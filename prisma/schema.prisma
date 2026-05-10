@@ -1,0 +1,460 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum BusinessType {
+  SOLE_TRADER
+  PARTNERSHIP
+  COMPANY
+  OTHER
+}
+
+enum SubscriptionTier {
+  FREE
+  PRO
+  BUSINESS
+}
+
+enum UserRole {
+  OWNER
+  EDITOR
+  VIEWER
+}
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  INCOME
+  EXPENSE
+}
+
+enum NormalBalance {
+  DEBIT
+  CREDIT
+}
+
+enum JournalEntrySource {
+  MANUAL
+  INVOICE
+  BILL
+  BANK_IMPORT
+  AI_EXTRACTION
+}
+
+enum ContactType {
+  CUSTOMER
+  SUPPLIER
+  BOTH
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PARTIAL
+  PAID
+  OVERDUE
+  VOID
+}
+
+enum BankStatementLineStatus {
+  UNMATCHED
+  MATCHED
+  EXCLUDED
+  CREATED
+}
+
+enum ExtractionStatus {
+  PENDING
+  PROCESSING
+  DONE
+  FAILED
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  VOID
+  DELETE
+}
+
+enum OnboardingStep {
+  BUSINESS_INFO
+  CURRENCY_TAX
+  COMPLETE
+}
+
+// ─── Organisation & Users ─────────────────────────────────────────────────────
+
+model Organisation {
+  id                   String           @id @default(cuid())
+  name                 String
+  businessType         BusinessType     @default(SOLE_TRADER)
+  currency             String           @default("USD") // ISO 4217
+  fiscalYearStartMonth Int              @default(1) // 1 = January
+  subscriptionTier     SubscriptionTier @default(FREE)
+  stripeCustomerId     String?          @unique
+  stripeSubscriptionId String?          @unique
+  onboardingStep       OnboardingStep   @default(BUSINESS_INFO)
+  onboardingComplete   Boolean          @default(false)
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  taxRegimeId String?
+  taxRegime   TaxRegime? @relation(fields: [taxRegimeId], references: [id])
+
+  users           User[]
+  chartAccounts   ChartAccount[]
+  journalEntries  JournalEntry[]
+  contacts        Contact[]
+  invoices        Invoice[]
+  bills           Bill[]
+  bankAccounts    BankAccount[]
+  attachments     Attachment[]
+  auditLogs       AuditLog[]
+  usageRecords    UsageRecord[]
+}
+
+model User {
+  id             String   @id @default(cuid())
+  email          String   @unique
+  name           String?
+  image          String?
+  hashedPassword String?
+  emailVerified  DateTime?
+  role           UserRole @default(OWNER)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organisationId String?
+  organisation   Organisation? @relation(fields: [organisationId], references: [id])
+
+  accounts  Account[]  @relation("AuthAccounts")
+  sessions  Session[]
+  auditLogs AuditLog[]
+
+  @@index([organisationId])
+}
+
+// NextAuth.js v5 required tables
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation("AuthAccounts", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─── Tax ─────────────────────────────────────────────────────────────────────
+
+model TaxRegime {
+  id      String @id @default(cuid())
+  code    String @unique // e.g. "UK_VAT", "US_SALES_TAX"
+  name    String
+  country String
+
+  rates         TaxRate[]
+  organisations Organisation[]
+  invoiceLines  InvoiceLine[]
+  billLines     BillLine[]
+}
+
+model TaxRate {
+  id          String    @id @default(cuid())
+  taxRegimeId String
+  taxRegime   TaxRegime @relation(fields: [taxRegimeId], references: [id])
+  code        String // e.g. "STANDARD", "ZERO", "EXEMPT"
+  name        String // e.g. "Standard Rate (20%)"
+  rate        Decimal   @db.Decimal(5, 4) // e.g. 0.2000
+
+  @@unique([taxRegimeId, code])
+}
+
+// ─── Chart of Accounts ───────────────────────────────────────────────────────
+
+model ChartAccount {
+  id             String        @id @default(cuid())
+  organisationId String
+  organisation   Organisation  @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  code           String // e.g. "1000"
+  name           String // e.g. "Cash at Bank"
+  type           AccountType
+  normalBalance  NormalBalance
+  description    String?
+  parentId       String?
+  parent         ChartAccount?  @relation("AccountHierarchy", fields: [parentId], references: [id])
+  children       ChartAccount[] @relation("AccountHierarchy")
+  isArchived     Boolean        @default(false)
+  isSystem       Boolean        @default(false) // system accounts cannot be deleted
+  sortOrder      Int            @default(0)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  journalLines      JournalLine[]
+  bankAccounts      BankAccount[]
+
+  @@unique([organisationId, code])
+  @@index([organisationId])
+}
+
+// ─── Journal ──────────────────────────────────────────────────────────────────
+
+model JournalEntry {
+  id             String             @id @default(cuid())
+  organisationId String
+  organisation   Organisation       @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  date           DateTime           @db.Date
+  reference      String?
+  description    String
+  source         JournalEntrySource @default(MANUAL)
+  sourceId       String? // polymorphic FK to Invoice, Bill, etc.
+  isVoid         Boolean            @default(false)
+  voidedAt       DateTime?
+  voidReason     String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  lines JournalLine[]
+
+  @@index([organisationId, date])
+}
+
+model JournalLine {
+  id             String       @id @default(cuid())
+  journalEntryId String
+  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  accountId      String
+  account        ChartAccount @relation(fields: [accountId], references: [id])
+  debit          Decimal?     @db.Decimal(19, 4)
+  credit         Decimal?     @db.Decimal(19, 4)
+  description    String?
+
+  bankStatementLines BankStatementLine[]
+}
+
+// ─── Contacts ─────────────────────────────────────────────────────────────────
+
+model Contact {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  type           ContactType
+  name           String
+  email          String?
+  phone          String?
+  address        String?
+  taxNumber      String?
+  isArchived     Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  invoices Invoice[]
+  bills    Bill[]
+
+  @@index([organisationId])
+}
+
+// ─── Invoices (AR) ────────────────────────────────────────────────────────────
+
+model Invoice {
+  id             String        @id @default(cuid())
+  organisationId String
+  organisation   Organisation  @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  contactId      String
+  contact        Contact       @relation(fields: [contactId], references: [id])
+  number         String
+  date           DateTime      @db.Date
+  dueDate        DateTime      @db.Date
+  status         InvoiceStatus @default(DRAFT)
+  subtotal       Decimal       @db.Decimal(19, 4) @default(0)
+  taxAmount      Decimal       @db.Decimal(19, 4) @default(0)
+  totalAmount    Decimal       @db.Decimal(19, 4) @default(0)
+  amountPaid     Decimal       @db.Decimal(19, 4) @default(0)
+  notes          String?
+  journalEntryId String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  lines       InvoiceLine[]
+  attachments Attachment[]
+
+  @@unique([organisationId, number])
+  @@index([organisationId, status])
+}
+
+model InvoiceLine {
+  id          String     @id @default(cuid())
+  invoiceId   String
+  invoice     Invoice    @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  description String
+  quantity    Decimal    @db.Decimal(10, 4) @default(1)
+  unitPrice   Decimal    @db.Decimal(19, 4)
+  amount      Decimal    @db.Decimal(19, 4)
+  taxRegimeId String?
+  taxRegime   TaxRegime? @relation(fields: [taxRegimeId], references: [id])
+  taxRateCode String?
+  taxAmount   Decimal    @db.Decimal(19, 4) @default(0)
+  sortOrder   Int        @default(0)
+}
+
+// ─── Bills (AP) ───────────────────────────────────────────────────────────────
+
+model Bill {
+  id             String        @id @default(cuid())
+  organisationId String
+  organisation   Organisation  @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  contactId      String
+  contact        Contact       @relation(fields: [contactId], references: [id])
+  number         String?
+  date           DateTime      @db.Date
+  dueDate        DateTime      @db.Date
+  status         InvoiceStatus @default(DRAFT)
+  subtotal       Decimal       @db.Decimal(19, 4) @default(0)
+  taxAmount      Decimal       @db.Decimal(19, 4) @default(0)
+  totalAmount    Decimal       @db.Decimal(19, 4) @default(0)
+  amountPaid     Decimal       @db.Decimal(19, 4) @default(0)
+  notes          String?
+  journalEntryId String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  lines       BillLine[]
+  attachments Attachment[]
+
+  @@index([organisationId, status])
+}
+
+model BillLine {
+  id          String     @id @default(cuid())
+  billId      String
+  bill        Bill       @relation(fields: [billId], references: [id], onDelete: Cascade)
+  description String
+  quantity    Decimal    @db.Decimal(10, 4) @default(1)
+  unitPrice   Decimal    @db.Decimal(19, 4)
+  amount      Decimal    @db.Decimal(19, 4)
+  taxRegimeId String?
+  taxRegime   TaxRegime? @relation(fields: [taxRegimeId], references: [id])
+  taxRateCode String?
+  taxAmount   Decimal    @db.Decimal(19, 4) @default(0)
+  sortOrder   Int        @default(0)
+}
+
+// ─── Bank ─────────────────────────────────────────────────────────────────────
+
+model BankAccount {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  name           String
+  accountId      String // FK → ChartAccount
+  chartAccount   ChartAccount @relation(fields: [accountId], references: [id])
+  currentBalance Decimal      @db.Decimal(19, 4) @default(0)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  statementLines BankStatementLine[]
+
+  @@index([organisationId])
+}
+
+model BankStatementLine {
+  id            String                  @id @default(cuid())
+  bankAccountId String
+  bankAccount   BankAccount             @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+  date          DateTime                @db.Date
+  description   String
+  amount        Decimal                 @db.Decimal(19, 4)
+  status        BankStatementLineStatus @default(UNMATCHED)
+  journalLineId String?
+  journalLine   JournalLine?            @relation(fields: [journalLineId], references: [id])
+  importedAt    DateTime                @default(now())
+
+  @@index([bankAccountId, status])
+}
+
+// ─── Attachments & AI Extraction ─────────────────────────────────────────────
+
+model Attachment {
+  id               String           @id @default(cuid())
+  organisationId   String
+  organisation     Organisation     @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  s3Key            String
+  originalFilename String
+  mimeType         String
+  sizeBytes        Int
+  extractionStatus ExtractionStatus @default(PENDING)
+  extractionResult Json?
+  invoiceId        String?
+  invoice          Invoice?         @relation(fields: [invoiceId], references: [id])
+  billId           String?
+  bill             Bill?            @relation(fields: [billId], references: [id])
+  uploadedAt       DateTime         @default(now())
+
+  @@index([organisationId])
+}
+
+// ─── Audit Log ────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id])
+  action         AuditAction
+  entityType     String
+  entityId       String
+  before         Json?
+  after          Json?
+  createdAt      DateTime     @default(now())
+
+  @@index([organisationId, entityType, entityId])
+}
+
+// ─── Usage Tracking ───────────────────────────────────────────────────────────
+
+model UsageRecord {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  month          String // "2026-05" format
+  transactionCount Int        @default(0)
+  aiExtractionCount Int       @default(0)
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organisationId, month])
+}
