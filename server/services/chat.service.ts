@@ -21,53 +21,22 @@ export interface ChatResponse {
   toolResults: ToolResult[];
 }
 
-const TOOL_DEFINITIONS = `
-Available tools (respond with a JSON tool call block when you need to perform an action):
+const TOOL_DEFINITIONS = `Tools (use TOOL_CALL format to invoke):
+- create_journal_entry: {"date","description","lines":[{"accountCode","debit","credit"}]}
+- create_invoice: {"contactName","date","dueDate","lines":[{"description","quantity","unitPrice"}],"notes"}
+- create_bill: {"contactName","date","dueDate","lines":[{"description","quantity","unitPrice"}],"notes"}
+- get_profit_and_loss: {"startDate","endDate"}
+- get_balance_sheet: {"asOfDate"}
+- get_trial_balance: {"startDate","endDate"}
+- get_ar_aging: {}
+- get_ap_aging: {}
+- list_accounts: {"type":"ASSET|LIABILITY|EQUITY|INCOME|EXPENSE"|null}
+- list_contacts: {"type":"CUSTOMER|SUPPLIER"|null}
+- search_transactions: {"query","limit"}
+- get_account_balance: {"accountCode"}
+- extract_document: {"attachmentId"}
 
-1. create_journal_entry: Create a journal entry
-   Args: { "date": "YYYY-MM-DD", "description": "string", "lines": [{"accountCode": "string", "debit": number|null, "credit": number|null}] }
-
-2. create_invoice: Create a customer invoice
-   Args: { "contactName": "string", "date": "YYYY-MM-DD", "dueDate": "YYYY-MM-DD", "lines": [{"description": "string", "quantity": number, "unitPrice": number}], "notes": "string"|null }
-
-3. create_bill: Create a supplier bill
-   Args: { "contactName": "string", "date": "YYYY-MM-DD", "dueDate": "YYYY-MM-DD", "lines": [{"description": "string", "quantity": number, "unitPrice": number}], "notes": "string"|null }
-
-4. get_profit_and_loss: Get profit & loss report
-   Args: { "startDate": "YYYY-MM-DD", "endDate": "YYYY-MM-DD" }
-
-5. get_balance_sheet: Get balance sheet
-   Args: { "asOfDate": "YYYY-MM-DD" }
-
-6. get_trial_balance: Get trial balance
-   Args: { "startDate": "YYYY-MM-DD", "endDate": "YYYY-MM-DD" }
-
-7. get_ar_aging: Get accounts receivable aging report
-   Args: {}
-
-8. get_ap_aging: Get accounts payable aging report
-   Args: {}
-
-9. list_accounts: List chart of accounts
-   Args: { "type": "ASSET"|"LIABILITY"|"EQUITY"|"INCOME"|"EXPENSE"|null }
-
-10. list_contacts: List contacts
-    Args: { "type": "CUSTOMER"|"SUPPLIER"|null }
-
-11. search_transactions: Search journal entries
-    Args: { "query": "string", "limit": number }
-
-12. get_account_balance: Get balance for a specific account
-    Args: { "accountCode": "string" }
-
-13. extract_document: Extract data from an uploaded receipt/invoice
-    Args: { "attachmentId": "string" }
-
-To call a tool, output EXACTLY this format on its own line:
-TOOL_CALL: {"tool": "tool_name", "args": {...}}
-
-You can include multiple TOOL_CALL lines if needed.
-After tool results are returned, continue with your natural language response.
+Format: TOOL_CALL: {"tool":"name","args":{...}}
 `;
 
 function buildSystemPrompt(orgContext: {
@@ -77,37 +46,20 @@ function buildSystemPrompt(orgContext: {
   contacts: { name: string; type: string }[];
 }): string {
   const accountList = orgContext.accounts
-    .slice(0, 30)
-    .map((a) => `  ${a.code} - ${a.name} (${a.type})`)
-    .join("\n");
+    .slice(0, 15)
+    .map((a) => `${a.code}:${a.name}`)
+    .join(", ");
 
   const contactList = orgContext.contacts
-    .slice(0, 20)
-    .map((c) => `  ${c.name} (${c.type})`)
-    .join("\n");
+    .slice(0, 10)
+    .map((c) => `${c.name}(${c.type})`)
+    .join(", ");
 
-  return `You are an AI accounting assistant for "${orgContext.orgName}".
-You help users manage their books through natural language conversation.
-The organisation's base currency is ${orgContext.currency}.
-Today's date is ${new Date().toISOString().slice(0, 10)}.
-
-Chart of Accounts (partial):
-${accountList}
-
-Contacts (partial):
-${contactList}
-
+  return `You are an accounting assistant for "${orgContext.orgName}". Currency: ${orgContext.currency}. Date: ${new Date().toISOString().slice(0, 10)}.
+Accounts: ${accountList}
+Contacts: ${contactList}
 ${TOOL_DEFINITIONS}
-
-Guidelines:
-- Be concise and helpful. Format monetary values with the currency symbol.
-- When creating entries/invoices/bills, confirm what you're about to do before calling the tool.
-- If the user asks for a report, call the appropriate tool and present the results in a readable format.
-- If dates are not specified, use reasonable defaults (today for entries, 30 days for due dates).
-- For journal entries, ensure debits equal credits.
-- If you cannot find a matching contact or account, ask the user for clarification.
-- When given an attachment, use extract_document to analyse it.
-`;
+Be concise. Use tools when the user wants to create entries, invoices, bills, or view reports. Confirm before creating.`;
 }
 
 export function parseToolCalls(response: string): { text: string; toolCalls: ToolCall[] } {
@@ -661,9 +613,10 @@ export async function processMessage(
 
   const history = await db.chatMessage.findMany({
     where: { conversationId: params.conversationId },
-    orderBy: { createdAt: "asc" },
-    take: 20,
+    orderBy: { createdAt: "desc" },
+    take: 6,
   });
+  history.reverse();
 
   const systemPrompt = buildSystemPrompt({
     orgName: org.name,
@@ -680,17 +633,26 @@ export async function processMessage(
 
   let aiResponse: string;
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 120000);
+
     const res = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model: OLLAMA_MODEL, messages, stream: false }),
+      signal: controller.signal,
     });
 
+    clearTimeout(timeout);
     if (!res.ok) throw new Error(`Ollama returned ${res.status}`);
     const json = await res.json();
     aiResponse = json.message?.content ?? "I'm sorry, I couldn't process that request.";
   } catch (err) {
-    aiResponse = `I'm having trouble connecting to the AI model. Please make sure Ollama is running. Error: ${err instanceof Error ? err.message : "Unknown"}`;
+    if (err instanceof Error && err.name === "AbortError") {
+      aiResponse = "The AI model took too long to respond. Please try a shorter or simpler request.";
+    } else {
+      aiResponse = `I'm having trouble connecting to the AI model. Please make sure Ollama is running. Error: ${err instanceof Error ? err.message : "Unknown"}`;
+    }
     return { content: aiResponse, toolCalls: [], toolResults: [] };
   }
 
