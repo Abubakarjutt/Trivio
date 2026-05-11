@@ -32,7 +32,7 @@ export function TRPCReactProvider({ children }: { children: React.ReactNode }) {
             process.env.NODE_ENV === "development" &&
             op.direction === "down" &&
             op.result instanceof Error &&
-            !op.path.startsWith("chat."),
+            !("path" in op && typeof op.path === "string" && op.path.startsWith("chat.")),
         }),
         httpBatchLink({
           transformer: superjson,

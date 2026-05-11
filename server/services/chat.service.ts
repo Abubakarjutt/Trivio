@@ -585,16 +585,15 @@ async function toolGetAccountBalance(
   };
 }
 
-export async function processMessage(
+export async function buildChatMessages(
   db: PrismaClient,
   params: {
     organisationId: string;
-    userId: string;
     conversationId: string;
     userMessage: string;
     attachmentId?: string;
   },
-): Promise<ChatResponse> {
+): Promise<{ role: string; content: string }[]> {
   const org = await db.organisation.findUniqueOrThrow({
     where: { id: params.organisationId },
   });
@@ -625,11 +624,24 @@ export async function processMessage(
     contacts: contacts.map((c) => ({ name: c.name, type: c.type })),
   });
 
-  const messages = [
+  return [
     { role: "system", content: systemPrompt },
     ...history.map((m) => ({ role: m.role, content: m.content })),
     { role: "user", content: params.attachmentId ? `[User attached a file (attachmentId: ${params.attachmentId})]\n\n${params.userMessage}` : params.userMessage },
   ];
+}
+
+export async function processMessage(
+  db: PrismaClient,
+  params: {
+    organisationId: string;
+    userId: string;
+    conversationId: string;
+    userMessage: string;
+    attachmentId?: string;
+  },
+): Promise<ChatResponse> {
+  const messages = await buildChatMessages(db, params);
 
   let aiResponse: string;
   try {
