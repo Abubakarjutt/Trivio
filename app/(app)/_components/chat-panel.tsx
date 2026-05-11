@@ -60,6 +60,7 @@ export function ChatPanel() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
+  const [loadConvId, setLoadConvId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -71,12 +72,12 @@ export function ChatPanel() {
   );
 
   const { data: conversationData } = trpc.chat.getConversation.useQuery(
-    { id: conversationId! },
-    { enabled: !!conversationId, retry: false },
+    { id: loadConvId! },
+    { enabled: !!loadConvId, retry: false },
   );
 
   useEffect(() => {
-    if (conversationData?.messages && !isStreaming) {
+    if (conversationData?.messages && loadConvId) {
       setMessages(
         conversationData.messages.map((m) => ({
           id: m.id,
@@ -87,8 +88,10 @@ export function ChatPanel() {
           createdAt: m.createdAt,
         })),
       );
+      setConversationId(loadConvId);
+      setLoadConvId(null);
     }
-  }, [conversationData, isStreaming]);
+  }, [conversationData, loadConvId]);
 
   const handleStreamMessage = useCallback(async (userMessage: string) => {
     setIsStreaming(true);
@@ -199,7 +202,7 @@ export function ChatPanel() {
       setIsStreaming(false);
       setIsThinking(false);
       setStreamingContent("");
-        abortRef.current = null;
+      abortRef.current = null;
     }
   }, [conversationId, toast, refetchConversations]);
 
@@ -243,7 +246,7 @@ export function ChatPanel() {
   };
 
   const loadConversation = (id: string) => {
-    setConversationId(id);
+    setLoadConvId(id);
     setShowHistory(false);
   };
 
