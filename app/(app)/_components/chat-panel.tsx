@@ -33,129 +33,9 @@ interface ToolResult {
   error?: string;
 }
 
-function ToolResultCard({ result }: { result: ToolResult }) {
-  if (!result.success) {
-    return (
-      <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">
-        <p className="font-medium text-destructive">Failed: {result.tool}</p>
-        <p className="text-muted-foreground mt-1">{result.error}</p>
-      </div>
-    );
-  }
-
-  const data = result.data as Record<string, unknown>;
-
-  if (result.tool === "create_invoice" || result.tool === "create_bill") {
-    const type = result.tool === "create_invoice" ? "Invoice" : "Bill";
-    return (
-      <div className="rounded-lg border border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950/30 p-3 text-sm">
-        <p className="font-medium text-green-700 dark:text-green-400">{type} Created</p>
-        <div className="mt-2 space-y-1 text-muted-foreground">
-          <p>Number: <span className="font-medium text-foreground">{data.number as string}</span></p>
-          <p>{result.tool === "create_invoice" ? "Customer" : "Supplier"}: {(data.customer ?? data.supplier) as string}</p>
-          <p>Total: <span className="font-medium text-foreground">${(data.total as number)?.toFixed(2)}</span></p>
-          <p>Status: {data.status as string}</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (result.tool === "create_journal_entry") {
-    const lines = data.lines as { account: string; debit: number | null; credit: number | null }[];
-    return (
-      <div className="rounded-lg border border-green-200 bg-green-50 dark:border-green-800 dark:bg-green-950/30 p-3 text-sm">
-        <p className="font-medium text-green-700 dark:text-green-400">Journal Entry Created</p>
-        <p className="text-muted-foreground mt-1">{data.description as string}</p>
-        <table className="mt-2 w-full text-xs">
-          <thead>
-            <tr className="border-b">
-              <th className="text-left py-1">Account</th>
-              <th className="text-right py-1">Debit</th>
-              <th className="text-right py-1">Credit</th>
-            </tr>
-          </thead>
-          <tbody>
-            {lines?.map((l, i) => (
-              <tr key={i} className="border-b border-dashed">
-                <td className="py-1">{l.account}</td>
-                <td className="text-right">{l.debit ? `$${l.debit.toFixed(2)}` : ""}</td>
-                <td className="text-right">{l.credit ? `$${l.credit.toFixed(2)}` : ""}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    );
-  }
-
-  if (result.tool === "get_profit_and_loss") {
-    const income = data.income as Record<string, number>;
-    const expenses = data.expenses as Record<string, number>;
-    return (
-      <div className="rounded-lg border bg-muted/30 p-3 text-sm">
-        <p className="font-medium">Profit & Loss</p>
-        <p className="text-xs text-muted-foreground">{(data.period as Record<string, string>)?.startDate} to {(data.period as Record<string, string>)?.endDate}</p>
-        <div className="mt-2 space-y-2">
-          <div>
-            <p className="text-xs font-semibold text-muted-foreground uppercase">Income</p>
-            {Object.entries(income || {}).map(([k, v]) => (
-              <div key={k} className="flex justify-between"><span>{k}</span><span>${v.toFixed(2)}</span></div>
-            ))}
-            <div className="flex justify-between font-medium border-t mt-1 pt-1">
-              <span>Total Income</span><span>${(data.totalIncome as number)?.toFixed(2)}</span>
-            </div>
-          </div>
-          <div>
-            <p className="text-xs font-semibold text-muted-foreground uppercase">Expenses</p>
-            {Object.entries(expenses || {}).map(([k, v]) => (
-              <div key={k} className="flex justify-between"><span>{k}</span><span>${v.toFixed(2)}</span></div>
-            ))}
-            <div className="flex justify-between font-medium border-t mt-1 pt-1">
-              <span>Total Expenses</span><span>${(data.totalExpenses as number)?.toFixed(2)}</span>
-            </div>
-          </div>
-          <div className="flex justify-between font-semibold text-base border-t pt-2">
-            <span>Net Profit</span><span className={(data.netProfit as number) >= 0 ? "text-green-600" : "text-red-600"}>${(data.netProfit as number)?.toFixed(2)}</span>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (result.tool === "get_ar_aging" || result.tool === "get_ap_aging") {
-    const aging = data.aging as Record<string, number>;
-    const label = result.tool === "get_ar_aging" ? "AR" : "AP";
-    return (
-      <div className="rounded-lg border bg-muted/30 p-3 text-sm">
-        <p className="font-medium">{label} Aging</p>
-        <div className="mt-2 grid grid-cols-5 gap-1 text-xs text-center">
-          {Object.entries(aging || {}).map(([period, amount]) => (
-            <div key={period} className="rounded bg-background p-2">
-              <p className="text-muted-foreground">{period}</p>
-              <p className="font-medium">${amount.toFixed(2)}</p>
-            </div>
-          ))}
-        </div>
-        <div className="flex justify-between font-medium mt-2 pt-2 border-t">
-          <span>Total</span><span>${(data.total as number)?.toFixed(2)}</span>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="rounded-lg border bg-muted/30 p-3 text-sm">
-      <p className="font-medium">{result.tool}</p>
-      <pre className="mt-1 text-xs overflow-x-auto whitespace-pre-wrap text-muted-foreground">
-        {JSON.stringify(data, null, 2)?.slice(0, 500)}
-      </pre>
-    </div>
-  );
-}
 
 function MessageBubble({ message }: { message: Message }) {
   const isUser = message.role === "user";
-  const toolResults = (message.toolResults ?? []) as ToolResult[];
 
   return (
     <div className={`flex gap-2.5 ${isUser ? "flex-row-reverse" : ""}`}>
@@ -166,9 +46,6 @@ function MessageBubble({ message }: { message: Message }) {
         <div className={`rounded-2xl px-3.5 py-2 text-sm leading-relaxed ${isUser ? "bg-primary text-primary-foreground rounded-tr-sm" : "bg-muted rounded-tl-sm"}`}>
           <p className="whitespace-pre-wrap">{message.content}</p>
         </div>
-        {toolResults.map((result, i) => (
-          <ToolResultCard key={i} result={result} />
-        ))}
       </div>
     </div>
   );
@@ -183,7 +60,6 @@ export function ChatPanel() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
-  const [streamingToolResults, setStreamingToolResults] = useState<ToolResult[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -200,7 +76,7 @@ export function ChatPanel() {
   );
 
   useEffect(() => {
-    if (conversationData?.messages) {
+    if (conversationData?.messages && !isStreaming) {
       setMessages(
         conversationData.messages.map((m) => ({
           id: m.id,
@@ -212,13 +88,12 @@ export function ChatPanel() {
         })),
       );
     }
-  }, [conversationData]);
+  }, [conversationData, isStreaming]);
 
   const handleStreamMessage = useCallback(async (userMessage: string) => {
     setIsStreaming(true);
     setIsThinking(true);
     setStreamingContent("");
-    setStreamingToolResults([]);
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -234,6 +109,7 @@ export function ChatPanel() {
         signal: controller.signal,
         credentials: "include",
       });
+
 
       if (!res.ok || !res.body) {
         throw new Error(`Server returned ${res.status}`);
@@ -286,7 +162,6 @@ export function ChatPanel() {
               break;
             case "tool_result":
               finalToolResults = [...finalToolResults, data as unknown as ToolResult];
-              setStreamingToolResults((prev) => [...prev, data as unknown as ToolResult]);
               break;
             case "done":
               finalContent = (data.content as string) || finalContent;
@@ -316,6 +191,7 @@ export function ChatPanel() {
       }
       refetchConversations();
     } catch (err) {
+
       if ((err as Error).name !== "AbortError") {
         toast({ variant: "destructive", title: (err as Error).message || "Failed to get response" });
       }
@@ -323,8 +199,7 @@ export function ChatPanel() {
       setIsStreaming(false);
       setIsThinking(false);
       setStreamingContent("");
-      setStreamingToolResults([]);
-      abortRef.current = null;
+        abortRef.current = null;
     }
   }, [conversationId, toast, refetchConversations]);
 
@@ -509,9 +384,6 @@ export function ChatPanel() {
                       </div>
                     )}
                   </div>
-                  {streamingToolResults.map((result, i) => (
-                    <ToolResultCard key={i} result={result} />
-                  ))}
                 </div>
               </div>
             )}

@@ -153,6 +153,10 @@ describe("Chat Tool Execution", () => {
     it("creates an invoice successfully", async () => {
       (mockDb.contact.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "c-1", name: "Acme Corp" });
       (mockDb.invoice.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+      (mockDb.chartAccount.findFirst as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ id: "acc-ar", code: "1200", name: "Accounts Receivable" })
+        .mockResolvedValueOnce({ id: "acc-sales", code: "4000", name: "Sales" });
+      (mockDb.journalEntry.create as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "je-1" });
       (mockDb.invoice.create as ReturnType<typeof vi.fn>).mockResolvedValue({
         id: "inv-1",
         number: "INV-0001",
@@ -171,6 +175,7 @@ describe("Chat Tool Execution", () => {
       expect(result.success).toBe(true);
       expect(result.data).toHaveProperty("number", "INV-0001");
       expect(result.data).toHaveProperty("total", 750);
+      expect(result.data).toHaveProperty("status", "SENT");
     });
   });
 
@@ -193,6 +198,10 @@ describe("Chat Tool Execution", () => {
     it("creates a bill successfully", async () => {
       (mockDb.contact.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "c-2", name: "Parts Inc" });
       (mockDb.bill.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+      (mockDb.chartAccount.findFirst as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ id: "acc-ap", code: "2100", name: "Accounts Payable" })
+        .mockResolvedValueOnce({ id: "acc-exp", code: "5000", name: "Purchases" });
+      (mockDb.journalEntry.create as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "je-2" });
       (mockDb.bill.create as ReturnType<typeof vi.fn>).mockResolvedValue({
         id: "bill-1",
         number: "BILL-0001",
@@ -211,6 +220,7 @@ describe("Chat Tool Execution", () => {
       expect(result.success).toBe(true);
       expect(result.data).toHaveProperty("number", "BILL-0001");
       expect(result.data).toHaveProperty("total", 250);
+      expect(result.data).toHaveProperty("status", "SENT");
     });
   });
 

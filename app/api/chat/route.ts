@@ -118,22 +118,14 @@ export async function POST(req: NextRequest) {
         }
 
         const { text, toolCalls } = parseToolCalls(fullContent);
-        let finalContent = text;
+        const finalContent = text;
         const toolResults = [];
 
         if (toolCalls.length > 0) {
-          sendEvent("tools_start", { count: toolCalls.length });
           for (const call of toolCalls) {
             const result = await executeToolCall(db, user.organisationId!, user.id, call);
             toolResults.push(result);
-            sendEvent("tool_result", result);
           }
-
-          const resultSummary = toolResults.map((r) => {
-            if (r.success) return `✅ ${r.tool}: ${JSON.stringify(r.data)}`;
-            return `❌ ${r.tool}: ${r.error}`;
-          }).join("\n\n");
-          finalContent = finalContent ? `${finalContent}\n\n${resultSummary}` : resultSummary;
         }
 
         await db.chatMessage.create({

@@ -221,6 +221,36 @@ async function toolCreateInvoice(
 
   const subtotal = lines.reduce((s, l) => s + l.quantity * l.unitPrice, 0);
 
+  const arAccount = await db.chartAccount.findFirst({
+    where: { organisationId, code: "1200" },
+  }) ?? await db.chartAccount.findFirst({
+    where: { organisationId, type: "ASSET", name: { contains: "receivable", mode: "insensitive" } },
+  });
+  const salesAccount = await db.chartAccount.findFirst({
+    where: { organisationId, code: "4000" },
+  }) ?? await db.chartAccount.findFirst({
+    where: { organisationId, type: "INCOME" },
+  });
+
+  if (!arAccount || !salesAccount) {
+    return { tool: "create_invoice", success: false, error: "Missing Accounts Receivable or Sales account. Set up your chart of accounts first." };
+  }
+
+  const journalEntry = await db.journalEntry.create({
+    data: {
+      organisationId,
+      date: new Date(date),
+      description: `Invoice ${nextNum} - ${contactName}`,
+      source: "INVOICE",
+      lines: {
+        create: [
+          { accountId: arAccount.id, debit: new Prisma.Decimal(subtotal), credit: null, description: `Invoice ${nextNum}` },
+          { accountId: salesAccount.id, debit: null, credit: new Prisma.Decimal(subtotal), description: `Invoice ${nextNum}` },
+        ],
+      },
+    },
+  });
+
   const invoice = await db.invoice.create({
     data: {
       organisationId,
@@ -228,11 +258,12 @@ async function toolCreateInvoice(
       number: nextNum,
       date: new Date(date),
       dueDate: new Date(dueDate),
-      status: "DRAFT",
+      status: "SENT",
       subtotal: new Prisma.Decimal(subtotal),
       taxAmount: new Prisma.Decimal(0),
       totalAmount: new Prisma.Decimal(subtotal),
       notes: (args.notes as string) || null,
+      journalEntryId: journalEntry.id,
       lines: {
         create: lines.map((l, i) => ({
           description: l.description,
@@ -257,7 +288,7 @@ async function toolCreateInvoice(
       date,
       dueDate,
       total: subtotal,
-      status: "DRAFT",
+      status: "SENT",
       lineCount: lines.length,
     },
   };
@@ -290,6 +321,36 @@ async function toolCreateBill(
 
   const subtotal = lines.reduce((s, l) => s + l.quantity * l.unitPrice, 0);
 
+  const apAccount = await db.chartAccount.findFirst({
+    where: { organisationId, code: "2100" },
+  }) ?? await db.chartAccount.findFirst({
+    where: { organisationId, type: "LIABILITY", name: { contains: "payable", mode: "insensitive" } },
+  });
+  const expenseAccount = await db.chartAccount.findFirst({
+    where: { organisationId, code: "5000" },
+  }) ?? await db.chartAccount.findFirst({
+    where: { organisationId, type: "EXPENSE" },
+  });
+
+  if (!apAccount || !expenseAccount) {
+    return { tool: "create_bill", success: false, error: "Missing Accounts Payable or Expense account. Set up your chart of accounts first." };
+  }
+
+  const journalEntry = await db.journalEntry.create({
+    data: {
+      organisationId,
+      date: new Date(date),
+      description: `Bill ${nextNum} - ${contactName}`,
+      source: "BILL",
+      lines: {
+        create: [
+          { accountId: expenseAccount.id, debit: new Prisma.Decimal(subtotal), credit: null, description: `Bill ${nextNum}` },
+          { accountId: apAccount.id, debit: null, credit: new Prisma.Decimal(subtotal), description: `Bill ${nextNum}` },
+        ],
+      },
+    },
+  });
+
   const bill = await db.bill.create({
     data: {
       organisationId,
@@ -297,11 +358,12 @@ async function toolCreateBill(
       number: nextNum,
       date: new Date(date),
       dueDate: new Date(dueDate),
-      status: "DRAFT",
+      status: "SENT",
       subtotal: new Prisma.Decimal(subtotal),
       taxAmount: new Prisma.Decimal(0),
       totalAmount: new Prisma.Decimal(subtotal),
       notes: (args.notes as string) || null,
+      journalEntryId: journalEntry.id,
       lines: {
         create: lines.map((l, i) => ({
           description: l.description,
@@ -326,7 +388,7 @@ async function toolCreateBill(
       date,
       dueDate,
       total: subtotal,
-      status: "DRAFT",
+      status: "SENT",
       lineCount: lines.length,
     },
   };
@@ -676,14 +738,5 @@ export async function processMessage(
     toolResults.push(result);
   }
 
-  let finalContent = text;
-  if (toolResults.length > 0) {
-    const resultSummary = toolResults.map((r) => {
-      if (r.success) return `✅ ${r.tool}: ${JSON.stringify(r.data)}`;
-      return `❌ ${r.tool}: ${r.error}`;
-    }).join("\n\n");
-    finalContent = finalContent ? `${finalContent}\n\n${resultSummary}` : resultSummary;
-  }
-
-  return { content: finalContent, toolCalls, toolResults };
+  return { content: text, toolCalls, toolResults };
 }
