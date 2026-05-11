@@ -3,6 +3,8 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { buildChatMessages, executeToolCall, parseToolCalls } from "@/server/services/chat.service";
 
+export const maxDuration = 120;
+
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "gemma4:e4b";
 
@@ -74,7 +76,7 @@ export async function POST(req: NextRequest) {
         const res = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ model: OLLAMA_MODEL, messages, stream: true }),
+          body: JSON.stringify({ model: OLLAMA_MODEL, messages, stream: true, think: false }),
         });
 
         if (!res.ok || !res.body) {
@@ -87,6 +89,7 @@ export async function POST(req: NextRequest) {
         const decoder = new TextDecoder();
         let fullContent = "";
         let buffer = "";
+        let sentThinking = false;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -104,9 +107,9 @@ export async function POST(req: NextRequest) {
                 const token = json.message.content;
                 fullContent += token;
                 sendEvent("token", { content: token });
-              }
-              if (json.done) {
-                break;
+              } else if (json.message?.thinking && !sentThinking) {
+                sentThinking = true;
+                sendEvent("thinking", { status: "thinking" });
               }
             } catch {
               // skip malformed lines

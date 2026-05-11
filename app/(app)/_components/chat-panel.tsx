@@ -181,6 +181,7 @@ export function ChatPanel() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isThinking, setIsThinking] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
   const [streamingToolResults, setStreamingToolResults] = useState<ToolResult[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -215,6 +216,7 @@ export function ChatPanel() {
 
   const handleStreamMessage = useCallback(async (userMessage: string) => {
     setIsStreaming(true);
+    setIsThinking(true);
     setStreamingContent("");
     setStreamingToolResults([]);
 
@@ -274,7 +276,11 @@ export function ChatPanel() {
               streamConvId = data.conversationId as string;
               setConversationId(data.conversationId as string);
               break;
+            case "thinking":
+              setIsThinking(true);
+              break;
             case "token":
+              setIsThinking(false);
               finalContent += data.content as string;
               setStreamingContent((prev) => prev + (data.content as string));
               break;
@@ -315,6 +321,7 @@ export function ChatPanel() {
       }
     } finally {
       setIsStreaming(false);
+      setIsThinking(false);
       setStreamingContent("");
       setStreamingToolResults([]);
       abortRef.current = null;
@@ -494,10 +501,11 @@ export function ChatPanel() {
                         <span className="inline-block w-1.5 h-4 bg-foreground/70 animate-pulse ml-0.5 align-middle" />
                       </p>
                     ) : (
-                      <div className="flex items-center gap-1.5 py-0.5">
+                      <div className="flex items-center gap-2 py-0.5">
                         <span className="h-1.5 w-1.5 rounded-full bg-foreground/50 animate-bounce [animation-delay:0ms]" />
                         <span className="h-1.5 w-1.5 rounded-full bg-foreground/50 animate-bounce [animation-delay:150ms]" />
                         <span className="h-1.5 w-1.5 rounded-full bg-foreground/50 animate-bounce [animation-delay:300ms]" />
+                        {isThinking && <span className="text-xs text-muted-foreground ml-1">Thinking...</span>}
                       </div>
                     )}
                   </div>
