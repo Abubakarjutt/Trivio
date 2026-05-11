@@ -180,8 +180,12 @@ export function ChatPanel() {
   const [input, setInput] = useState("");
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamingContent, setStreamingContent] = useState("");
+  const [streamingToolResults, setStreamingToolResults] = useState<ToolResult[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const { toast } = useToast();
 
   const { data: conversations, refetch: refetchConversations } = trpc.chat.listConversations.useQuery(
@@ -209,26 +213,113 @@ export function ChatPanel() {
     }
   }, [conversationData]);
 
-  const sendMessage = trpc.chat.sendMessage.useMutation({
-    onSuccess: (data) => {
-      setConversationId(data.conversationId);
+  const handleStreamMessage = useCallback(async (userMessage: string) => {
+    setIsStreaming(true);
+    setStreamingContent("");
+    setStreamingToolResults([]);
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: userMessage,
+          conversationId: conversationId ?? undefined,
+        }),
+        signal: controller.signal,
+        credentials: "include",
+      });
+
+      if (!res.ok || !res.body) {
+        throw new Error(`Server returned ${res.status}`);
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finalContent = "";
+      let finalToolCalls: unknown[] = [];
+      let finalToolResults: ToolResult[] = [];
+      let streamConvId = conversationId;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() ?? "";
+
+        for (const event of events) {
+          if (!event.trim()) continue;
+          const lines = event.split("\n");
+          let eventType = "";
+          let eventData = "";
+
+          for (const line of lines) {
+            if (line.startsWith("event: ")) eventType = line.slice(7).trim();
+            else if (line.startsWith("data: ")) eventData = line.slice(6);
+          }
+
+          if (!eventType || !eventData) continue;
+
+          let data: Record<string, unknown>;
+          try { data = JSON.parse(eventData); } catch { continue; }
+
+          switch (eventType) {
+            case "start":
+              streamConvId = data.conversationId as string;
+              setConversationId(data.conversationId as string);
+              break;
+            case "token":
+              finalContent += data.content as string;
+              setStreamingContent((prev) => prev + (data.content as string));
+              break;
+            case "tool_result":
+              finalToolResults = [...finalToolResults, data as unknown as ToolResult];
+              setStreamingToolResults((prev) => [...prev, data as unknown as ToolResult]);
+              break;
+            case "done":
+              finalContent = (data.content as string) || finalContent;
+              finalToolCalls = (data.toolCalls as unknown[]) || [];
+              finalToolResults = (data.toolResults as ToolResult[]) || finalToolResults;
+              break;
+            case "error":
+              throw new Error(data.message as string);
+          }
+        }
+      }
+
       setMessages((prev) => [
         ...prev,
         {
-          id: data.message.id,
-          role: data.message.role,
-          content: data.message.content,
-          toolCalls: data.message.toolCalls,
-          toolResults: data.message.toolResults as ToolResult[],
-          createdAt: data.message.createdAt,
+          id: `assistant-${Date.now()}`,
+          role: "assistant",
+          content: finalContent,
+          toolCalls: finalToolCalls,
+          toolResults: finalToolResults,
+          createdAt: new Date(),
         },
       ]);
+
+      if (streamConvId && streamConvId !== conversationId) {
+        setConversationId(streamConvId);
+      }
       refetchConversations();
-    },
-    onError: (err) => {
-      toast({ variant: "destructive", title: err.message });
-    },
-  });
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") {
+        toast({ variant: "destructive", title: (err as Error).message || "Failed to get response" });
+      }
+    } finally {
+      setIsStreaming(false);
+      setStreamingContent("");
+      setStreamingToolResults([]);
+      abortRef.current = null;
+    }
+  }, [conversationId, toast, refetchConversations]);
 
   const deleteConversation = trpc.chat.deleteConversation.useMutation({
     onSuccess: () => {
@@ -246,7 +337,7 @@ export function ChatPanel() {
 
   const handleSend = useCallback(() => {
     const trimmed = input.trim();
-    if (!trimmed || sendMessage.isPending) return;
+    if (!trimmed || isStreaming) return;
 
     setMessages((prev) => [
       ...prev,
@@ -259,11 +350,8 @@ export function ChatPanel() {
     ]);
     setInput("");
 
-    sendMessage.mutate({
-      conversationId: conversationId ?? undefined,
-      message: trimmed,
-    });
-  }, [input, conversationId, sendMessage]);
+    handleStreamMessage(trimmed);
+  }, [input, isStreaming, handleStreamMessage]);
 
   const handleNewChat = () => {
     setConversationId(null);
@@ -393,13 +481,29 @@ export function ChatPanel() {
             {messages.map((msg) => (
               <MessageBubble key={msg.id} message={msg} />
             ))}
-            {sendMessage.isPending && (
+            {isStreaming && (
               <div className="flex gap-2.5">
                 <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted">
                   <Bot className="h-3.5 w-3.5" />
                 </div>
-                <div className="rounded-2xl rounded-tl-sm bg-muted px-3.5 py-2">
-                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                <div className="flex flex-col gap-2 max-w-[85%] items-start">
+                  <div className="rounded-2xl rounded-tl-sm bg-muted px-3.5 py-2 text-sm leading-relaxed">
+                    {streamingContent ? (
+                      <p className="whitespace-pre-wrap">
+                        {streamingContent}
+                        <span className="inline-block w-1.5 h-4 bg-foreground/70 animate-pulse ml-0.5 align-middle" />
+                      </p>
+                    ) : (
+                      <div className="flex items-center gap-1.5 py-0.5">
+                        <span className="h-1.5 w-1.5 rounded-full bg-foreground/50 animate-bounce [animation-delay:0ms]" />
+                        <span className="h-1.5 w-1.5 rounded-full bg-foreground/50 animate-bounce [animation-delay:150ms]" />
+                        <span className="h-1.5 w-1.5 rounded-full bg-foreground/50 animate-bounce [animation-delay:300ms]" />
+                      </div>
+                    )}
+                  </div>
+                  {streamingToolResults.map((result, i) => (
+                    <ToolResultCard key={i} result={result} />
+                  ))}
                 </div>
               </div>
             )}
@@ -420,16 +524,16 @@ export function ChatPanel() {
                 placeholder="Ask me anything..."
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                disabled={sendMessage.isPending}
+                disabled={isStreaming}
                 className="flex-1 text-sm"
               />
               <Button
                 type="submit"
                 size="icon"
-                disabled={!input.trim() || sendMessage.isPending}
+                disabled={!input.trim() || isStreaming}
                 className="shrink-0"
               >
-                {sendMessage.isPending ? (
+                {isStreaming ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <Send className="h-4 w-4" />
