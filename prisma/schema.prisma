@@ -110,16 +110,17 @@ model Organisation {
   taxRegimeId String?
   taxRegime   TaxRegime? @relation(fields: [taxRegimeId], references: [id])
 
-  users           User[]
-  chartAccounts   ChartAccount[]
-  journalEntries  JournalEntry[]
-  contacts        Contact[]
-  invoices        Invoice[]
-  bills           Bill[]
-  bankAccounts    BankAccount[]
-  attachments     Attachment[]
-  auditLogs       AuditLog[]
-  usageRecords    UsageRecord[]
+  users             User[]
+  chartAccounts     ChartAccount[]
+  journalEntries    JournalEntry[]
+  contacts          Contact[]
+  invoices          Invoice[]
+  bills             Bill[]
+  bankAccounts      BankAccount[]
+  attachments       Attachment[]
+  auditLogs         AuditLog[]
+  usageRecords      UsageRecord[]
+  chatConversations ChatConversation[]
 }
 
 model User {
@@ -136,9 +137,10 @@ model User {
   organisationId String?
   organisation   Organisation? @relation(fields: [organisationId], references: [id])
 
-  accounts  Account[]  @relation("AuthAccounts")
-  sessions  Session[]
-  auditLogs AuditLog[]
+  accounts          Account[]          @relation("AuthAccounts")
+  sessions          Session[]
+  auditLogs         AuditLog[]
+  chatConversations ChatConversation[]
 
   @@index([organisationId])
 }
@@ -424,6 +426,8 @@ model Attachment {
   bill             Bill?            @relation(fields: [billId], references: [id])
   uploadedAt       DateTime         @default(now())
 
+  chatMessages ChatMessage[]
+
   @@index([organisationId])
 }
 
@@ -443,6 +447,39 @@ model AuditLog {
   createdAt      DateTime     @default(now())
 
   @@index([organisationId, entityType, entityId])
+}
+
+// ─── Chat ─────────────────────────────────────────────────────────────────
+
+model ChatConversation {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id])
+  title          String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  messages ChatMessage[]
+
+  @@index([organisationId])
+  @@index([userId])
+}
+
+model ChatMessage {
+  id             String           @id @default(cuid())
+  conversationId String
+  conversation   ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           String           // "user" | "assistant"
+  content        String
+  toolCalls      Json?
+  toolResults    Json?
+  attachmentId   String?
+  attachment     Attachment?      @relation(fields: [attachmentId], references: [id])
+  createdAt      DateTime         @default(now())
+
+  @@index([conversationId])
 }
 
 // ─── Usage Tracking ───────────────────────────────────────────────────────────

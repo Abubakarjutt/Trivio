@@ -240,6 +240,33 @@
 
 ---
 
+## Phase 10 — Chat Assistant (Sprint 10)
+
+**Goal:** Conversational AI assistant that can create entries, generate reports, and process uploaded documents via natural language.
+
+**Design Document:** [CHAT_FEATURE.md](./CHAT_FEATURE.md)
+
+### Tasks
+
+- [ ] **P10-01** Prisma schema: `ChatConversation`, `ChatMessage` models + migration.
+- [ ] **P10-02** `ChatService` — core service: prompt building, Ollama integration, tool parsing, tool execution.
+- [ ] **P10-03** Tool implementations: `create_journal_entry`, `create_invoice`, `create_bill`.
+- [ ] **P10-04** Tool implementations: `get_profit_and_loss`, `get_balance_sheet`, `get_trial_balance`.
+- [ ] **P10-05** Tool implementations: `list_accounts`, `list_contacts`, `search_transactions`, `get_account_balance`.
+- [ ] **P10-06** Tool implementations: `get_ar_aging`, `get_ap_aging`.
+- [ ] **P10-07** Tool implementation: `extract_document` — integrate with existing extraction service.
+- [ ] **P10-08** tRPC router: `chat.sendMessage`, `chat.getConversation`, `chat.listConversations`, `chat.deleteConversation`.
+- [ ] **P10-09** Chat UI: floating panel component with message list, input, file upload button.
+- [ ] **P10-10** Chat UI: tool result rendering (tables for reports, confirmation cards for created documents).
+- [ ] **P10-11** Chat UI: file attachment preview and upload progress.
+- [ ] **P10-12** Unit tests: ChatService tool parsing, prompt building, tool execution.
+- [ ] **P10-13** Integration tests: end-to-end chat flows (create invoice via chat, get report via chat).
+- [ ] **P10-14** Chat conversation management: conversation list sidebar, create new, delete.
+
+**Definition of Done:** User can open chat panel, create invoices/bills/entries, view reports, and upload receipts — all via natural language conversation.
+
+---
+
 ## Backlog (Post-v1)
 
 | ID | Feature | Notes |
@@ -271,6 +298,7 @@
 | Sprint 7 | Dashboard | P7-01 to P7-06 | Not started |
 | Sprint 8 | Subscriptions | P8-01 to P8-09 | Not started |
 | Sprint 9 | Hardening | P9-01 to P9-10 | Not started |
+| Sprint 10 | Chat Assistant | P10-01 to P10-14 | In Progress |
 
 ---
 
@@ -283,3 +311,5 @@
 | 2026-05-09 | BullMQ for async jobs over serverless functions | Reliable retry, delay, priority; avoids cold starts for AI workloads |
 | 2026-05-09 | Multi-currency deferred | Adds significant complexity to reporting and reconciliation; not needed for v1 |
 | 2026-05-09 | Bank feed deferred | Plaid/TrueLayer integration requires compliance review; manual import sufficient for v1 |
+| 2026-05-10 | Chat assistant uses Ollama tool-calling pattern | Reuses existing Ollama setup; tool calls parsed server-side and delegated to existing services |
+| 2026-05-10 | Chat as floating panel, not separate page | Accessible from anywhere in the app without losing context; better UX for quick actions |

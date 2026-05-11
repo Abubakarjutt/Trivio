@@ -11,6 +11,7 @@ import { bankAccountsRouter } from "@/server/routers/bankAccounts";
 import { reportsRouter } from "@/server/routers/reports";
 import { subscriptionRouter } from "@/server/routers/subscription";
 import { dashboardRouter } from "@/server/routers/dashboard";
+import { chatRouter } from "@/server/routers/chat";
 
 export const appRouter = createTRPCRouter({
   auth: authRouter,
@@ -25,6 +26,7 @@ export const appRouter = createTRPCRouter({
   reports: reportsRouter,
   subscription: subscriptionRouter,
   dashboard: dashboardRouter,
+  chat: chatRouter,
 });
 
 export type AppRouter = typeof appRouter;
