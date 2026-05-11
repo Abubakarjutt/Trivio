@@ -186,12 +186,12 @@ export function ChatPanel() {
 
   const { data: conversations, refetch: refetchConversations } = trpc.chat.listConversations.useQuery(
     undefined,
-    { enabled: isOpen },
+    { enabled: isOpen, retry: false },
   );
 
   const { data: conversationData } = trpc.chat.getConversation.useQuery(
     { id: conversationId! },
-    { enabled: !!conversationId },
+    { enabled: !!conversationId, retry: false },
   );
 
   useEffect(() => {

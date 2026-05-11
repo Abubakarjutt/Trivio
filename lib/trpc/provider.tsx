@@ -29,12 +29,17 @@ export function TRPCReactProvider({ children }: { children: React.ReactNode }) {
       links: [
         loggerLink({
           enabled: (op) =>
-            process.env.NODE_ENV === "development" ||
-            (op.direction === "down" && op.result instanceof Error),
+            process.env.NODE_ENV === "development" &&
+            op.direction === "down" &&
+            op.result instanceof Error &&
+            !op.path.startsWith("chat."),
         }),
         httpBatchLink({
           transformer: superjson,
           url: `${getBaseUrl()}/api/trpc`,
+          fetch(url, options) {
+            return fetch(url, { ...options, credentials: "include" });
+          },
         }),
       ],
     })
