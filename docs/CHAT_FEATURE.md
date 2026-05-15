@@ -1,9 +1,9 @@
 # AutoAccounts — Chat Assistant Feature
 
-**Version:** 1.0.0  
-**Status:** In Progress  
+**Version:** 1.1.0  
+**Status:** Complete (core), In Progress (extract_document)  
 **Created:** 2026-05-10  
-**Branch:** `feature/chat-assistant`
+**Last Updated:** 2026-05-15
 
 ---
 
@@ -19,9 +19,15 @@ The Chat Assistant is a conversational interface that allows users to perform co
 | **Generate reports** | "Show me the P&L for this month", "What's my AR aging?" |
 | **Create invoices** | "Create an invoice for Acme Corp: 5 hours consulting at $150/hr" |
 | **Create bills** | "Record a bill from AWS for $432.10 due June 15" |
+| **Record payments** | "Mark invoice #INV-042 as paid", "Record $500 payment against the AWS bill" |
+| **Void records** | "Void invoice #INV-007", "Cancel that journal entry" |
+| **Send invoices** | "Send invoice #INV-042 to the customer" |
+| **Manage contacts** | "Create a new customer: Acme Corp, acme@example.com" |
+| **Manage accounts** | "Add an account called 'Software Subscriptions' under expenses" |
+| **List & search** | "Show all unpaid invoices", "List my suppliers", "Search transactions for 'AWS'" |
 | **Upload & extract documents** | (Upload receipt) "Add this as a bill" |
 | **Query data** | "How much does Acme Corp owe me?", "What's my cash balance?" |
-| **Get help** | "How do I reconcile my bank account?" |
+| **UI guidance** | "How do I reconcile my bank account?", "Walk me through creating an invoice manually" |
 
 ### 1.2 Non-Goals (v1)
 
@@ -42,42 +48,55 @@ User types message / uploads file
         ▼
 ┌─────────────────────┐
 │   Chat UI Component  │  (floating panel, right side)
-│   /app/(app)/chat    │
+│   chat-panel.tsx     │
 └──────────┬──────────┘
-           │ tRPC mutation: chat.sendMessage
+           │ POST /api/chat  (SSE stream)
            ▼
 ┌─────────────────────────────────────────────┐
-│              Chat Router (tRPC)              │
-│  - Persists user message                     │
-│  - Calls ChatService.processMessage()        │
-│  - Returns assistant response                │
+│            /api/chat Route Handler           │
+│  - Auth check + org scope                   │
+│  - Create/reuse ChatConversation             │
+│  - Persist user ChatMessage                  │
+│  - Build prompt via ChatService              │
+│  - Stream Ollama response via SSE            │
+│  - Parse + execute tool calls server-side   │
+│  - Persist assistant ChatMessage             │
+│  - Send SSE "done" event with full result   │
 └──────────┬──────────────────────────────────┘
            │
            ▼
 ┌─────────────────────────────────────────────┐
-│            ChatService                       │
+│            ChatService (chat.service.ts)     │
 │                                              │
-│  1. Build prompt with conversation history   │
-│  2. Include org context (accounts, contacts) │
-│  3. Call Ollama with tool definitions         │
-│  4. Parse tool calls from response           │
-│  5. Execute tools (delegate to services)     │
-│  6. Return formatted response                │
+│  buildChatMessages()                         │
+│  1. Build system prompt with org context     │
+│  2. Inject APP_UI_GUIDE for how-to questions │
+│  3. Inject TOOL_DEFINITIONS (25 tools)       │
+│  4. Append conversation history              │
+│                                              │
+│  parseToolCalls()                            │
+│  5. Extract TOOL_CALL: {…} lines from text  │
+│  6. Strip tool call lines from display text  │
+│                                              │
+│  executeToolCall()                           │
+│  7. Dispatch to the appropriate tool fn      │
 └──────────┬──────────────────────────────────┘
            │ delegates to
            ▼
 ┌─────────────────────────────────────────────┐
-│         Existing Service Layer               │
+│         Existing Service Layer + Prisma      │
 │                                              │
 │  AccountingService.createJournalEntry()      │
-│  InvoiceService.createInvoice()              │
-│  BillService.createBill()                    │
+│  InvoiceService.createInvoice/Payment/Void() │
+│  BillService.createBill/Payment/Void()       │
 │  ReportService.getProfitAndLoss()            │
 │  ReportService.getBalanceSheet()             │
-│  ExtractionService.extractDocument()         │
+│  ReportService.getTrialBalance()             │
 │  + direct Prisma queries for lookups         │
 └─────────────────────────────────────────────┘
 ```
+
+**Streaming:** The route uses Server-Sent Events. The client receives `token` events during generation (for the typing animation), then a final `done` event with the complete content, tool calls, and tool results. The `conversationId` is sent in the initial `start` event so the UI can open the right conversation before the response finishes.
 
 ### 2.2 Data Model
 
@@ -117,23 +136,37 @@ model ChatMessage {
 
 The AI model receives a system prompt with tool definitions. When it needs to perform an action, it outputs a structured tool call that the ChatService intercepts and executes server-side.
 
-**Available Tools:**
+**Available Tools (25 total):**
 
 | Tool | Service | Description |
 |------|---------|-------------|
-| `create_journal_entry` | AccountingService | Create a manual journal entry with debit/credit lines |
+| `create_journal_entry` | AccountingService | Create a balanced double-entry journal entry |
 | `create_invoice` | InvoiceService | Create a draft invoice for a customer |
 | `create_bill` | BillService | Create a draft bill from a supplier |
+| `get_invoice` | Prisma query | Fetch a single invoice by number |
+| `get_bill` | Prisma query | Fetch a single bill by number |
+| `list_invoices` | Prisma query | List invoices filtered by status |
+| `list_bills` | Prisma query | List bills filtered by status |
+| `record_invoice_payment` | InvoiceService | Record full or partial payment against an invoice |
+| `record_bill_payment` | BillService | Record full or partial payment against a bill |
+| `void_invoice` | InvoiceService | Void an invoice (posts reversal journal) |
+| `void_bill` | BillService | Void a bill (posts reversal journal) |
+| `void_transaction` | AccountingService | Void a journal entry (posts reversal) |
+| `send_invoice` | InvoiceService | Mark invoice as sent / email it to customer |
+| `approve_bill` | BillService | Move bill from draft to received/approved |
+| `create_contact` | Prisma | Create a new customer or supplier contact |
+| `update_contact` | Prisma | Update an existing contact |
+| `create_account` | Prisma | Create a new chart-of-accounts entry |
 | `get_profit_and_loss` | ReportService | Generate P&L report for a date range |
 | `get_balance_sheet` | ReportService | Generate balance sheet as of a date |
 | `get_trial_balance` | ReportService | Generate trial balance for a date range |
-| `get_ar_aging` | Prisma query | Get accounts receivable aging |
-| `get_ap_aging` | Prisma query | Get accounts payable aging |
+| `get_ar_aging` | Prisma query | Get accounts receivable aging buckets |
+| `get_ap_aging` | Prisma query | Get accounts payable aging buckets |
 | `list_accounts` | Prisma query | List chart of accounts |
 | `list_contacts` | Prisma query | List customers or suppliers |
-| `search_transactions` | Prisma query | Search journal entries |
-| `get_account_balance` | Prisma query | Get balance for a specific account |
-| `extract_document` | ExtractionService | Extract data from an uploaded receipt/invoice |
+| `search_transactions` | Prisma query | Search journal entries by description |
+| `get_account_balance` | Prisma query | Get running balance for a specific account |
+| `extract_document` | ExtractionService | *(planned)* Extract data from an uploaded receipt/invoice |
 
 ### 2.4 AI Integration
 
@@ -141,9 +174,10 @@ The AI model receives a system prompt with tool definitions. When it needs to pe
 
 **Prompt Strategy:**
 1. System prompt defines the assistant's role, available tools, and output format
-2. Org context injected: currency, business name, list of accounts (codes + names), recent contacts
-3. Conversation history (last 20 messages) included for context
-4. Tool calls use a structured JSON format that the service parses
+2. `APP_UI_GUIDE` injected — step-by-step procedures for every page/workflow in the app, so the AI can answer "how do I…" questions without a tool call
+3. Org context injected: currency, business name, list of accounts (codes + names), recent contacts
+4. Conversation history (last 20 messages) included for context
+5. Tool calls use a structured JSON format that the service parses; all other text is shown to the user
 
 **Tool Call Format (from AI):**
 ```json
@@ -176,20 +210,22 @@ Users can attach files (receipts, invoices) directly in the chat. Flow:
 
 ### Tasks
 
-- [ ] **P10-01** Prisma schema: `ChatConversation`, `ChatMessage` models + migration.
-- [ ] **P10-02** `ChatService` — core service: prompt building, Ollama integration, tool parsing, tool execution.
-- [ ] **P10-03** Tool implementations: `create_journal_entry`, `create_invoice`, `create_bill`.
-- [ ] **P10-04** Tool implementations: `get_profit_and_loss`, `get_balance_sheet`, `get_trial_balance`.
-- [ ] **P10-05** Tool implementations: `list_accounts`, `list_contacts`, `search_transactions`, `get_account_balance`.
-- [ ] **P10-06** Tool implementations: `get_ar_aging`, `get_ap_aging`.
-- [ ] **P10-07** Tool implementation: `extract_document` — integrate with existing extraction service.
-- [ ] **P10-08** tRPC router: `chat.sendMessage`, `chat.getConversation`, `chat.listConversations`, `chat.deleteConversation`.
-- [ ] **P10-09** Chat UI: floating panel component with message list, input, file upload button.
-- [ ] **P10-10** Chat UI: tool result rendering (tables for reports, confirmation cards for created documents).
-- [ ] **P10-11** Chat UI: file attachment preview and upload progress.
-- [ ] **P10-12** Unit tests: ChatService tool parsing, prompt building, tool execution.
-- [ ] **P10-13** Integration tests: end-to-end chat flows (create invoice via chat, get report via chat).
-- [ ] **P10-14** Chat conversation management: conversation list sidebar, create new, delete.
+- [x] **P10-01** Prisma schema: `ChatConversation`, `ChatMessage` models + migration.
+- [x] **P10-02** `ChatService` — core service: prompt building, Ollama SSE streaming, tool parsing, tool execution.
+- [x] **P10-03** Tool implementations: `create_journal_entry`, `create_invoice`, `create_bill`.
+- [x] **P10-04** Tool implementations: `get_profit_and_loss`, `get_balance_sheet`, `get_trial_balance`.
+- [x] **P10-05** Tool implementations: `list_accounts`, `list_contacts`, `search_transactions`, `get_account_balance`, `list_invoices`, `list_bills`, `get_invoice`, `get_bill`.
+- [x] **P10-06** Tool implementations: `get_ar_aging`, `get_ap_aging`.
+- [x] **P10-07** Tool implementations: `record_invoice_payment`, `record_bill_payment`, `void_invoice`, `void_bill`, `void_transaction`, `send_invoice`, `approve_bill`, `create_contact`, `update_contact`, `create_account`.
+- [ ] **P10-08** Tool implementation: `extract_document` — integrate with existing extraction service.
+- [x] **P10-09** `/api/chat` SSE route + tRPC: `chat.getConversation`, `chat.listConversations`, `chat.deleteConversation`.
+- [x] **P10-10** Chat UI: floating panel component with message list, streaming typing animation, input, conversation sidebar.
+- [x] **P10-11** Chat UI: 20+ visual tool result card types with consistent white+colored-header design.
+- [x] **P10-12** Chat UI: `APP_UI_GUIDE` injected into system prompt; AI answers "how do I…" with numbered steps.
+- [ ] **P10-13** Chat UI: file attachment preview and upload progress.
+- [x] **P10-14** Unit tests: 75 tests covering all 25 tool implementations. 140 total suite tests passing.
+- [ ] **P10-15** Integration/E2E tests: end-to-end chat flows.
+- [x] **P10-16** Chat conversation management: conversation list sidebar, create new, delete.
 
 **Definition of Done:** User can open chat panel, create invoices/bills/entries, view reports, and upload receipts — all via natural language conversation.
 
@@ -225,9 +261,24 @@ Users can attach files (receipts, invoices) directly in the chat. Flow:
 
 | Type | Rendering |
 |------|-----------|
-| Text | Markdown-rendered text |
-| Report table | Formatted table with currency values |
-| Created document | Card with link to the invoice/bill/entry |
-| Extraction result | Card showing extracted fields with confidence badges |
-| Error | Red-tinted card with error message |
-| Confirmation | Card with confirm/cancel buttons (for destructive actions) |
+| Text | Plain text, whitespace-preserved; `TOOL_CALL:` lines stripped before display |
+| UI guidance | Numbered step-by-step text from the AI's built-in app guide |
+| Created invoice | Blue card — number, customer, dates, status badge, total |
+| Created bill | Amber card — number, supplier, dates, status badge, total |
+| Created journal entry | Violet card — description + DR/CR lines with fixed-width columns |
+| Payment recorded | Green card — invoice/bill number, amount paid, new status |
+| Void | Orange card — voided record number + type |
+| Invoice/bill detail | White card with status badge, line items, outstanding amount |
+| Invoice/bill list | Scrollable table of records with status badges and amounts |
+| Contact card | Card with contact type badge (customer / supplier / both), email |
+| Contact list | Table of contacts with type and email |
+| Account card | White card with account code, type, balance |
+| Account list | Fixed-width table — code, name, type, balance |
+| Account balance | Card — account name, code (monospace), large balance figure |
+| P&L report | Two-section card (Income / Expenses) with net profit total |
+| Balance sheet | Three-section card (Assets / Liabilities / Equity) |
+| Trial balance | Fixed-width three-column table (account, debit, credit) with totals |
+| AR aging | Blue-themed table with 30/60/90/90+ day bucket columns |
+| AP aging | Amber-themed table with 30/60/90/90+ day bucket columns |
+| Transaction search | Table of journal entries with date, description, amount |
+| Error | Red-tinted banner with error message |

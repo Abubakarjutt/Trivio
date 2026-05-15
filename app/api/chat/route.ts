@@ -1,7 +1,41 @@
 import { NextRequest } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { buildChatMessages, executeToolCall, parseToolCalls } from "@/server/services/chat.service";
+import { buildChatMessages, executeToolCall, parseToolCalls, type ToolResult } from "@/server/services/chat.service";
+
+function buildToolSummary(toolResults: ToolResult[]): string {
+  return toolResults
+    .map((r) => {
+      if (!r.success) return `❌ ${r.tool.replace(/_/g, " ")}: ${r.error}`;
+      const d = r.data as Record<string, unknown> | undefined;
+      switch (r.tool) {
+        case "create_invoice":
+          return `✓ Invoice ${d?.number} created for ${d?.customer} — total $${d?.total}`;
+        case "create_bill":
+          return `✓ Bill ${d?.number} created for ${d?.supplier} — total $${d?.total}`;
+        case "create_journal_entry":
+          return `✓ Journal entry recorded`;
+        case "list_invoices":
+        case "list_bills":
+        case "get_invoice":
+        case "get_bill":
+        case "list_contacts":
+        case "list_accounts":
+        case "get_account_balance":
+        case "search_transactions":
+        case "get_profit_and_loss":
+        case "get_balance_sheet":
+        case "get_trial_balance":
+        case "get_ar_aging":
+        case "get_ap_aging":
+          return "";
+        default:
+          return `✓ ${r.tool.replace(/_/g, " ")} completed`;
+      }
+    })
+    .filter(Boolean)
+    .join("\n");
+}
 
 export const maxDuration = 120;
 
@@ -118,8 +152,7 @@ export async function POST(req: NextRequest) {
         }
 
         const { text, toolCalls } = parseToolCalls(fullContent);
-        const finalContent = text;
-        const toolResults = [];
+        const toolResults: ToolResult[] = [];
 
         if (toolCalls.length > 0) {
           for (const call of toolCalls) {
@@ -127,6 +160,9 @@ export async function POST(req: NextRequest) {
             toolResults.push(result);
           }
         }
+
+        const summary = buildToolSummary(toolResults);
+        const finalContent = summary ? `${text}\n\n${summary}`.trim() : text;
 
         await db.chatMessage.create({
           data: {

@@ -1,8 +1,8 @@
 # AutoAccounts — Architecture Document
 
-**Version:** 0.1.0  
-**Status:** Draft  
-**Last Updated:** 2026-05-09
+**Version:** 0.2.0  
+**Status:** Active  
+**Last Updated:** 2026-05-15
 
 ---
 
@@ -199,6 +199,24 @@ AuditLog
   ├── before              (JSON)
   ├── after               (JSON)
   └── timestamp
+
+ChatConversation
+  ├── id
+  ├── organisationId
+  ├── userId
+  ├── title               (auto-set from first message, max 60 chars)
+  ├── createdAt
+  └── updatedAt
+
+ChatMessage
+  ├── id
+  ├── conversationId
+  ├── role                ("user" | "assistant")
+  ├── content             (text; TOOL_CALL lines stripped before storing)
+  ├── toolCalls           (JSON — raw tool calls for audit)
+  ├── toolResults         (JSON — execution results for audit)
+  ├── attachmentId        (optional FK → Attachment)
+  └── createdAt
 ```
 
 ---
@@ -235,8 +253,11 @@ appRouter
   ├── bank          listAccounts, createAccount, importStatement, reconcile
   ├── reports       pnl, balanceSheet, cashFlow, taxSummary, trialBalance, arAging, apAging
   ├── attachments   uploadUrl, confirmUpload, getExtractionResult
+  ├── chat          getConversation, listConversations, deleteConversation
   └── subscription  currentPlan, createCheckoutSession, portal
 ```
+
+**Note:** Chat message sending uses a dedicated SSE route (`POST /api/chat`) rather than a tRPC mutation. This avoids the 30-second timeout on serverless functions and enables real-time token streaming to the UI.
 
 ### 4.3 Service Layer
 
@@ -248,6 +269,7 @@ Services contain business logic and are called by tRPC routers:
 - **`ReconciliationService`** — matching algorithm, locking logic.
 - **`ReportService`** — aggregation queries for each financial report.
 - **`ExtractionService`** — Claude API calls, result parsing, confidence scoring.
+- **`ChatService`** (`server/services/chat.service.ts`) — system prompt construction (org context + tool definitions + UI guide), tool call parsing, tool dispatch to 25 tool functions; called by the `/api/chat` SSE route.
 - **`SubscriptionService`** — Stripe integration, tier enforcement (usage gates).
 - **`TaxService`** — pluggable tax regime resolver, rate lookup, tax line calculation.
 
