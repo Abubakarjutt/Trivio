@@ -1,8 +1,8 @@
 # AutoAccounts — Product Requirements Document
 
-**Version:** 0.2.0  
+**Version:** 0.3.0  
 **Status:** Active  
-**Last Updated:** 2026-05-15
+**Last Updated:** 2026-05-17
 
 ---
 
@@ -145,7 +145,49 @@ All personas share a common trait: **limited or no formal accounting knowledge**
 - FR-65: Chat conversations are persisted; the user can view previous conversations in a sidebar and delete them.
 - FR-66: All tool executions are scoped to the authenticated user's organisation. Tool calls and results are stored in `ChatMessage` for audit purposes.
 
-### 3.11 Subscription & Billing
+### 3.11 Personal Finance Module (EasyFinance)
+
+The Personal Finance module is a self-contained addition to AutoAccounts, merged from the EasyFinance project. It reuses existing double-entry bookkeeping data (JournalLine aggregation) for spend calculations — no duplicate transaction model.
+
+#### 3.11.1 Budgets
+
+- FR-67: User can create a budget with a name, category (partial match against expense account names), spending limit, and period (weekly/monthly/quarterly/yearly).
+- FR-68: System automatically calculates how much has been spent in the current period by aggregating expense JournalLines whose account name contains the budget's category string (case-insensitive).
+- FR-69: Each budget card shows: spent amount, remaining amount, utilization percentage (capped at 100%), and a colour-coded progress bar (green < 80%, amber 80–99%, red ≥ 100%).
+- FR-70: User can archive a budget (hides it from the default list but preserves history).
+- FR-71: User can delete a budget permanently.
+
+#### 3.11.2 Goals
+
+- FR-72: User can create a savings goal with a name, optional description, target amount, optional starting amount, and optional target date.
+- FR-73: Goals have a status: ACTIVE, COMPLETED, or CANCELLED.
+- FR-74: User can contribute funds to an active goal; the current amount increases by the contributed amount.
+- FR-75: When a contribution brings the current amount to within $0.001 of the target, the goal is automatically marked COMPLETED.
+- FR-76: User can manually mark a goal as COMPLETED or CANCELLED.
+- FR-77: Goal cards show a progress bar, progress percentage, and remaining amount.
+- FR-78: Goals list supports filtering by status (All / Active / Completed / Cancelled).
+- FR-79: Summary strip shows total target, total saved, and still-needed across all ACTIVE goals.
+
+#### 3.11.3 Recurring Items
+
+- FR-80: User can create a recurring item (income or expense) with a name, amount, frequency (daily/weekly/fortnightly/monthly/quarterly/yearly), category, and next due date.
+- FR-81: Recurring items list shows three sections: Due Now (overdue), Upcoming, and Inactive.
+- FR-82: User can mark a recurring item as paid; the system advances the next due date by exactly one frequency period.
+- FR-83: User can deactivate (pause) or reactivate a recurring item.
+- FR-84: Summary strip normalises all active items to monthly equivalents and shows monthly income, monthly expense, and net.
+- FR-85: Monthly normalisation factors: daily × 30, weekly × 4.33, fortnightly × 2.17, monthly × 1, quarterly ÷ 3, yearly ÷ 12.
+
+#### 3.11.4 Watchlists
+
+- FR-86: User can create a watchlist entry with a name, category, spending threshold, and period.
+- FR-87: System calculates actual spend the same way as budgets (JournalLine aggregation over the period window).
+- FR-88: A watchlist is marked as "breached" when actual spend strictly exceeds the threshold (spend > threshold).
+- FR-89: An alert strip appears at the top of the Watchlists page listing all breached watchlists by name.
+- FR-90: Watchlist cards show spend, threshold, percentage used (may exceed 100%), and a colour-coded bar.
+- FR-91: User can pause or resume a watchlist (paused watchlists are excluded from the active list and breach detection).
+- FR-92: User can delete a watchlist permanently.
+
+### 3.12 Subscription & Billing
 
 - FR-46: **Free Tier** — limited to:
   - 1 user

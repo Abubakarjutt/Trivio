@@ -1709,3 +1709,210 @@ Currently uses local filesystem (`./storage/`). The `s3Key` field in `Attachment
 | AWS deployment (ECS/RDS) | Not implemented | Docker Compose for local only |
 | GDPR data deletion flow | Not implemented | Bulk export exists via `/api/export` |
 | WCAG 2.1 AA audit | Not done | Radix primitives provide basic accessibility |
+
+---
+
+## 23. Personal Finance Module (EasyFinance)
+
+Merged from the EasyFinance project as a self-contained "Personal Finance" sidebar section. All spend calculations reuse existing `JournalLine` aggregates — no duplicate transaction model.
+
+### 23.1 Prisma Schema Additions
+
+```prisma
+enum BudgetPeriod      { WEEKLY MONTHLY QUARTERLY YEARLY }
+enum GoalStatus        { ACTIVE COMPLETED CANCELLED }
+enum RecurringFrequency { DAILY WEEKLY FORTNIGHTLY MONTHLY QUARTERLY YEARLY }
+enum RecurringType     { INCOME EXPENSE }
+
+model Budget {
+  id             String       @id @default(cuid())
+  organisationId String
+  name           String
+  category       String       // partial match against expense account names
+  limitAmount    Decimal      @db.Decimal(19,4)
+  period         BudgetPeriod @default(MONTHLY)
+  isArchived     Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  @@index([organisationId])
+}
+
+model Goal {
+  id             String     @id @default(cuid())
+  organisationId String
+  name           String
+  description    String?
+  targetAmount   Decimal    @db.Decimal(19,4)
+  currentAmount  Decimal    @db.Decimal(19,4) @default(0)
+  targetDate     DateTime?
+  status         GoalStatus @default(ACTIVE)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  @@index([organisationId])
+}
+
+model RecurringItem {
+  id             String             @id @default(cuid())
+  organisationId String
+  name           String
+  description    String?
+  amount         Decimal            @db.Decimal(19,4)
+  type           RecurringType      @default(EXPENSE)
+  frequency      RecurringFrequency @default(MONTHLY)
+  category       String?
+  nextDueDate    DateTime
+  lastPaidAt     DateTime?
+  isActive       Boolean            @default(true)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  @@index([organisationId])
+}
+
+model Watchlist {
+  id             String       @id @default(cuid())
+  organisationId String
+  name           String
+  category       String       // partial match against expense account names
+  threshold      Decimal      @db.Decimal(19,4)
+  period         BudgetPeriod @default(MONTHLY)
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  @@index([organisationId])
+}
+```
+
+### 23.2 EasyFinance Service (`server/services/easyfinance.service.ts`)
+
+All pure business logic — no Prisma calls except `getSpentForCategory` which accepts `db` as a parameter for testability.
+
+| Function | Signature | Description |
+|---|---|---|
+| `periodFrom` | `(period, now) → Date` | Returns start-of-window date (now minus N days) |
+| `getSpentForCategory` | `(db, orgId, category, from, now) → Promise<number>` | Aggregates expense JournalLine debits for a category within a date window |
+| `calcBudgetUtilization` | `(spent, limit) → number` | Returns 0–100, capped, rounded |
+| `calcGoalProgress` | `(current, target) → number` | Returns 0–100 progress %, capped |
+| `isGoalComplete` | `(newAmount, targetAmount) → boolean` | True when `newAmount >= targetAmount - 0.001` |
+| `nextDueDateAfter` | `(current, frequency) → Date` | Advances date by one frequency period (immutable) |
+| `MONTHLY_FACTOR` | `Record<string, number>` | Multipliers: DAILY×30, WEEKLY×4.33, FORTNIGHTLY×2.17, MONTHLY×1, QUARTERLY÷3, YEARLY÷12 |
+| `normalisedMonthly` | `(amount, frequency) → number` | amount × MONTHLY_FACTOR |
+| `calcRecurringSummary` | `(items[]) → {monthlyIncome, monthlyExpense, monthlyNet}` | Aggregates normalised monthly amounts |
+| `calcDueStatus` | `(nextDueDate, now) → {isDue, daysUntilDue}` | isDue when nextDueDate ≤ now |
+| `calcWatchlistStatus` | `(spent, threshold) → {isBreached, percentUsed}` | isBreached when spent > threshold (strict) |
+
+### 23.3 tRPC Routers
+
+**`budgetsRouter`**
+| Procedure | Type | Description |
+|---|---|---|
+| `list` | query | Fetches budgets, calculates spent/remaining/utilization per budget via JournalLine aggregate |
+| `create` | mutation | Creates budget; stores limitAmount as `Prisma.Decimal` |
+| `update` | mutation | Updates fields; throws NOT_FOUND if budget doesn't belong to org |
+| `archive` | mutation | Sets `isArchived = true` |
+| `delete` | mutation | Hard deletes; throws NOT_FOUND guard |
+
+**`goalsRouter`**
+| Procedure | Type | Description |
+|---|---|---|
+| `list` | query | Returns goals enriched with `progress` (%) and `remaining`; filterable by status |
+| `create` | mutation | Creates with `status = ACTIVE` |
+| `update` | mutation | Updates any field including status |
+| `contribute` | mutation | Adds amount to `currentAmount`; auto-sets `status = COMPLETED` via `isGoalComplete` |
+| `delete` | mutation | Hard deletes; NOT_FOUND guard |
+
+**`recurringItemsRouter`**
+| Procedure | Type | Description |
+|---|---|---|
+| `list` | query | Returns items with `isDue` and `daysUntilDue`; filterable by `activeOnly` |
+| `create` | mutation | Stores amount as `Prisma.Decimal` |
+| `update` | mutation | Updates fields including `isActive` (pause/resume) |
+| `markPaid` | mutation | Records `lastPaidAt = now()`, advances `nextDueDate` via `nextDueDateAfter` |
+| `summary` | query | Normalises all active items to monthly equivalents; returns income/expense/net/totalItems |
+| `delete` | mutation | Hard deletes; NOT_FOUND guard |
+
+**`watchlistsRouter`**
+| Procedure | Type | Description |
+|---|---|---|
+| `list` | query | Returns active watchlists with `spent`, `isBreached`, `percentUsed` |
+| `create` | mutation | Stores threshold as `Prisma.Decimal` |
+| `update` | mutation | Updates fields; `isActive = false` pauses the watchlist |
+| `delete` | mutation | Hard deletes; NOT_FOUND guard |
+
+### 23.4 Pages
+
+| Route | File | Key UI elements |
+|---|---|---|
+| `/budgets` | `app/(app)/budgets/page.tsx` | Summary strip (total/spent/remaining), utilization bar cards (green/amber/red), archive + delete per card, create dialog |
+| `/goals` | `app/(app)/goals/page.tsx` | Summary strip (target/saved/needed for ACTIVE), status filter tabs, progress bar cards, contribute dialog, complete/cancel/delete actions |
+| `/recurring` | `app/(app)/recurring/page.tsx` | Monthly income/expense/net summary, three sections (Due Now/Upcoming/Inactive), markPaid checkmark button, pause/resume toggle |
+| `/watchlists` | `app/(app)/watchlists/page.tsx` | Breach alert strip, threshold spend bar cards, percentUsed (can exceed 100%), pause/resume, create dialog |
+
+All pages use the same design system as the rest of AutoAccounts: `PageHeader`, shadcn `Dialog`, `Input`, `Select`, `Button`, Tailwind `rounded-xl border bg-card` cards, `Loader2` spinner, `toast.success/error` via Sonner.
+
+### 23.5 Sidebar Navigation
+
+Added to `app/(app)/_components/sidebar.tsx`:
+
+```typescript
+{
+  label: "Personal Finance",
+  items: [
+    { label: "Budgets",    href: "/budgets",    icon: TrendingUp, matchPrefix: true },
+    { label: "Goals",      href: "/goals",      icon: Target,     matchPrefix: true },
+    { label: "Recurring",  href: "/recurring",  icon: RefreshCw,  matchPrefix: true },
+    { label: "Watchlists", href: "/watchlists", icon: Eye,        matchPrefix: true },
+  ],
+}
+```
+
+### 23.6 Test Coverage
+
+| File | Tests | Coverage |
+|---|---|---|
+| `tests/unit/easyfinance.service.test.ts` | 78 | All 12 exported functions; edge cases: divide-by-zero, 0.001 epsilon, timezone-safe dates, unknown frequency fallbacks, mutation guards |
+| `tests/unit/easyfinance.routers.test.ts` | 62 | All 4 routers via `createCallerFactory`; `vi.mock("@/lib/db")` stubs `orgProcedure` middleware; covers enriched fields, NOT_FOUND guards, auto-complete logic, Decimal storage |
+| `tests/e2e/easyfinance.spec.ts` | 8 | Auth-guard: all 4 routes redirect unauthenticated users to `/login` |
+| **Total new** | **148** | — |
+| **Suite total** | **280** | Up from 218 before Phase 11 |
+
+### 23.7 Spend Calculation Logic
+
+Both Budgets and Watchlists derive "spent" from the live accounting ledger:
+
+```typescript
+const result = await db.journalLine.aggregate({
+  where: {
+    account: {
+      organisationId,
+      type: "EXPENSE",
+      name: { contains: category, mode: "insensitive" }, // partial, case-insensitive
+    },
+    journalEntry: {
+      organisationId,
+      isVoid: false,
+      date: { gte: periodFrom(period, now), lte: now },
+    },
+  },
+  _sum: { debit: true },
+});
+const spent = Number(result._sum.debit ?? 0);
+```
+
+Period windows: WEEKLY = last 7 days, MONTHLY = last 30 days, QUARTERLY = last 91 days, YEARLY = last 365 days.
+
+### 23.8 Monthly Normalisation (Recurring Summary)
+
+```typescript
+const MONTHLY_FACTOR = {
+  DAILY: 30, WEEKLY: 4.33, FORTNIGHTLY: 2.17,
+  MONTHLY: 1, QUARTERLY: 1/3, YEARLY: 1/12,
+};
+// monthlyIncome = sum of (amount × factor) for all INCOME items
+// monthlyExpense = sum of (amount × factor) for all EXPENSE items
+// monthlyNet = monthlyIncome - monthlyExpense
+// All rounded to 2 decimal places
+```

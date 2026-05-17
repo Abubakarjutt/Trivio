@@ -1,8 +1,8 @@
 # AutoAccounts — Implementation Plan
 
-**Version:** 0.2.0  
+**Version:** 0.3.0  
 **Status:** Active  
-**Last Updated:** 2026-05-15  
+**Last Updated:** 2026-05-17  
 **Methodology:** Agile sprints (~2 weeks each), spec-driven, vertical slices
 
 ---
@@ -269,6 +269,37 @@
 
 ---
 
+## Phase 11 — Personal Finance Module / EasyFinance (Sprint 11) ✅ Complete
+
+**Goal:** Merge the EasyFinance project as a self-contained Personal Finance module within AutoAccounts, reusing existing double-entry bookkeeping data for all spend calculations.
+
+**Requirements covered:** FR-67 to FR-92
+
+### Tasks
+
+- [x] **P11-01** Prisma schema: `Budget`, `Goal`, `RecurringItem`, `Watchlist` models with `NUMERIC(19,4)` monetary fields, `organisationId` isolation, and indexes. Four new enums: `BudgetPeriod`, `GoalStatus`, `RecurringFrequency`, `RecurringType`.
+- [x] **P11-02** Migration: `20260517000000_add_easyfinance_module` — DDL for all 4 tables, indexes, foreign keys to `Organisation`.
+- [x] **P11-03** `EasyFinanceService` (`server/services/easyfinance.service.ts`) — all pure business logic extracted: `periodFrom`, `getSpentForCategory`, `calcBudgetUtilization`, `calcGoalProgress`, `isGoalComplete`, `nextDueDateAfter`, `MONTHLY_FACTOR`, `normalisedMonthly`, `calcRecurringSummary`, `calcDueStatus`, `calcWatchlistStatus`.
+- [x] **P11-04** `budgetsRouter` — list (with live spend via JournalLine aggregate), create, update, archive, delete.
+- [x] **P11-05** `goalsRouter` — list (with progress %), create, update, contribute (auto-completes at 100%), delete.
+- [x] **P11-06** `recurringItemsRouter` — list (with `isDue`/`daysUntilDue`), create, update, markPaid (advances `nextDueDate`), summary (monthly normalisation), delete.
+- [x] **P11-07** `watchlistsRouter` — list (with `isBreached`/`percentUsed`), create, update (pause/resume), delete.
+- [x] **P11-08** `server/root.ts` — all 4 routers registered in `appRouter`.
+- [x] **P11-09** Budgets page (`/budgets`) — summary strip, utilization bar cards, archive/delete, create dialog.
+- [x] **P11-10** Goals page (`/goals`) — summary strip, status filter, progress bar cards, contribute dialog, status management.
+- [x] **P11-11** Recurring page (`/recurring`) — monthly income/expense/net summary, Due Now / Upcoming / Inactive sections, markPaid action.
+- [x] **P11-12** Watchlists page (`/watchlists`) — breach alert strip, threshold spend bar cards, pause/resume toggle, create dialog.
+- [x] **P11-13** Sidebar updated with "Personal Finance" nav group (Budgets, Goals, Recurring, Watchlists) using `TrendingUp`, `Target`, `RefreshCw`, `Eye` icons.
+- [x] **P11-14** Unit tests — `easyfinance.service.test.ts`: 78 tests covering all 12 exported pure functions with edge cases (divide-by-zero, epsilon tolerance, timezone-safe dates, unknown frequency fallbacks).
+- [x] **P11-15** Router tests — `easyfinance.routers.test.ts`: 62 tests covering all 4 routers via `createCallerFactory` with mocked Prisma context; `vi.mock("@/lib/db")` stubs the `orgProcedure` middleware.
+- [x] **P11-16** E2E auth-guard tests — `easyfinance.spec.ts`: 8 tests confirming all 4 routes redirect unauthenticated users to `/login`.
+
+**Test results: 280/280 passing (up from 218 before this phase). Zero TypeScript errors.**
+
+**Definition of Done:** ✅ User can navigate to Budgets, Goals, Recurring, and Watchlists from the sidebar. All CRUD operations work. Spend calculations pull live data from JournalLines. All business logic is exhaustively unit-tested.
+
+---
+
 ## Backlog (Post-v1)
 
 | ID | Feature | Notes |
@@ -301,6 +332,7 @@
 | Sprint 8 | Subscriptions | P8-01 to P8-09 | Not started |
 | Sprint 9 | Hardening | P9-01 to P9-10 | Not started |
 | Sprint 10 | Chat Assistant | P10-01 to P10-16 | ✅ Complete (P10-08, P10-13, P10-15 deferred) |
+| Sprint 11 | Personal Finance (EasyFinance) | P11-01 to P11-16 | ✅ Complete |
 
 ---
 
@@ -318,3 +350,5 @@
 | 2026-05-15 | Chat uses SSE streaming instead of tRPC mutation | Real-time typing animation; avoids Vercel/serverless 30s timeout for long AI responses |
 | 2026-05-15 | Tool call text stripped from chat display | Raw `TOOL_CALL: {…}` lines never shown to users; only rendered visual cards |
 | 2026-05-15 | 25 tools implemented (vs 13 original plan) | Added list/get for invoices+bills, record payment, void, send, approve, create/update contact, create account |
+| 2026-05-17 | EasyFinance merged as Personal Finance module | Reuses JournalLine aggregates for spend; no duplicate transaction model; 4 new Prisma models, 4 routers, 4 pages, 1 service file |
+| 2026-05-17 | Business logic extracted to EasyFinanceService | All pure functions in a dedicated service file for testability; routers are thin wrappers; 280 tests passing |
