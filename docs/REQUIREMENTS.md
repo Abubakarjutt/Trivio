@@ -1,8 +1,8 @@
 # AutoAccounts — Product Requirements Document
 
-**Version:** 0.1.0  
-**Status:** Draft  
-**Last Updated:** 2026-05-09
+**Version:** 0.2.0  
+**Status:** Active  
+**Last Updated:** 2026-05-15
 
 ---
 
@@ -126,7 +126,26 @@ All personas share a common trait: **limited or no formal accounting knowledge**
   - Cash position (sum of bank accounts)
 - FR-45: Charts: income vs. expense trend (last 12 months), expense breakdown by category.
 
-### 3.10 Subscription & Billing
+### 3.10 AI Chat Assistant
+
+- FR-51: User can open a floating chat panel from anywhere in the app without losing their current page context.
+- FR-52: User can converse with an AI assistant in natural language to perform accounting tasks.
+- FR-53: The assistant can create, list, and retrieve invoices and bills via chat.
+- FR-54: The assistant can record payments (full or partial) against invoices and bills.
+- FR-55: The assistant can void invoices, bills, and journal entries.
+- FR-56: The assistant can send invoices and approve bills.
+- FR-57: The assistant can create and update contacts (customers and suppliers).
+- FR-58: The assistant can create new chart-of-accounts entries.
+- FR-59: The assistant can generate financial reports (P&L, balance sheet, trial balance, AR/AP aging) and display them as visual cards inline in the chat.
+- FR-60: The assistant can search journal entries and retrieve account balances.
+- FR-61: When the user asks "how do I…", the assistant provides numbered step-by-step instructions for performing tasks manually in the app UI — without requiring a tool call.
+- FR-62: Responses stream token-by-token with a typing animation; the UI renders the full response when streaming completes.
+- FR-63: Raw tool call syntax is never shown to the user; only rendered visual result cards appear.
+- FR-64: Tool results are displayed as contextual visual cards (invoice = blue, bill = amber, journal = violet, payment = green, void = orange, reports = themed tables).
+- FR-65: Chat conversations are persisted; the user can view previous conversations in a sidebar and delete them.
+- FR-66: All tool executions are scoped to the authenticated user's organisation. Tool calls and results are stored in `ChatMessage` for audit purposes.
+
+### 3.11 Subscription & Billing
 
 - FR-46: **Free Tier** — limited to:
   - 1 user
