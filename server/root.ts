@@ -12,6 +12,11 @@ import { reportsRouter } from "@/server/routers/reports";
 import { subscriptionRouter } from "@/server/routers/subscription";
 import { dashboardRouter } from "@/server/routers/dashboard";
 import { chatRouter } from "@/server/routers/chat";
+// EasyFinance module
+import { budgetsRouter } from "@/server/routers/budgets";
+import { goalsRouter } from "@/server/routers/goals";
+import { recurringItemsRouter } from "@/server/routers/recurringItems";
+import { watchlistsRouter } from "@/server/routers/watchlists";
 
 export const appRouter = createTRPCRouter({
   auth: authRouter,
@@ -27,6 +32,11 @@ export const appRouter = createTRPCRouter({
   subscription: subscriptionRouter,
   dashboard: dashboardRouter,
   chat: chatRouter,
+  // EasyFinance module
+  budgets: budgetsRouter,
+  goals: goalsRouter,
+  recurringItems: recurringItemsRouter,
+  watchlists: watchlistsRouter,
 });
 
 export type AppRouter = typeof appRouter;

@@ -1,0 +1,169 @@
+"use client";
+
+import { useState } from "react";
+import { trpc } from "@/lib/trpc/client";
+import { PageHeader } from "@/app/(app)/_components/page-header";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Loader2, Plus, Trash2, Archive, TrendingUp } from "lucide-react";
+import { toast } from "sonner";
+
+const PERIODS = ["WEEKLY", "MONTHLY", "QUARTERLY", "YEARLY"] as const;
+
+function fmt(n: number) {
+  return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function UtilBar({ pct }: { pct: number }) {
+  const color = pct >= 100 ? "bg-red-500" : pct >= 80 ? "bg-amber-500" : "bg-emerald-500";
+  return (
+    <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+      <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+    </div>
+  );
+}
+
+export default function BudgetsPage() {
+  const utils = trpc.useUtils();
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ name: "", category: "", limitAmount: "", period: "MONTHLY" });
+
+  const { data: budgets = [], isLoading } = trpc.budgets.list.useQuery({ includeArchived: false });
+
+  const create = trpc.budgets.create.useMutation({
+    onSuccess: () => { utils.budgets.list.invalidate(); setOpen(false); setForm({ name: "", category: "", limitAmount: "", period: "MONTHLY" }); toast.success("Budget created"); },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const archive = trpc.budgets.archive.useMutation({
+    onSuccess: () => { utils.budgets.list.invalidate(); toast.success("Budget archived"); },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const del = trpc.budgets.delete.useMutation({
+    onSuccess: () => { utils.budgets.list.invalidate(); toast.success("Budget deleted"); },
+    onError: (e) => toast.error(e.message),
+  });
+
+  const totalLimit = budgets.reduce((s, b) => s + b.limitAmount, 0);
+  const totalSpent = budgets.reduce((s, b) => s + b.spent, 0);
+
+  return (
+    <div className="flex flex-col gap-6 p-6">
+      <PageHeader
+        title="Budgets"
+        description="Set spending limits by category and track utilization."
+        action={
+          <Button size="sm" onClick={() => setOpen(true)}>
+            <Plus className="h-4 w-4 mr-1" /> New Budget
+          </Button>
+        }
+      />
+
+      {/* Summary strip */}
+      {budgets.length > 0 && (
+        <div className="grid grid-cols-3 gap-4">
+          {[
+            { label: "Total budget", value: fmt(totalLimit), sub: "across all categories" },
+            { label: "Total spent", value: fmt(totalSpent), sub: "this period" },
+            { label: "Remaining", value: fmt(Math.max(0, totalLimit - totalSpent)), sub: "available to spend" },
+          ].map((card) => (
+            <div key={card.label} className="rounded-xl border bg-card p-4">
+              <p className="text-xs text-muted-foreground">{card.label}</p>
+              <p className="text-2xl font-semibold tabular-nums mt-1">{card.value}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">{card.sub}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Budget cards */}
+      {isLoading ? (
+        <div className="flex justify-center py-16"><Loader2 className="animate-spin h-6 w-6 text-muted-foreground" /></div>
+      ) : budgets.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 gap-3 text-center">
+          <TrendingUp className="h-10 w-10 text-muted-foreground/30" />
+          <p className="font-medium">No budgets yet</p>
+          <p className="text-sm text-muted-foreground">Create a budget to track spending by category.</p>
+          <Button size="sm" onClick={() => setOpen(true)}><Plus className="h-4 w-4 mr-1" /> New Budget</Button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {budgets.map((b) => (
+            <div key={b.id} className="rounded-xl border bg-card p-5 flex flex-col gap-3">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="font-semibold">{b.name}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{b.category} · {b.period.charAt(0) + b.period.slice(1).toLowerCase()}</p>
+                </div>
+                <div className="flex gap-1 shrink-0">
+                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => archive.mutate({ id: b.id })} title="Archive">
+                    <Archive className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => del.mutate({ id: b.id })} title="Delete">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+              <UtilBar pct={b.utilization} />
+              <div className="flex justify-between text-xs">
+                <span className="text-muted-foreground">Spent {fmt(b.spent)}</span>
+                <span className={b.utilization >= 100 ? "text-red-600 font-semibold" : b.utilization >= 80 ? "text-amber-600 font-medium" : "font-medium"}>
+                  {b.utilization}% of {fmt(b.limitAmount)}
+                </span>
+              </div>
+              {b.utilization >= 100 && (
+                <p className="text-xs text-red-600 font-medium">⚠ Over budget by {fmt(b.spent - b.limitAmount)}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Create dialog */}
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>New Budget</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label>Budget name</Label>
+              <Input placeholder="e.g. Marketing spend" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Category</Label>
+              <Input placeholder="e.g. Marketing & Advertising" value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} />
+              <p className="text-xs text-muted-foreground">Must match part of an expense account name to track spending automatically.</p>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label>Limit amount</Label>
+                <Input type="number" min="0" step="0.01" placeholder="0.00" value={form.limitAmount} onChange={(e) => setForm((f) => ({ ...f, limitAmount: e.target.value }))} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Period</Label>
+                <Select value={form.period} onValueChange={(v) => setForm((f) => ({ ...f, period: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {PERIODS.map((p) => <SelectItem key={p} value={p}>{p.charAt(0) + p.slice(1).toLowerCase()}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button
+              disabled={!form.name || !form.category || !form.limitAmount || create.isPending}
+              onClick={() => create.mutate({ name: form.name, category: form.category, limitAmount: parseFloat(form.limitAmount), period: form.period as "WEEKLY" | "MONTHLY" | "QUARTERLY" | "YEARLY" })}
+            >
+              {create.isPending && <Loader2 className="animate-spin h-4 w-4 mr-1" />} Create
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

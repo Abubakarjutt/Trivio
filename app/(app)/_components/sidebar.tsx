@@ -17,6 +17,10 @@ import {
   ChevronRight,
   Sparkles,
   Landmark,
+  TrendingUp,
+  Target,
+  RefreshCw,
+  Eye,
 } from "lucide-react";
 
 type NavItem = {
@@ -53,6 +57,15 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Contacts", href: "/contacts", icon: BookOpen, matchPrefix: true },
       { label: "Reports", href: "/reports", icon: BarChart3, matchPrefix: true },
       { label: "AI Extract", href: "/extract", icon: Sparkles, matchPrefix: true },
+    ],
+  },
+  {
+    label: "Personal Finance",
+    items: [
+      { label: "Budgets", href: "/budgets", icon: TrendingUp, matchPrefix: true },
+      { label: "Goals", href: "/goals", icon: Target, matchPrefix: true },
+      { label: "Recurring", href: "/recurring", icon: RefreshCw, matchPrefix: true },
+      { label: "Watchlists", href: "/watchlists", icon: Eye, matchPrefix: true },
     ],
   },
 ];

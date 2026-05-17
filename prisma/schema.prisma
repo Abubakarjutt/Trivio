@@ -121,6 +121,10 @@ model Organisation {
   auditLogs         AuditLog[]
   usageRecords      UsageRecord[]
   chatConversations ChatConversation[]
+  budgets           Budget[]
+  goals             Goal[]
+  recurringItems    RecurringItem[]
+  watchlists        Watchlist[]
 }
 
 model User {
@@ -480,6 +484,100 @@ model ChatMessage {
   createdAt      DateTime         @default(now())
 
   @@index([conversationId])
+}
+
+// ─── Personal Finance (EasyFinance module) ────────────────────────────────────
+
+enum BudgetPeriod {
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+enum GoalStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum RecurringFrequency {
+  DAILY
+  WEEKLY
+  FORTNIGHTLY
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+enum RecurringType {
+  INCOME
+  EXPENSE
+}
+
+model Budget {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  name           String
+  category       String
+  limitAmount    Decimal      @db.Decimal(19, 4)
+  period         BudgetPeriod @default(MONTHLY)
+  isArchived     Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organisationId])
+}
+
+model Goal {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  name           String
+  description    String?
+  targetAmount   Decimal      @db.Decimal(19, 4)
+  currentAmount  Decimal      @db.Decimal(19, 4) @default(0)
+  targetDate     DateTime?    @db.Date
+  status         GoalStatus   @default(ACTIVE)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organisationId])
+}
+
+model RecurringItem {
+  id             String             @id @default(cuid())
+  organisationId String
+  organisation   Organisation       @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  name           String
+  description    String?
+  amount         Decimal            @db.Decimal(19, 4)
+  type           RecurringType
+  frequency      RecurringFrequency @default(MONTHLY)
+  category       String?
+  nextDueDate    DateTime           @db.Date
+  isActive       Boolean            @default(true)
+  lastPaidAt     DateTime?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  @@index([organisationId])
+}
+
+model Watchlist {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  name           String
+  category       String
+  threshold      Decimal      @db.Decimal(19, 4)
+  period         BudgetPeriod @default(MONTHLY)
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organisationId])
 }
 
 // ─── Usage Tracking ───────────────────────────────────────────────────────────
