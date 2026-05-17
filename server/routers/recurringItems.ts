@@ -2,19 +2,11 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, orgProcedure } from "@/server/trpc";
 import { Prisma } from "@prisma/client";
-
-function nextDueDateAfter(current: Date, frequency: string): Date {
-  const d = new Date(current);
-  switch (frequency) {
-    case "DAILY":       d.setDate(d.getDate() + 1); break;
-    case "WEEKLY":      d.setDate(d.getDate() + 7); break;
-    case "FORTNIGHTLY": d.setDate(d.getDate() + 14); break;
-    case "MONTHLY":     d.setMonth(d.getMonth() + 1); break;
-    case "QUARTERLY":   d.setMonth(d.getMonth() + 3); break;
-    case "YEARLY":      d.setFullYear(d.getFullYear() + 1); break;
-  }
-  return d;
-}
+import {
+  nextDueDateAfter,
+  calcDueStatus,
+  calcRecurringSummary,
+} from "@/server/services/easyfinance.service";
 
 export const recurringItemsRouter = createTRPCRouter({
   list: orgProcedure
@@ -32,8 +24,7 @@ export const recurringItemsRouter = createTRPCRouter({
       return items.map((item) => ({
         ...item,
         amount: Number(item.amount),
-        isDue: new Date(item.nextDueDate) <= now,
-        daysUntilDue: Math.ceil((new Date(item.nextDueDate).getTime() - now.getTime()) / 86400000),
+        ...calcDueStatus(item.nextDueDate, now),
       }));
     }),
 
@@ -126,30 +117,10 @@ export const recurringItemsRouter = createTRPCRouter({
       where: { organisationId: ctx.organisationId, isActive: true },
     });
 
-    // Normalise all amounts to monthly equivalent
-    const MONTHLY_FACTOR: Record<string, number> = {
-      DAILY: 30,
-      WEEKLY: 4.33,
-      FORTNIGHTLY: 2.17,
-      MONTHLY: 1,
-      QUARTERLY: 1 / 3,
-      YEARLY: 1 / 12,
-    };
+    const { monthlyIncome, monthlyExpense, monthlyNet } = calcRecurringSummary(
+      items.map((i) => ({ amount: Number(i.amount), frequency: i.frequency, type: i.type }))
+    );
 
-    let monthlyIncome = 0;
-    let monthlyExpense = 0;
-
-    for (const item of items) {
-      const monthly = Number(item.amount) * (MONTHLY_FACTOR[item.frequency] ?? 1);
-      if (item.type === "INCOME") monthlyIncome += monthly;
-      else monthlyExpense += monthly;
-    }
-
-    return {
-      monthlyIncome: Math.round(monthlyIncome * 100) / 100,
-      monthlyExpense: Math.round(monthlyExpense * 100) / 100,
-      monthlyNet: Math.round((monthlyIncome - monthlyExpense) * 100) / 100,
-      totalItems: items.length,
-    };
+    return { monthlyIncome, monthlyExpense, monthlyNet, totalItems: items.length };
   }),
 });

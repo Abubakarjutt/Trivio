@@ -2,13 +2,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, orgProcedure } from "@/server/trpc";
 import { Prisma } from "@prisma/client";
-
-const PERIOD_DAYS: Record<string, number> = {
-  WEEKLY: 7,
-  MONTHLY: 30,
-  QUARTERLY: 91,
-  YEARLY: 365,
-};
+import { periodFrom, getSpentForCategory, calcBudgetUtilization } from "@/server/services/easyfinance.service";
 
 export const budgetsRouter = createTRPCRouter({
   list: orgProcedure
@@ -26,34 +20,15 @@ export const budgetsRouter = createTRPCRouter({
       const now = new Date();
       return Promise.all(
         budgets.map(async (budget) => {
-          const days = PERIOD_DAYS[budget.period] ?? 30;
-          const from = new Date(now.getTime() - days * 86400000);
-
-          // Sum expense journal lines for this category (account name contains category)
-          const result = await ctx.db.journalLine.aggregate({
-            where: {
-              account: {
-                organisationId: ctx.organisationId,
-                type: "EXPENSE",
-                name: { contains: budget.category, mode: "insensitive" },
-              },
-              journalEntry: {
-                organisationId: ctx.organisationId,
-                isVoid: false,
-                date: { gte: from, lte: now },
-              },
-            },
-            _sum: { debit: true },
-          });
-
-          const spent = Number(result._sum.debit ?? 0);
+          const from = periodFrom(budget.period, now);
+          const spent = await getSpentForCategory(ctx.db, ctx.organisationId, budget.category, from, now);
           const limit = Number(budget.limitAmount);
           return {
             ...budget,
-            limitAmount: Number(budget.limitAmount),
+            limitAmount: limit,
             spent,
             remaining: Math.max(0, limit - spent),
-            utilization: limit > 0 ? Math.min(100, Math.round((spent / limit) * 100)) : 0,
+            utilization: calcBudgetUtilization(spent, limit),
           };
         })
       );

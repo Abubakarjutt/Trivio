@@ -2,6 +2,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, orgProcedure } from "@/server/trpc";
 import { Prisma } from "@prisma/client";
+import { calcGoalProgress, isGoalComplete } from "@/server/services/easyfinance.service";
 
 export const goalsRouter = createTRPCRouter({
   list: orgProcedure
@@ -19,10 +20,7 @@ export const goalsRouter = createTRPCRouter({
         ...g,
         targetAmount: Number(g.targetAmount),
         currentAmount: Number(g.currentAmount),
-        progress:
-          Number(g.targetAmount) > 0
-            ? Math.min(100, Math.round((Number(g.currentAmount) / Number(g.targetAmount)) * 100))
-            : 0,
+        progress: calcGoalProgress(Number(g.currentAmount), Number(g.targetAmount)),
         remaining: Math.max(0, Number(g.targetAmount) - Number(g.currentAmount)),
       }));
     }),
@@ -87,7 +85,7 @@ export const goalsRouter = createTRPCRouter({
       if (goal.status !== "ACTIVE") throw new TRPCError({ code: "BAD_REQUEST", message: "Goal is not active" });
 
       const newAmount = Number(goal.currentAmount) + input.amount;
-      const isComplete = newAmount >= Number(goal.targetAmount) - 0.001;
+      const isComplete = isGoalComplete(newAmount, Number(goal.targetAmount));
 
       return ctx.db.goal.update({
         where: { id: input.id },

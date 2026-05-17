@@ -2,13 +2,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, orgProcedure } from "@/server/trpc";
 import { Prisma } from "@prisma/client";
-
-const PERIOD_DAYS: Record<string, number> = {
-  WEEKLY: 7,
-  MONTHLY: 30,
-  QUARTERLY: 91,
-  YEARLY: 365,
-};
+import { periodFrom, getSpentForCategory, calcWatchlistStatus } from "@/server/services/easyfinance.service";
 
 export const watchlistsRouter = createTRPCRouter({
   list: orgProcedure.query(async ({ ctx }) => {
@@ -20,36 +14,14 @@ export const watchlistsRouter = createTRPCRouter({
     const now = new Date();
     return Promise.all(
       watchlists.map(async (wl) => {
-        const days = PERIOD_DAYS[wl.period] ?? 30;
-        const from = new Date(now.getTime() - days * 86400000);
-
-        // Sum expense journal lines matching this category
-        const result = await ctx.db.journalLine.aggregate({
-          where: {
-            account: {
-              organisationId: ctx.organisationId,
-              type: "EXPENSE",
-              name: { contains: wl.category, mode: "insensitive" },
-            },
-            journalEntry: {
-              organisationId: ctx.organisationId,
-              isVoid: false,
-              date: { gte: from, lte: now },
-            },
-          },
-          _sum: { debit: true },
-        });
-
-        const spent = Number(result._sum.debit ?? 0);
+        const from = periodFrom(wl.period, now);
+        const spent = await getSpentForCategory(ctx.db, ctx.organisationId, wl.category, from, now);
         const threshold = Number(wl.threshold);
-        const isBreached = spent > threshold;
-
         return {
           ...wl,
-          threshold: Number(wl.threshold),
+          threshold,
           spent,
-          isBreached,
-          percentUsed: threshold > 0 ? Math.round((spent / threshold) * 100) : 0,
+          ...calcWatchlistStatus(spent, threshold),
         };
       })
     );
