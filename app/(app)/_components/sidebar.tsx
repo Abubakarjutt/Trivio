@@ -21,6 +21,11 @@ import {
   Target,
   RefreshCw,
   Eye,
+  Users2,
+  UserPlus,
+  Building2,
+  Handshake,
+  Calendar,
 } from "lucide-react";
 
 type NavItem = {
@@ -66,6 +71,16 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Goals", href: "/goals", icon: Target, matchPrefix: true },
       { label: "Recurring", href: "/recurring", icon: RefreshCw, matchPrefix: true },
       { label: "Watchlists", href: "/watchlists", icon: Eye, matchPrefix: true },
+    ],
+  },
+  {
+    label: "CRM",
+    items: [
+      { label: "CRM Dashboard", href: "/crm", icon: Users2, matchPrefix: false },
+      { label: "Leads", href: "/crm/leads", icon: UserPlus, matchPrefix: true },
+      { label: "Companies", href: "/crm/companies", icon: Building2, matchPrefix: true },
+      { label: "Deals", href: "/crm/deals", icon: Handshake, matchPrefix: true },
+      { label: "Activities", href: "/crm/activities", icon: Calendar, matchPrefix: true },
     ],
   },
 ];

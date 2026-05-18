@@ -17,6 +17,13 @@ import { budgetsRouter } from "@/server/routers/budgets";
 import { goalsRouter } from "@/server/routers/goals";
 import { recurringItemsRouter } from "@/server/routers/recurringItems";
 import { watchlistsRouter } from "@/server/routers/watchlists";
+// CRM module
+import { crmLeadsRouter } from "@/server/routers/crmLeads";
+import { crmCompaniesRouter } from "@/server/routers/crmCompanies";
+import { crmDealsRouter } from "@/server/routers/crmDeals";
+import { crmActivitiesRouter } from "@/server/routers/crmActivities";
+import { crmPipelinesRouter } from "@/server/routers/crmPipelines";
+import { crmReportsRouter } from "@/server/routers/crmReports";
 
 export const appRouter = createTRPCRouter({
   auth: authRouter,
@@ -37,6 +44,13 @@ export const appRouter = createTRPCRouter({
   goals: goalsRouter,
   recurringItems: recurringItemsRouter,
   watchlists: watchlistsRouter,
+  // CRM module
+  crmLeads: crmLeadsRouter,
+  crmCompanies: crmCompaniesRouter,
+  crmDeals: crmDealsRouter,
+  crmActivities: crmActivitiesRouter,
+  crmPipelines: crmPipelinesRouter,
+  crmReports: crmReportsRouter,
 });
 
 export type AppRouter = typeof appRouter;

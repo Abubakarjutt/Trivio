@@ -125,6 +125,12 @@ model Organisation {
   goals             Goal[]
   recurringItems    RecurringItem[]
   watchlists        Watchlist[]
+  // CRM
+  crmLeads          CrmLead[]
+  crmCompanies      CrmCompany[]
+  crmPipelines      CrmPipeline[]
+  crmDeals          CrmDeal[]
+  crmActivities     CrmActivity[]
 }
 
 model User {
@@ -145,6 +151,9 @@ model User {
   sessions          Session[]
   auditLogs         AuditLog[]
   chatConversations ChatConversation[]
+  // CRM
+  assignedLeads     CrmLead[]          @relation("CrmLeadAssignedTo")
+  crmActivities     CrmActivity[]      @relation("CrmActivityCreatedBy")
 
   @@index([organisationId])
 }
@@ -291,6 +300,12 @@ model Contact {
   invoices Invoice[]
   bills    Bill[]
 
+  // CRM back-relations
+  crmLeads      CrmLead[]     @relation("CrmLeadContact")
+  crmCompany    CrmCompany?   @relation("CrmCompanyContact")
+  crmDeals      CrmDeal[]     @relation("CrmDealContact")
+  crmActivities CrmActivity[] @relation("CrmActivityContact")
+
   @@index([organisationId])
 }
 
@@ -317,6 +332,7 @@ model Invoice {
 
   lines       InvoiceLine[]
   attachments Attachment[]
+  crmDeal     CrmDeal?      @relation("CrmDealInvoice")
 
   @@unique([organisationId, number])
   @@index([organisationId, status])
@@ -578,6 +594,173 @@ model Watchlist {
   updatedAt      DateTime     @updatedAt
 
   @@index([organisationId])
+}
+
+// ─── CRM Module ───────────────────────────────────────────────────────────────
+
+enum CrmLeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  UNQUALIFIED
+  CONVERTED
+}
+
+enum CrmLeadSource {
+  WEBSITE
+  REFERRAL
+  SOCIAL_MEDIA
+  COLD_OUTREACH
+  EVENT
+  ADVERTISING
+  OTHER
+}
+
+enum CrmCompanySize {
+  SOLO
+  SMALL
+  MEDIUM
+  LARGE
+  ENTERPRISE
+}
+
+enum CrmActivityType {
+  CALL
+  EMAIL
+  MEETING
+  NOTE
+  TASK
+}
+
+model CrmLead {
+  id                 String        @id @default(cuid())
+  organisationId     String
+  organisation       Organisation  @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  firstName          String
+  lastName           String
+  email              String?
+  phone              String?
+  companyName        String?
+  jobTitle           String?
+  estimatedValue     Decimal?      @db.Decimal(19, 4)
+  source             CrmLeadSource @default(OTHER)
+  notes              String?
+  status             CrmLeadStatus @default(NEW)
+  assignedToId       String?
+  assignedTo         User?         @relation("CrmLeadAssignedTo", fields: [assignedToId], references: [id])
+  tags               String[]
+  convertedAt        DateTime?
+  convertedContactId String?
+  convertedContact   Contact?      @relation("CrmLeadContact", fields: [convertedContactId], references: [id])
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  @@index([organisationId, status])
+  @@index([organisationId, source])
+}
+
+model CrmCompany {
+  id              String         @id @default(cuid())
+  organisationId  String
+  organisation    Organisation   @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  name            String
+  industry        String?
+  website         String?
+  phone           String?
+  address         String?
+  size            CrmCompanySize @default(SMALL)
+  tags            String[]
+  notes           String?
+  linkedContactId String?        @unique
+  linkedContact   Contact?       @relation("CrmCompanyContact", fields: [linkedContactId], references: [id])
+  deals           CrmDeal[]
+  activities      CrmActivity[]
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@index([organisationId])
+}
+
+model CrmPipeline {
+  id             String             @id @default(cuid())
+  organisationId String
+  organisation   Organisation       @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  name           String
+  isDefault      Boolean            @default(false)
+  stages         CrmPipelineStage[]
+  deals          CrmDeal[]
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  @@index([organisationId])
+}
+
+model CrmPipelineStage {
+  id          String      @id @default(cuid())
+  pipelineId  String
+  pipeline    CrmPipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  name        String
+  order       Int
+  probability Int         @default(50)
+  deals       CrmDeal[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([pipelineId, order])
+}
+
+model CrmDeal {
+  id                String           @id @default(cuid())
+  organisationId    String
+  organisation      Organisation     @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  name              String
+  value             Decimal          @db.Decimal(19, 4) @default(0)
+  contactId         String
+  contact           Contact          @relation("CrmDealContact", fields: [contactId], references: [id])
+  crmCompanyId      String?
+  crmCompany        CrmCompany?      @relation(fields: [crmCompanyId], references: [id])
+  pipelineId        String
+  pipeline          CrmPipeline      @relation(fields: [pipelineId], references: [id])
+  stageId           String
+  stage             CrmPipelineStage @relation(fields: [stageId], references: [id])
+  expectedCloseDate DateTime?        @db.Date
+  probability       Int              @default(50)
+  source            String?
+  wonLostReason     String?
+  closedAt          DateTime?
+  invoiceId         String?          @unique
+  invoice           Invoice?         @relation("CrmDealInvoice", fields: [invoiceId], references: [id])
+  activities        CrmActivity[]
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  @@index([organisationId, stageId])
+  @@index([organisationId, pipelineId])
+}
+
+model CrmActivity {
+  id             String          @id @default(cuid())
+  organisationId String
+  organisation   Organisation    @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  type           CrmActivityType
+  subject        String
+  notes          String?
+  dueDate        DateTime?
+  completedAt    DateTime?
+  contactId      String?
+  contact        Contact?        @relation("CrmActivityContact", fields: [contactId], references: [id])
+  dealId         String?
+  deal           CrmDeal?        @relation(fields: [dealId], references: [id])
+  crmCompanyId   String?
+  crmCompany     CrmCompany?     @relation(fields: [crmCompanyId], references: [id])
+  createdById    String
+  createdBy      User            @relation("CrmActivityCreatedBy", fields: [createdById], references: [id])
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([organisationId, contactId])
+  @@index([organisationId, dealId])
+  @@index([organisationId, dueDate])
 }
 
 // ─── Usage Tracking ───────────────────────────────────────────────────────────
