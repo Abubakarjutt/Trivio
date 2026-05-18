@@ -404,7 +404,6 @@ function MatchPickerDialog({
 // ── Create Journal Dialog ─────────────────────────────────────────────────────
 
 function CreateJournalDialog({
-  bankAccountId,
   statementLineId,
   statementAmount,
   open,

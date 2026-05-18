@@ -45,7 +45,6 @@ export default function WatchlistsPage() {
   });
 
   const breached = watchlists.filter((w) => w.isBreached);
-  const ok = watchlists.filter((w) => !w.isBreached);
 
   return (
     <div className="flex flex-col gap-6 p-6">

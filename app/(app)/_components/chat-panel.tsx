@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { trpc } from "@/lib/trpc/client";
 import { useToast } from "@/lib/hooks/use-toast";
@@ -122,7 +123,7 @@ function ToolResultCard({ result }: { result: ToolResult }) {
 
   if (result.tool === "create_invoice") {
     return (
-      <a href={`/invoices/${d?.id}`} className="group block rounded-xl border border-blue-200 bg-blue-50 overflow-hidden text-xs transition-colors hover:bg-blue-100">
+      <Link href={`/invoices/${d?.id}`} className="group block rounded-xl border border-blue-200 bg-blue-50 overflow-hidden text-xs transition-colors hover:bg-blue-100">
         <div className="flex items-center justify-between px-3.5 py-2.5 bg-blue-100/60 border-b border-blue-200">
           <div className="flex items-center gap-1.5 font-semibold text-blue-800">
             <FileText className="h-3.5 w-3.5" />
@@ -140,7 +141,7 @@ function ToolResultCard({ result }: { result: ToolResult }) {
           <StatusBadge status={d?.status as string} />
           <span className="font-bold tabular-nums text-blue-900">{fmt(d?.total)}</span>
         </div>
-      </a>
+      </Link>
     );
   }
 
@@ -148,7 +149,7 @@ function ToolResultCard({ result }: { result: ToolResult }) {
 
   if (result.tool === "create_bill") {
     return (
-      <a href={`/bills/${d?.id}`} className="group block rounded-xl border border-amber-200 bg-amber-50 overflow-hidden text-xs transition-colors hover:bg-amber-100">
+      <Link href={`/bills/${d?.id}`} className="group block rounded-xl border border-amber-200 bg-amber-50 overflow-hidden text-xs transition-colors hover:bg-amber-100">
         <div className="flex items-center justify-between px-3.5 py-2.5 bg-amber-100/60 border-b border-amber-200">
           <div className="flex items-center gap-1.5 font-semibold text-amber-800">
             <Receipt className="h-3.5 w-3.5" />
@@ -166,7 +167,7 @@ function ToolResultCard({ result }: { result: ToolResult }) {
           <StatusBadge status={d?.status as string} />
           <span className="font-bold tabular-nums text-amber-900">{fmt(d?.total)}</span>
         </div>
-      </a>
+      </Link>
     );
   }
 
@@ -207,7 +208,7 @@ function ToolResultCard({ result }: { result: ToolResult }) {
     const isPaid = d?.newStatus === "PAID";
 
     return (
-      <a href={href} className="group block rounded-xl border border-green-200 bg-green-50 overflow-hidden text-xs transition-colors hover:bg-green-100">
+      <Link href={href} className="group block rounded-xl border border-green-200 bg-green-50 overflow-hidden text-xs transition-colors hover:bg-green-100">
         <div className="flex items-center justify-between px-3.5 py-2.5 bg-green-100/60 border-b border-green-200">
           <div className="flex items-center gap-1.5 font-semibold text-green-800">
             <CheckCircle2 className="h-3.5 w-3.5" />
@@ -228,7 +229,7 @@ function ToolResultCard({ result }: { result: ToolResult }) {
             </span>
           )}
         </div>
-      </a>
+      </Link>
     );
   }
 
@@ -255,27 +256,27 @@ function ToolResultCard({ result }: { result: ToolResult }) {
 
   if (result.tool === "send_invoice") {
     return (
-      <a href="/invoices" className="group flex items-center gap-2.5 rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-2.5 text-xs transition-colors hover:bg-blue-100">
+      <Link href="/invoices" className="group flex items-center gap-2.5 rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-2.5 text-xs transition-colors hover:bg-blue-100">
         <CheckCircle2 className="h-3.5 w-3.5 text-blue-500 shrink-0" />
         <span className="flex-1 text-blue-800">
           Invoice <span className="font-semibold">{d?.number as string}</span> sent
         </span>
         <StatusBadge status="SENT" />
         <ExternalLink className="h-3 w-3 text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity" />
-      </a>
+      </Link>
     );
   }
 
   if (result.tool === "approve_bill") {
     return (
-      <a href="/bills" className="group flex items-center gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs transition-colors hover:bg-amber-100">
+      <Link href="/bills" className="group flex items-center gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs transition-colors hover:bg-amber-100">
         <CheckCircle2 className="h-3.5 w-3.5 text-amber-500 shrink-0" />
         <span className="flex-1 text-amber-800">
           Bill <span className="font-semibold">{d?.number as string}</span> approved
         </span>
         <StatusBadge status="SENT" />
         <ExternalLink className="h-3 w-3 text-amber-400 opacity-0 group-hover:opacity-100 transition-opacity" />
-      </a>
+      </Link>
     );
   }
 
@@ -285,7 +286,7 @@ function ToolResultCard({ result }: { result: ToolResult }) {
     const action = result.tool === "create_contact" ? "Contact created" : "Contact updated";
     const typeColor = CONTACT_TYPE_COLORS[d?.type as string] ?? "bg-slate-100 text-slate-600";
     return (
-      <a href="/contacts" className="group flex items-center gap-2.5 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs transition-colors hover:bg-slate-100">
+      <Link href="/contacts" className="group flex items-center gap-2.5 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs transition-colors hover:bg-slate-100">
         <UserPlus className="h-3.5 w-3.5 text-slate-400 shrink-0" />
         <div className="flex-1 min-w-0">
           <p className="font-semibold text-slate-900 truncate">{d?.name as string}</p>
@@ -295,7 +296,7 @@ function ToolResultCard({ result }: { result: ToolResult }) {
           {(d?.type as string)?.toLowerCase()}
         </span>
         <ExternalLink className="h-3 w-3 text-slate-400 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
-      </a>
+      </Link>
     );
   }
 
@@ -304,7 +305,7 @@ function ToolResultCard({ result }: { result: ToolResult }) {
   if (result.tool === "create_account") {
     const typeColor = ACCT_TYPE_COLORS[d?.type as string] ?? "bg-slate-100 text-slate-700";
     return (
-      <a href="/accounts" className="group flex items-center gap-2.5 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs transition-colors hover:bg-slate-100">
+      <Link href="/accounts" className="group flex items-center gap-2.5 rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs transition-colors hover:bg-slate-100">
         <BookOpen className="h-3.5 w-3.5 text-slate-400 shrink-0" />
         <div className="flex-1 min-w-0">
           <p className="font-semibold text-slate-900 truncate">
@@ -316,7 +317,7 @@ function ToolResultCard({ result }: { result: ToolResult }) {
           {(d?.type as string)?.toLowerCase()}
         </span>
         <ExternalLink className="h-3 w-3 text-slate-400 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
-      </a>
+      </Link>
     );
   }
 
@@ -332,11 +333,11 @@ function ToolResultCard({ result }: { result: ToolResult }) {
             Invoices
             <span className="font-normal text-blue-500 text-[10px]">({items.length})</span>
           </div>
-          <a href="/invoices" className="text-blue-400 hover:text-blue-600 transition-colors"><ExternalLink className="h-3 w-3" /></a>
+          <Link href="/invoices" className="text-blue-400 hover:text-blue-600 transition-colors"><ExternalLink className="h-3 w-3" /></Link>
         </div>
         <div className="divide-y divide-slate-100 max-h-56 overflow-y-auto">
           {items.map((inv) => (
-            <a key={inv.id} href={`/invoices/${inv.id}`} className="flex items-center gap-3 px-3.5 py-2.5 hover:bg-blue-50 transition-colors">
+            <Link key={inv.id} href={`/invoices/${inv.id}`} className="flex items-center gap-3 px-3.5 py-2.5 hover:bg-blue-50 transition-colors">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5 mb-0.5">
                   <span className="font-semibold text-slate-800">{inv.number}</span>
@@ -347,7 +348,7 @@ function ToolResultCard({ result }: { result: ToolResult }) {
               <span className="shrink-0 tabular-nums font-semibold text-slate-800">
                 {fmt(inv.outstanding)}
               </span>
-            </a>
+            </Link>
           ))}
           {items.length === 0 && <p className="py-6 text-center text-slate-400">No invoices found</p>}
         </div>
@@ -365,11 +366,11 @@ function ToolResultCard({ result }: { result: ToolResult }) {
             Bills
             <span className="font-normal text-amber-500 text-[10px]">({items.length})</span>
           </div>
-          <a href="/bills" className="text-amber-400 hover:text-amber-600 transition-colors"><ExternalLink className="h-3 w-3" /></a>
+          <Link href="/bills" className="text-amber-400 hover:text-amber-600 transition-colors"><ExternalLink className="h-3 w-3" /></Link>
         </div>
         <div className="divide-y divide-slate-100 max-h-56 overflow-y-auto">
           {items.map((b) => (
-            <a key={b.id} href={`/bills/${b.id}`} className="flex items-center gap-3 px-3.5 py-2.5 hover:bg-amber-50 transition-colors">
+            <Link key={b.id} href={`/bills/${b.id}`} className="flex items-center gap-3 px-3.5 py-2.5 hover:bg-amber-50 transition-colors">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5 mb-0.5">
                   <span className="font-semibold text-slate-800">{b.number ?? "—"}</span>
@@ -380,7 +381,7 @@ function ToolResultCard({ result }: { result: ToolResult }) {
               <span className="shrink-0 tabular-nums font-semibold text-slate-800">
                 {fmt(b.outstanding)}
               </span>
-            </a>
+            </Link>
           ))}
           {items.length === 0 && <p className="py-6 text-center text-slate-400">No bills found</p>}
         </div>
@@ -402,7 +403,7 @@ function ToolResultCard({ result }: { result: ToolResult }) {
     const isPartial = outstanding > 0 && outstanding < total;
 
     return (
-      <a href={href} className="group block rounded-xl border border-slate-200 bg-white overflow-hidden text-xs transition-colors hover:bg-slate-50">
+      <Link href={href} className="group block rounded-xl border border-slate-200 bg-white overflow-hidden text-xs transition-colors hover:bg-slate-50">
         <div className="flex items-center justify-between px-3.5 py-2.5 bg-slate-50 border-b border-slate-200">
           <div className="flex items-center gap-1.5 font-semibold text-slate-700">
             <Icon className="h-3.5 w-3.5" />
@@ -438,7 +439,7 @@ function ToolResultCard({ result }: { result: ToolResult }) {
             )}
           </div>
         </div>
-      </a>
+      </Link>
     );
   }
 
@@ -454,7 +455,7 @@ function ToolResultCard({ result }: { result: ToolResult }) {
             Contacts
             <span className="font-normal text-slate-400 text-[10px]">({items.length})</span>
           </div>
-          <a href="/contacts" className="text-slate-400 hover:text-slate-600 transition-colors"><ExternalLink className="h-3 w-3" /></a>
+          <Link href="/contacts" className="text-slate-400 hover:text-slate-600 transition-colors"><ExternalLink className="h-3 w-3" /></Link>
         </div>
         <div className="divide-y divide-slate-100 max-h-56 overflow-y-auto">
           {items.map((c) => (
@@ -486,7 +487,7 @@ function ToolResultCard({ result }: { result: ToolResult }) {
             Chart of Accounts
             <span className="font-normal text-slate-400 text-[10px]">({items.length})</span>
           </div>
-          <a href="/accounts" className="text-slate-400 hover:text-slate-600 transition-colors"><ExternalLink className="h-3 w-3" /></a>
+          <Link href="/accounts" className="text-slate-400 hover:text-slate-600 transition-colors"><ExternalLink className="h-3 w-3" /></Link>
         </div>
         <div className="divide-y divide-slate-100 max-h-56 overflow-y-auto">
           {items.map((a) => (
@@ -544,7 +545,7 @@ function ToolResultCard({ result }: { result: ToolResult }) {
             Transactions
             <span className="font-normal text-slate-400 text-[10px]">({items.length})</span>
           </div>
-          <a href="/transactions" className="text-slate-400 hover:text-slate-600 transition-colors"><ExternalLink className="h-3 w-3" /></a>
+          <Link href="/transactions" className="text-slate-400 hover:text-slate-600 transition-colors"><ExternalLink className="h-3 w-3" /></Link>
         </div>
         <div className="divide-y divide-slate-100 max-h-64 overflow-y-auto">
           {items.map((e) => (
