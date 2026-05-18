@@ -1,8 +1,8 @@
 # AutoAccounts — Product Requirements Document
 
-**Version:** 0.3.0  
+**Version:** 0.4.0  
 **Status:** Active  
-**Last Updated:** 2026-05-17
+**Last Updated:** 2026-05-18
 
 ---
 
@@ -187,7 +187,65 @@ The Personal Finance module is a self-contained addition to AutoAccounts, merged
 - FR-91: User can pause or resume a watchlist (paused watchlists are excluded from the active list and breach detection).
 - FR-92: User can delete a watchlist permanently.
 
-### 3.12 Subscription & Billing
+### 3.12 CRM Module
+
+The CRM module enables AutoAccounts users to manage the full client lifecycle — from first lead through qualified deal, closed sale, and ongoing relationship — directly alongside their accounting data. Deals closed as "Won" can be converted to invoices in one click.
+
+#### 3.12.1 Leads
+
+- FR-93: User can capture leads with: first name, last name, email, phone, company name, job title, estimated value, lead source (website, referral, social media, cold outreach, event, advertising, other), and freeform notes.
+- FR-94: Leads have a status workflow: New → Contacted → Qualified → Unqualified → Converted.
+- FR-95: User can convert a Qualified lead into a Contact + CRM Company + Deal in a single action; the original lead is marked Converted with a timestamp.
+- FR-96: User can assign leads to team members (Pro tier).
+- FR-97: User can tag leads for segmentation (e.g. "high-value", "warm", "enterprise").
+- FR-98: Leads list supports filtering by status, source, assigned user, and tag.
+
+#### 3.12.2 CRM Companies
+
+- FR-99: User can create CRM company records with: name, industry, website, phone, address, company size (solo / small / medium / large / enterprise), tags, and notes.
+- FR-100: A CRM company can be linked to an existing Accounting Contact (supplier/customer) to unify the financial and relationship views.
+- FR-101: CRM company record shows all associated contacts, deals, and activities in one place.
+
+#### 3.12.3 Contacts (CRM view)
+
+- FR-102: Existing accounting Contacts are extended with CRM fields: job title, phone, lead source, tags, and LinkedIn URL.
+- FR-103: Each contact has a full timeline showing all activities (calls, emails, meetings, notes), linked deals, and linked invoices/bills.
+- FR-104: User can manually create CRM-only contacts not tied to accounting.
+
+#### 3.12.4 Deals & Pipeline
+
+- FR-105: User can create deals with: name, value, associated contact, associated CRM company, pipeline, stage, expected close date, probability (0–100%), source, and notes.
+- FR-106: Deals progress through customisable pipeline stages (e.g. Lead → Proposal → Negotiation → Closed Won / Closed Lost).
+- FR-107: User can create multiple pipelines for different products, services, or sales processes.
+- FR-108: Pipeline view is a Kanban board with drag-and-drop stage advancement; list view also available.
+- FR-109: Deal probability is auto-suggested based on stage but can be manually overridden.
+- FR-110: When a deal is marked "Won", user can convert it to an Invoice with one click — contact, value, and date pre-filled from the deal.
+- FR-111: Revenue forecast widget shows weighted pipeline value (deal value × probability) summed by month.
+- FR-112: Won/Lost reason can be recorded when closing a deal.
+
+#### 3.12.5 Activities
+
+- FR-113: User can log activities against any contact or deal: Call, Email, Meeting, Note, Task.
+- FR-114: Activities have: type, subject, notes/outcome, due date/time, completed timestamp, and linked contact/deal.
+- FR-115: Overdue and upcoming activities surface on the CRM dashboard as an action list.
+- FR-116: User can set follow-up reminders on any contact; reminders appear in the activity feed when due.
+- FR-117: All activity history for a contact or deal is shown in a chronological timeline.
+
+#### 3.12.6 CRM Dashboard
+
+- FR-118: CRM dashboard shows: total open deals value, deals by stage (funnel chart), win rate (last 30/90 days), average deal close time, activities due today, and top deals by value.
+- FR-119: Revenue forecast chart shows weighted pipeline by month for the next 3 months.
+- FR-120: Lead source breakdown chart shows which channels produce the most leads and highest deal values.
+
+#### 3.12.7 Reporting
+
+- FR-121: **Pipeline Report** — all open deals by stage with total values and weighted forecast.
+- FR-122: **Won/Lost Analysis** — deals closed in a period, win rate, average deal size, loss reasons.
+- FR-123: **Activity Report** — calls, meetings, emails logged per user per period.
+- FR-124: **Lead Source Report** — leads and deals by source with conversion rates.
+- FR-125: **Sales Forecast** — projected revenue by month based on weighted deal values.
+
+### 3.14 Subscription & Billing
 
 - FR-46: **Free Tier** — limited to:
   - 1 user

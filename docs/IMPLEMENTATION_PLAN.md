@@ -1,8 +1,8 @@
 # AutoAccounts — Implementation Plan
 
-**Version:** 0.3.0  
+**Version:** 0.4.0  
 **Status:** Active  
-**Last Updated:** 2026-05-17  
+**Last Updated:** 2026-05-18  
 **Methodology:** Agile sprints (~2 weeks each), spec-driven, vertical slices
 
 ---
@@ -300,6 +300,109 @@
 
 ---
 
+## Phase 12 — CRM Module (Sprint 12)
+
+**Goal:** Full client lifecycle management — leads, companies, contacts, deals/pipeline, activities, CRM dashboard, and reporting — integrated with existing accounting data (contacts, invoices).
+
+**Requirements covered:** FR-93 to FR-125
+
+### Tasks
+
+#### P12-A: Database Schema
+
+- [ ] **P12-01** Prisma schema — new models:
+  - `CrmLead` (id, organisationId, firstName, lastName, email, phone, companyName, jobTitle, estimatedValue NUMERIC(19,4), source enum, notes, status enum, assignedToId, convertedAt, convertedContactId, tags String[], createdAt, updatedAt)
+  - `CrmCompany` (id, organisationId, name, industry, website, phone, address, size enum, tags String[], notes, linkedContactId?, createdAt, updatedAt)
+  - `CrmPipeline` (id, organisationId, name, isDefault bool, createdAt, updatedAt)
+  - `CrmPipelineStage` (id, pipelineId, name, order int, probability int, createdAt, updatedAt)
+  - `CrmDeal` (id, organisationId, name, value NUMERIC(19,4), contactId, crmCompanyId?, pipelineId, stageId, expectedCloseDate?, probability int, source?, wonLostReason?, closedAt?, invoiceId?, createdAt, updatedAt)
+  - `CrmActivity` (id, organisationId, type enum, subject, notes?, dueDate?, completedAt?, contactId?, dealId?, createdById, createdAt, updatedAt)
+- [ ] **P12-02** New enums: `CrmLeadStatus` (NEW, CONTACTED, QUALIFIED, UNQUALIFIED, CONVERTED), `CrmLeadSource` (WEBSITE, REFERRAL, SOCIAL_MEDIA, COLD_OUTREACH, EVENT, ADVERTISING, OTHER), `CrmCompanySize` (SOLO, SMALL, MEDIUM, LARGE, ENTERPRISE), `CrmActivityType` (CALL, EMAIL, MEETING, NOTE, TASK).
+- [ ] **P12-03** Extend existing `Contact` model with CRM fields: `jobTitle String?`, `phone String?`, `linkedinUrl String?`, `leadSource String?`, `tags String[]`.
+- [ ] **P12-04** Migration: `20260518000000_add_crm_module` — DDL for all 6 tables, enums, indexes on organisationId + status + stageId, FK constraints.
+- [ ] **P12-05** Run `npx prisma generate` to regenerate Prisma client.
+
+#### P12-B: Service Layer
+
+- [ ] **P12-06** `CrmService` (`server/services/crm.service.ts`) — pure business logic:
+  - `convertLeadToContact(db, leadId, orgId)` — atomic transaction: create `Contact` + `CrmCompany` + `CrmDeal`, mark lead `CONVERTED` with `convertedAt` timestamp.
+  - `convertDealToInvoice(db, dealId, orgId)` — creates `Invoice` from deal (contact, value, today as due + 30 days), links `deal.invoiceId`.
+  - `calcWeightedForecast(deals)` — groups open deals by `expectedCloseDate` month, computes `sum(value × probability/100)` per month.
+  - `calcWinRate(deals, fromDate)` — `wonCount / (wonCount + lostCount)` for deals closed in period.
+  - `calcAvgCloseTime(deals)` — average days from `createdAt` to `closedAt` for won deals.
+  - `suggestProbability(stageOrder, totalStages)` — linear interpolation: `Math.round((stageOrder / totalStages) × 100)`.
+- [ ] **P12-07** Unit tests for all `CrmService` pure functions (`tests/unit/crm.service.test.ts`).
+
+#### P12-C: tRPC Routers
+
+- [ ] **P12-08** `crmLeadsRouter` (`server/routers/crmLeads.ts`):
+  - `list` — filterable by status, source, assignedToId, tag; returns paginated leads.
+  - `get` — single lead by id with linked contact if converted.
+  - `create` — validates email uniqueness within org.
+  - `update` — updates any field including status.
+  - `convert` — calls `CrmService.convertLeadToContact`; returns created contact + company + deal ids.
+  - `delete` — hard delete (leads are pre-conversion, no financial data).
+- [ ] **P12-09** `crmCompaniesRouter` (`server/routers/crmCompanies.ts`):
+  - `list` — with associated deal count and total deal value.
+  - `get` — single company with all contacts, deals, and activities.
+  - `create`, `update`, `delete`.
+  - `linkContact` — sets `linkedContactId` to connect to accounting `Contact`.
+- [ ] **P12-10** `crmDealsRouter` (`server/routers/crmDeals.ts`):
+  - `list` — filterable by pipelineId, stageId, contactId; returns enriched with stage name.
+  - `get` — single deal with full activity timeline and linked invoice.
+  - `create` — auto-suggests probability via `suggestProbability`.
+  - `update` — updates stage (records stage change in activity log), probability, value.
+  - `close` — marks deal Won or Lost with reason; if Won, calls `convertDealToInvoice` if user confirms.
+  - `convertToInvoice` — explicit conversion; returns new invoice id.
+  - `forecast` — returns `calcWeightedForecast` result for next 3 months.
+  - `delete`.
+- [ ] **P12-11** `crmActivitiesRouter` (`server/routers/crmActivities.ts`):
+  - `list` — filterable by contactId, dealId, type, overdue (dueDate < now && completedAt null).
+  - `create`, `update` (includes `completedAt` toggle), `delete`.
+- [ ] **P12-12** `crmPipelinesRouter` (`server/routers/crmPipelines.ts`):
+  - `list` — returns pipelines with their stages ordered by `order`.
+  - `create`, `update`, `delete` (cannot delete if deals exist in pipeline).
+  - `createStage`, `updateStage`, `deleteStage`, `reorderStages`.
+- [ ] **P12-13** `crmReportsRouter` (`server/routers/crmReports.ts`):
+  - `pipeline` — all open deals by stage with totals and weighted forecast.
+  - `wonLostAnalysis` — deals closed in date range: win rate, avg deal size, loss reasons breakdown.
+  - `activityReport` — activity counts by type and user for period.
+  - `leadSourceReport` — leads and deals grouped by source with conversion rate.
+  - `salesForecast` — weighted pipeline value by month for next 6 months.
+- [ ] **P12-14** Register all 5 CRM routers in `server/root.ts`.
+
+#### P12-D: Frontend Pages
+
+- [ ] **P12-15** CRM sidebar group in `sidebar.tsx` — icon: `Users2` for CRM section header; sub-links: Leads (UserPlus), Companies (Building2), Deals (TrendingUp), Activities (Calendar), Pipeline (Kanban).
+- [ ] **P12-16** `/crm` — CRM dashboard:
+  - KPI strip: open deals value, win rate (30d), avg close time, activities due today.
+  - Pipeline funnel chart (deals count per stage).
+  - Revenue forecast chart (Recharts BarChart, monthly weighted values, next 3 months).
+  - Lead source breakdown (Recharts PieChart).
+  - Top deals table (top 5 by value).
+- [ ] **P12-17** `/crm/leads` — leads list with status tabs (All / New / Contacted / Qualified / Unqualified / Converted), filters (source, assigned, tag), create lead dialog, convert action button on Qualified leads.
+- [ ] **P12-18** `/crm/leads/[id]` — lead detail: all fields, status history, convert button (if Qualified).
+- [ ] **P12-19** `/crm/companies` — company list with deal count badge, create dialog.
+- [ ] **P12-20** `/crm/companies/[id]` — company detail: info, linked contacts, deals list, activities timeline.
+- [ ] **P12-21** `/crm/deals` — dual view (Kanban board + list toggle):
+  - Kanban: pipeline selector, draggable deal cards between stage columns (react-beautiful-dnd or dnd-kit).
+  - List: sortable table with stage, value, probability, expected close date.
+  - Create deal button (dialog).
+- [ ] **P12-22** `/crm/deals/[id]` — deal detail: info panel, activity timeline, "Mark Won / Lost" button with reason input, "Convert to Invoice" button (shown on Won deals without invoice), linked invoice chip.
+- [ ] **P12-23** `/crm/activities` — activity list filtered by overdue / upcoming / completed; create activity dialog with contact/deal link pickers.
+- [ ] **P12-24** Contact detail page (`/contacts/[id]`) — extend with CRM tab: activity timeline, linked deals, linked invoices (reuse existing invoice data).
+- [ ] **P12-25** Pipeline settings page (`/settings/pipelines`) — create/rename/delete pipelines; drag-reorder stages within a pipeline.
+
+#### P12-E: Testing
+
+- [ ] **P12-26** `tests/unit/crm.service.test.ts` — unit tests for all `CrmService` functions: lead conversion atomic logic, deal-to-invoice pre-fill, weighted forecast grouping, win rate edge cases (zero closed deals), avg close time.
+- [ ] **P12-27** `tests/unit/crm.routers.test.ts` — router tests via `createCallerFactory` + `vi.mock("@/lib/db")`; covers all procedures in all 5 routers.
+- [ ] **P12-28** `tests/e2e/crm.spec.ts` — E2E auth-guard tests: all CRM routes redirect unauthenticated users to `/login`.
+
+**Definition of Done:** User can capture leads, progress them through a pipeline Kanban, mark deals Won, convert won deals to invoices, log activities, and view CRM reports — all data scoped to their organisation.
+
+---
+
 ## Backlog (Post-v1)
 
 | ID | Feature | Notes |
@@ -333,6 +436,7 @@
 | Sprint 9 | Hardening | P9-01 to P9-10 | Not started |
 | Sprint 10 | Chat Assistant | P10-01 to P10-16 | ✅ Complete (P10-08, P10-13, P10-15 deferred) |
 | Sprint 11 | Personal Finance (EasyFinance) | P11-01 to P11-16 | ✅ Complete |
+| Sprint 12 | CRM Module | P12-01 to P12-28 | Not started |
 
 ---
 
@@ -352,3 +456,4 @@
 | 2026-05-15 | 25 tools implemented (vs 13 original plan) | Added list/get for invoices+bills, record payment, void, send, approve, create/update contact, create account |
 | 2026-05-17 | EasyFinance merged as Personal Finance module | Reuses JournalLine aggregates for spend; no duplicate transaction model; 4 new Prisma models, 4 routers, 4 pages, 1 service file |
 | 2026-05-17 | Business logic extracted to EasyFinanceService | All pure functions in a dedicated service file for testability; routers are thin wrappers; 280 tests passing |
+| 2026-05-18 | CRM module added as Phase 12 | Full client lifecycle (leads → deals → invoices) integrated with existing Contact and Invoice models; 5 routers, 6 Prisma models, 10 pages |

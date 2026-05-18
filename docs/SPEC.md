@@ -1,7 +1,7 @@
 # AutoAccounts — Complete Implementation Spec
 
-**Version:** 1.0.0  
-**Last Updated:** 2026-05-15  
+**Version:** 1.1.0  
+**Last Updated:** 2026-05-18  
 **Purpose:** Exhaustive implementation reference. Using this document alone you should be able to recreate the entire application from scratch.
 
 ---
@@ -30,6 +30,8 @@
 20. [Testing](#20-testing)
 21. [Key Invariants & Design Decisions](#21-key-invariants--design-decisions)
 22. [Known Gaps / Future Work](#22-known-gaps--future-work)
+23. [Personal Finance Module (EasyFinance)](#23-personal-finance-module-easyfinance)
+24. [CRM Module](#24-crm-module)
 
 ---
 
@@ -1916,3 +1918,398 @@ const MONTHLY_FACTOR = {
 // monthlyNet = monthlyIncome - monthlyExpense
 // All rounded to 2 decimal places
 ```
+
+---
+
+## 24. CRM Module
+
+The CRM module (Phase 12) enables full client lifecycle management alongside accounting data. It is entirely scoped to `organisationId` and integrates with the existing `Contact` and `Invoice` models.
+
+### 24.1 Prisma Schema
+
+```prisma
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum CrmLeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  UNQUALIFIED
+  CONVERTED
+}
+
+enum CrmLeadSource {
+  WEBSITE
+  REFERRAL
+  SOCIAL_MEDIA
+  COLD_OUTREACH
+  EVENT
+  ADVERTISING
+  OTHER
+}
+
+enum CrmCompanySize {
+  SOLO
+  SMALL
+  MEDIUM
+  LARGE
+  ENTERPRISE
+}
+
+enum CrmActivityType {
+  CALL
+  EMAIL
+  MEETING
+  NOTE
+  TASK
+}
+
+// ─── Models ───────────────────────────────────────────────────────────────────
+
+model CrmLead {
+  id                 String        @id @default(cuid())
+  organisationId     String
+  organisation       Organisation  @relation(fields: [organisationId], references: [id])
+  firstName          String
+  lastName           String
+  email              String?
+  phone              String?
+  companyName        String?
+  jobTitle           String?
+  estimatedValue     Decimal?      @db.Decimal(19, 4)
+  source             CrmLeadSource @default(OTHER)
+  notes              String?
+  status             CrmLeadStatus @default(NEW)
+  assignedToId       String?
+  assignedTo         User?         @relation(fields: [assignedToId], references: [id])
+  tags               String[]
+  convertedAt        DateTime?
+  convertedContactId String?
+  convertedContact   Contact?      @relation(fields: [convertedContactId], references: [id])
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  @@index([organisationId, status])
+  @@index([organisationId, source])
+}
+
+model CrmCompany {
+  id               String         @id @default(cuid())
+  organisationId   String
+  organisation     Organisation   @relation(fields: [organisationId], references: [id])
+  name             String
+  industry         String?
+  website          String?
+  phone            String?
+  address          String?
+  size             CrmCompanySize @default(SMALL)
+  tags             String[]
+  notes            String?
+  linkedContactId  String?        @unique
+  linkedContact    Contact?       @relation(fields: [linkedContactId], references: [id])
+  deals            CrmDeal[]
+  activities       CrmActivity[]
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@index([organisationId])
+}
+
+model CrmPipeline {
+  id             String             @id @default(cuid())
+  organisationId String
+  organisation   Organisation       @relation(fields: [organisationId], references: [id])
+  name           String
+  isDefault      Boolean            @default(false)
+  stages         CrmPipelineStage[]
+  deals          CrmDeal[]
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  @@index([organisationId])
+}
+
+model CrmPipelineStage {
+  id          String      @id @default(cuid())
+  pipelineId  String
+  pipeline    CrmPipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  name        String
+  order       Int
+  probability Int         @default(50) // 0–100 auto-suggested
+  deals       CrmDeal[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([pipelineId, order])
+}
+
+model CrmDeal {
+  id               String            @id @default(cuid())
+  organisationId   String
+  organisation     Organisation      @relation(fields: [organisationId], references: [id])
+  name             String
+  value            Decimal           @db.Decimal(19, 4)
+  contactId        String
+  contact          Contact           @relation(fields: [contactId], references: [id])
+  crmCompanyId     String?
+  crmCompany       CrmCompany?       @relation(fields: [crmCompanyId], references: [id])
+  pipelineId       String
+  pipeline         CrmPipeline       @relation(fields: [pipelineId], references: [id])
+  stageId          String
+  stage            CrmPipelineStage  @relation(fields: [stageId], references: [id])
+  expectedCloseDate DateTime?
+  probability      Int               @default(50)
+  source           String?
+  wonLostReason    String?
+  closedAt         DateTime?
+  invoiceId        String?           @unique
+  invoice          Invoice?          @relation(fields: [invoiceId], references: [id])
+  activities       CrmActivity[]
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@index([organisationId, stageId])
+  @@index([organisationId, pipelineId])
+}
+
+model CrmActivity {
+  id             String          @id @default(cuid())
+  organisationId String
+  organisation   Organisation    @relation(fields: [organisationId], references: [id])
+  type           CrmActivityType
+  subject        String
+  notes          String?
+  dueDate        DateTime?
+  completedAt    DateTime?
+  contactId      String?
+  contact        Contact?        @relation(fields: [contactId], references: [id])
+  dealId         String?
+  deal           CrmDeal?        @relation(fields: [dealId], references: [id])
+  crmCompanyId   String?
+  crmCompany     CrmCompany?     @relation(fields: [crmCompanyId], references: [id])
+  createdById    String
+  createdBy      User            @relation(fields: [createdById], references: [id])
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([organisationId, contactId])
+  @@index([organisationId, dealId])
+  @@index([organisationId, dueDate])
+}
+```
+
+**Contact model extensions** (added fields on existing model):
+```prisma
+// Added to existing Contact model:
+jobTitle    String?
+phone       String?
+linkedinUrl String?
+leadSource  String?
+tags        String[]
+crmDeals    CrmDeal[]
+crmActivities CrmActivity[]
+crmLeads    CrmLead[]
+crmCompany  CrmCompany?   // back-relation from linkedContactId
+```
+
+### 24.2 CrmService
+
+File: `server/services/crm.service.ts`
+
+| Function | Signature | Description |
+|---|---|---|
+| `convertLeadToContact` | `(db, leadId, orgId) → { contact, company, deal }` | Atomic Prisma `$transaction`: creates Contact from lead fields, creates CrmCompany (if companyName present), creates CrmDeal in default pipeline stage 1, marks lead CONVERTED with `convertedAt = now()` and `convertedContactId`. |
+| `convertDealToInvoice` | `(db, dealId, orgId) → Invoice` | Creates Invoice with contact from deal, value as single line item ("Services"), `issueDate = today`, `dueDate = today + 30 days`, sets `deal.invoiceId`. Throws if deal already has invoiceId. |
+| `calcWeightedForecast` | `(deals: CrmDeal[]) → MonthlyForecast[]` | Groups open deals by `expectedCloseDate` month (YYYY-MM), computes `sum(value × probability / 100)` per month. Returns array sorted by month ascending. |
+| `calcWinRate` | `(deals, fromDate) → number` | Filters deals closed after `fromDate`; returns `wonCount / (wonCount + lostCount)`. Returns 0 if no closed deals. |
+| `calcAvgCloseTime` | `(wonDeals: CrmDeal[]) → number` | Average days from `createdAt` to `closedAt` across won deals. Returns 0 if empty. |
+| `suggestProbability` | `(stageOrder, totalStages) → number` | `Math.round((stageOrder / totalStages) × 100)`, clamped 0–100. |
+| `isOverdue` | `(activity: CrmActivity) → boolean` | `activity.dueDate < now && activity.completedAt === null`. |
+
+### 24.3 tRPC Routers
+
+All routers use `orgProcedure` (requires authenticated session with organisationId).
+
+**`crmLeadsRouter`** (`server/routers/crmLeads.ts`)
+
+| Procedure | Type | Input | Description |
+|---|---|---|---|
+| `list` | query | `status?, source?, assignedToId?, tag?` | Filtered leads list, newest first |
+| `get` | query | `id` | Single lead; throws NOT_FOUND if not in org |
+| `create` | mutation | `firstName, lastName, email?, phone?, companyName?, jobTitle?, estimatedValue?, source, notes?, tags?` | Creates with `status = NEW` |
+| `update` | mutation | `id, ...fields` | Updates any field |
+| `convert` | mutation | `id` | Calls `CrmService.convertLeadToContact`; lead must be QUALIFIED |
+| `delete` | mutation | `id` | Hard delete |
+
+**`crmCompaniesRouter`** (`server/routers/crmCompanies.ts`)
+
+| Procedure | Type | Input | Description |
+|---|---|---|---|
+| `list` | query | — | Companies with `_count` of deals |
+| `get` | query | `id` | Company with contacts, deals, activities |
+| `create` | mutation | `name, industry?, website?, phone?, address?, size?, tags?, notes?` | — |
+| `update` | mutation | `id, ...fields` | — |
+| `linkContact` | mutation | `id, contactId` | Sets `linkedContactId` |
+| `delete` | mutation | `id` | Hard delete |
+
+**`crmDealsRouter`** (`server/routers/crmDeals.ts`)
+
+| Procedure | Type | Input | Description |
+|---|---|---|---|
+| `list` | query | `pipelineId?, stageId?, contactId?` | Deals with stage and company names |
+| `get` | query | `id` | Deal with activities, invoice chip |
+| `create` | mutation | `name, value, contactId, pipelineId, stageId, expectedCloseDate?, probability?, source?, notes?` | Auto-suggests probability via `suggestProbability` if not provided |
+| `update` | mutation | `id, ...fields` | Updates including stage move |
+| `close` | mutation | `id, outcome: "WON"\|"LOST", reason?` | Sets `closedAt`, `wonLostReason`; moves to terminal stage |
+| `convertToInvoice` | mutation | `id` | Calls `CrmService.convertDealToInvoice`; returns `{ invoiceId }` |
+| `forecast` | query | — | Returns `calcWeightedForecast` for all open org deals |
+| `delete` | mutation | `id` | Hard delete; cannot delete if linked invoice exists |
+
+**`crmActivitiesRouter`** (`server/routers/crmActivities.ts`)
+
+| Procedure | Type | Input | Description |
+|---|---|---|---|
+| `list` | query | `contactId?, dealId?, type?, overdueOnly?` | Filtered activity list |
+| `create` | mutation | `type, subject, notes?, dueDate?, contactId?, dealId?` | — |
+| `update` | mutation | `id, completedAt?, ...fields` | Toggle `completedAt` to mark done |
+| `delete` | mutation | `id` | Hard delete |
+
+**`crmPipelinesRouter`** (`server/routers/crmPipelines.ts`)
+
+| Procedure | Type | Input | Description |
+|---|---|---|---|
+| `list` | query | — | Pipelines with stages (ordered by `order`) |
+| `create` | mutation | `name, isDefault?` | Creates pipeline with a default "New" stage |
+| `update` | mutation | `id, name?, isDefault?` | — |
+| `delete` | mutation | `id` | Throws if any deals exist in pipeline |
+| `createStage` | mutation | `pipelineId, name, order, probability?` | Appends stage |
+| `updateStage` | mutation | `stageId, name?, probability?` | — |
+| `deleteStage` | mutation | `stageId` | Throws if any deals in stage |
+| `reorderStages` | mutation | `pipelineId, stageIds: string[]` | Updates `order` field for all stages atomically |
+
+**`crmReportsRouter`** (`server/routers/crmReports.ts`)
+
+| Procedure | Type | Input | Description |
+|---|---|---|---|
+| `pipeline` | query | `pipelineId?` | Open deals by stage: count, total value, weighted value |
+| `wonLostAnalysis` | query | `from, to` | Win rate, avg deal size, loss reasons breakdown |
+| `activityReport` | query | `from, to` | Activity counts by type and by user |
+| `leadSourceReport` | query | — | Leads and deals grouped by source with conversion rate (converted leads / total leads per source) |
+| `salesForecast` | query | `months?: number` | Weighted pipeline by month for next N months (default 6) |
+
+### 24.4 Pages
+
+| Route | File | Key UI Elements |
+|---|---|---|
+| `/crm` | `app/(app)/crm/page.tsx` | KPI strip (open deal value, win rate, avg close time, activities due today); funnel chart (deals per stage); forecast bar chart (next 3 months weighted); lead source pie; top 5 deals table |
+| `/crm/leads` | `app/(app)/crm/leads/page.tsx` | Status tab filter, source + tag filters, leads table with convert button on Qualified rows, create dialog |
+| `/crm/leads/[id]` | `app/(app)/crm/leads/[id]/page.tsx` | Lead detail card, status badge, convert-to-contact button (Qualified only), notes section |
+| `/crm/companies` | `app/(app)/crm/companies/page.tsx` | Company cards with deal count badge, link-to-contact action, create dialog |
+| `/crm/companies/[id]` | `app/(app)/crm/companies/[id]/page.tsx` | Company info, linked contact chip, associated contacts list, deals list, activities timeline |
+| `/crm/deals` | `app/(app)/crm/deals/page.tsx` | Pipeline selector, Kanban board (dnd-kit), list view toggle, deal value/probability chips, create dialog |
+| `/crm/deals/[id]` | `app/(app)/crm/deals/[id]/page.tsx` | Deal info panel, probability slider, "Mark Won/Lost" dialog with reason input, "Convert to Invoice" button (Won + no invoice), linked invoice chip, activity timeline |
+| `/crm/activities` | `app/(app)/crm/activities/page.tsx` | Overdue / upcoming / completed tabs, type filter, create activity dialog with contact + deal pickers |
+| `/settings/pipelines` | `app/(app)/settings/pipelines/page.tsx` | Pipeline list, stage drag-reorder (dnd-kit), add/rename/delete stages, create pipeline |
+| `/contacts/[id]` (extended) | `app/(app)/contacts/[id]/page.tsx` | New "CRM" tab: linked deals, activity timeline, lead source badge, tags |
+
+### 24.5 Sidebar Navigation
+
+```typescript
+// Added to app/(app)/_components/sidebar.tsx:
+{
+  label: "CRM",
+  items: [
+    { label: "CRM Dashboard", href: "/crm",              icon: Users2,    matchPrefix: false },
+    { label: "Leads",         href: "/crm/leads",        icon: UserPlus,  matchPrefix: true },
+    { label: "Companies",     href: "/crm/companies",    icon: Building2, matchPrefix: true },
+    { label: "Deals",         href: "/crm/deals",        icon: Handshake, matchPrefix: true },
+    { label: "Activities",    href: "/crm/activities",   icon: Calendar,  matchPrefix: true },
+  ],
+}
+```
+
+Import icons from `lucide-react`: `Users2`, `UserPlus`, `Building2`, `Handshake`, `Calendar`.
+
+### 24.6 Lead Conversion Flow
+
+```
+CrmLead (status = QUALIFIED)
+  │
+  │  user clicks "Convert Lead"
+  ▼
+CrmService.convertLeadToContact() ← Prisma.$transaction
+  ├── Contact.create({ name: `${firstName} ${lastName}`, email, phone, type: "customer" })
+  ├── CrmCompany.create({ name: companyName, organisationId })  ← only if companyName present
+  ├── CrmDeal.create({
+  │     name: `Deal with ${firstName} ${lastName}`,
+  │     value: estimatedValue ?? 0,
+  │     contactId: newContact.id,
+  │     pipelineId: defaultPipeline.id,
+  │     stageId: firstStage.id,
+  │     probability: suggestProbability(1, totalStages),
+  │   })
+  └── CrmLead.update({ status: CONVERTED, convertedAt: now(), convertedContactId: newContact.id })
+  │
+  ▼
+Returns { contact, company, deal }
+UI shows success toast with links to new contact and deal
+```
+
+### 24.7 Deal-to-Invoice Conversion Flow
+
+```
+CrmDeal (closedAt !== null, invoiceId === null)
+  │
+  │  user clicks "Convert to Invoice"
+  ▼
+CrmService.convertDealToInvoice()
+  ├── Invoice.create({
+  │     contactId: deal.contactId,
+  │     organisationId,
+  │     status: "DRAFT",
+  │     issueDate: today,
+  │     dueDate: today + 30 days,
+  │     lines: [{ description: deal.name, quantity: 1, unitPrice: deal.value }],
+  │   })
+  └── CrmDeal.update({ invoiceId: newInvoice.id })
+  │
+  ▼
+Returns new Invoice
+UI navigates to /invoices/[newInvoice.id] for review and sending
+```
+
+### 24.8 Weighted Forecast Formula
+
+```typescript
+// For each open deal grouped by expectedCloseDate month (YYYY-MM):
+weightedValue = deal.value × (deal.probability / 100)
+
+// Monthly totals:
+MonthlyForecast = {
+  month: "2026-07",                // YYYY-MM
+  totalValue: 45000,               // sum of deal values
+  weightedValue: 28500,            // sum of weighted values
+  dealCount: 3,
+}
+
+// Deals without expectedCloseDate are excluded from the forecast.
+// Closed (won/lost) deals are excluded.
+```
+
+### 24.9 Test Coverage
+
+| File | Tests | Coverage |
+|---|---|---|
+| `tests/unit/crm.service.test.ts` | ~40 | All `CrmService` functions: lead conversion atomic mock, deal-to-invoice pre-fill, forecast grouping, win rate edge cases (zero closed), avg close time, `suggestProbability` interpolation |
+| `tests/unit/crm.routers.test.ts` | ~80 | All 5 routers via `createCallerFactory` + `vi.mock("@/lib/db")`; covers NOT_FOUND guards, conversion mutation, stage reorder, delete guards |
+| `tests/e2e/crm.spec.ts` | ~10 | Auth-guard: all CRM routes redirect unauthenticated users to `/login` |
+
+### 24.10 Integration with Existing Models
+
+| Existing Model | CRM Extension | How |
+|---|---|---|
+| `Contact` | CRM fields + relations | New nullable fields added directly to the Contact model; back-relations to CrmDeal and CrmActivity |
+| `Invoice` | Linked from Won deals | `CrmDeal.invoiceId` FK; `Invoice` gets back-relation `crmDeal CrmDeal?` |
+| `Organisation` | Root anchor | All 6 CRM models carry `organisationId` FK for row-level isolation |
+| `User` | Lead assignment, activity authorship | `CrmLead.assignedToId`, `CrmActivity.createdById` |
+

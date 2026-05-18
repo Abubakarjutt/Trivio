@@ -1,8 +1,8 @@
 # AutoAccounts — Architecture Document
 
-**Version:** 0.3.0  
+**Version:** 0.4.0  
 **Status:** Active  
-**Last Updated:** 2026-05-17
+**Last Updated:** 2026-05-18
 
 ---
 
@@ -266,6 +266,92 @@ Watchlist                 (EasyFinance module)
   ├── isActive
   ├── createdAt
   └── updatedAt
+
+CrmLead                   (CRM module)
+  ├── id
+  ├── organisationId
+  ├── firstName
+  ├── lastName
+  ├── email
+  ├── phone
+  ├── company             (free text — before conversion)
+  ├── jobTitle
+  ├── source              (website | referral | social_media | cold_outreach | event | advertising | other)
+  ├── status              (new | contacted | qualified | unqualified | converted)
+  ├── estimatedValue      (NUMERIC 19,4, nullable)
+  ├── notes
+  ├── tags                (String[])
+  ├── assignedUserId      (FK → User, nullable)
+  ├── convertedAt         (nullable)
+  ├── convertedContactId  (FK → Contact, nullable)
+  ├── createdAt
+  └── updatedAt
+
+CrmCompany                (CRM module)
+  ├── id
+  ├── organisationId
+  ├── name
+  ├── industry
+  ├── website
+  ├── phone
+  ├── address
+  ├── size                (solo | small | medium | large | enterprise)
+  ├── tags                (String[])
+  ├── notes
+  ├── linkedContactId     (FK → Contact, nullable — ties to accounting contact)
+  ├── createdAt
+  └── updatedAt
+
+CrmPipeline               (CRM module)
+  ├── id
+  ├── organisationId
+  ├── name
+  ├── isDefault           (Boolean)
+  ├── stages[]            (CrmPipelineStage[])
+  ├── createdAt
+  └── updatedAt
+
+CrmPipelineStage          (CRM module)
+  ├── id
+  ├── pipelineId
+  ├── name
+  ├── order               (Int)
+  ├── probability         (Int 0–100, default suggestion per stage)
+  └── deals[]
+
+CrmDeal                   (CRM module)
+  ├── id
+  ├── organisationId
+  ├── name
+  ├── value               (NUMERIC 19,4)
+  ├── stageId             (FK → CrmPipelineStage)
+  ├── pipelineId          (FK → CrmPipeline)
+  ├── contactId           (FK → Contact, nullable)
+  ├── companyId           (FK → CrmCompany, nullable)
+  ├── expectedCloseDate   (nullable)
+  ├── probability         (Int 0–100)
+  ├── status              (open | won | lost)
+  ├── source              (LeadSource enum, nullable)
+  ├── lostReason          (nullable)
+  ├── notes
+  ├── invoiceId           (FK → Invoice, nullable — set on deal-to-invoice conversion)
+  ├── createdAt
+  └── updatedAt
+
+CrmActivity               (CRM module)
+  ├── id
+  ├── organisationId
+  ├── type                (call | email | meeting | note | task)
+  ├── subject
+  ├── notes
+  ├── dueAt               (nullable)
+  ├── completedAt         (nullable)
+  ├── contactId           (FK → Contact, nullable)
+  ├── dealId              (FK → CrmDeal, nullable)
+  ├── companyId           (FK → CrmCompany, nullable)
+  ├── userId              (FK → User)
+  ├── createdAt
+  └── updatedAt
 ```
 
 ---
@@ -290,6 +376,15 @@ Watchlist                 (EasyFinance module)
     - `/goals` — Savings targets with progress tracking and contributions
     - `/recurring` — Regular income/expense tracker with due-date advancement
     - `/watchlists` — Threshold alerts on category spend with breach detection
+  - **CRM module**
+    - `/crm` — CRM dashboard (pipeline funnel, forecast, activity feed)
+    - `/crm/leads` — Lead list + capture form
+    - `/crm/leads/[id]` — Lead detail with timeline
+    - `/crm/companies` — CRM company list + create form
+    - `/crm/companies/[id]` — Company detail with contacts, deals, activities
+    - `/crm/deals` — Deal list + Kanban pipeline board
+    - `/crm/deals/[id]` — Deal detail with timeline and activities
+    - `/crm/activities` — Activity feed (all due/overdue tasks)
 
 ### 4.2 API Layer (tRPC Routers)
 
@@ -309,10 +404,16 @@ appRouter
   ├── attachments    uploadUrl, confirmUpload, getExtractionResult
   ├── chat           getConversation, listConversations, deleteConversation
   ├── subscription   currentPlan, createCheckoutSession, portal
-  ├── budgets        list, create, update, archive, delete        ← EasyFinance
-  ├── goals          list, create, update, contribute, delete     ← EasyFinance
-  ├── recurringItems list, create, update, markPaid, summary, delete  ← EasyFinance
-  └── watchlists     list, create, update, delete                 ← EasyFinance
+  ├── budgets        list, create, update, archive, delete              ← EasyFinance
+  ├── goals          list, create, update, contribute, delete           ← EasyFinance
+  ├── recurringItems list, create, update, markPaid, summary, delete    ← EasyFinance
+  ├── watchlists     list, create, update, delete                       ← EasyFinance
+  ├── crmLeads       list, get, create, update, convert, delete         ← CRM
+  ├── crmCompanies   list, get, create, update, delete                  ← CRM
+  ├── crmDeals       list, get, create, update, markWon, markLost, delete ← CRM
+  ├── crmActivities  list, create, update, complete, delete             ← CRM
+  ├── crmPipelines   list, create, update, reorderStages, delete        ← CRM
+  └── crmReports     pipeline, wonLost, activitySummary, forecast       ← CRM
 ```
 
 **Note:** Chat message sending uses a dedicated SSE route (`POST /api/chat`) rather than a tRPC mutation. This avoids the 30-second timeout on serverless functions and enables real-time token streaming to the UI.
@@ -331,6 +432,7 @@ Services contain business logic and are called by tRPC routers:
 - **`SubscriptionService`** — Stripe integration, tier enforcement (usage gates).
 - **`TaxService`** — pluggable tax regime resolver, rate lookup, tax line calculation.
 - **`EasyFinanceService`** (`server/services/easyfinance.service.ts`) — pure business logic helpers for the Personal Finance module: `periodFrom`, `getSpentForCategory`, `calcBudgetUtilization`, `calcGoalProgress`, `isGoalComplete`, `nextDueDateAfter`, `normalisedMonthly`, `calcRecurringSummary`, `calcDueStatus`, `calcWatchlistStatus`. All functions are side-effect-free and fully unit-tested.
+- **`CrmService`** (`server/services/crm.service.ts`) — CRM business logic: lead conversion (creates Contact + CrmCompany + Deal atomically in a Prisma transaction), deal-to-invoice conversion (pre-fills Invoice from Deal fields), weighted pipeline forecast calculation, win-rate and average-close-time computation, activity due-status derivation.
 
 ### 4.4 Data Layer (Prisma + PostgreSQL)
 
