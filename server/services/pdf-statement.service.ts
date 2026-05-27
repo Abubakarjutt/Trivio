@@ -57,36 +57,41 @@ export async function parseTransactionsFromText(text: string): Promise<RawTransa
     return [];
   }
 
-  const response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: OLLAMA_MODEL,
-      messages: [{ role: "user", content: `${PARSE_PROMPT}${text.slice(0, 12000)}` }],
-      stream: false,
-      options: { temperature: 0.1, num_predict: 8192 },
-    }),
-    signal: AbortSignal.timeout(120_000),
-  });
+  try {
+    const response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: OLLAMA_MODEL,
+        messages: [{ role: "user", content: `${PARSE_PROMPT}${text.slice(0, 12000)}` }],
+        stream: false,
+        options: { temperature: 0.1, num_predict: 8192 },
+      }),
+      signal: AbortSignal.timeout(120_000),
+    });
 
-  if (!response.ok) return [];
+    if (!response.ok) return [];
 
-  const data = await response.json() as { message?: { content?: string } };
-  const content = data.message?.content ?? "";
-  const raw = content.replace(/^```(?:json)?\n?/m, "").replace(/```\s*$/m, "").trim();
-  const match = raw.match(/\[[\s\S]*\]/);
-  if (!match) return [];
+    const data = await response.json() as { message?: { content?: string } };
+    const content = data.message?.content ?? "";
+    const raw = content.replace(/^```(?:json)?\n?/m, "").replace(/```\s*$/m, "").trim();
+    const match = raw.match(/\[[\s\S]*\]/);
+    if (!match) return [];
 
-  let parsed: unknown;
-  try { parsed = JSON.parse(match[0]); } catch { return []; }
-  if (!Array.isArray(parsed)) return [];
+    let parsed: unknown;
+    try { parsed = JSON.parse(match[0]); } catch { return []; }
+    if (!Array.isArray(parsed)) return [];
 
-  return (parsed as Array<Partial<RawTransaction>>)
-    .filter((item) => item.date && item.description && item.amount != null && item.type)
-    .map((item) => ({
-      date: String(item.date),
-      description: String(item.description),
-      amount: Number(item.amount),
-      type: item.type as "DEBIT" | "CREDIT",
-    }));
+    return (parsed as Array<Partial<RawTransaction>>)
+      .filter((item) => item.date && item.description && item.amount != null && item.type)
+      .map((item) => ({
+        date: String(item.date),
+        description: String(item.description),
+        amount: Number(item.amount),
+        type: item.type as "DEBIT" | "CREDIT",
+      }));
+  } catch {
+    console.warn("[pdf-statement.service] Ollama request failed — returning empty transaction list.");
+    return [];
+  }
 }
