@@ -23,7 +23,7 @@ describe("autoDetectColumns", () => {
     expect(map.description).toBe(1);
     expect(map.debit).toBe(2);
     expect(map.credit).toBe(3);
-    expect(map.amount).toBe(-1);
+    expect(map.amount).toBeUndefined();
   });
 
   it("is case-insensitive", () => {

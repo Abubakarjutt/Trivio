@@ -8,7 +8,7 @@ export type StatementTransactionType = "DEBIT" | "CREDIT";
 export interface ColumnMap {
   date: number;
   description: number;
-  amount: number;
+  amount?: number;   // undefined when no combined amount column exists
   debit?: number;
   credit?: number;
 }
@@ -63,7 +63,7 @@ export function autoDetectColumns(headers: string[]): ColumnMap {
   return {
     date: dateIdx,
     description: descIdx,
-    amount: amountIdx,
+    ...(amountIdx !== -1 ? { amount: amountIdx } : {}),
     ...(debitIdx !== -1 ? { debit: debitIdx } : {}),
     ...(creditIdx !== -1 ? { credit: creditIdx } : {}),
   };
@@ -74,7 +74,7 @@ export function normalizeAmount(raw: string): { amount: number; type: StatementT
   const isParenNeg = /^\([\d,$.]+\)$/.test(trimmed);
   const cleaned = trimmed.replace(/[$(),\s]/g, "");
   const isNeg = cleaned.startsWith("-") || isParenNeg;
-  const abs = parseFloat(cleaned.replace("-", ""));
+  const abs = Math.abs(parseFloat(cleaned.replace("-", "")));
   if (isNaN(abs)) throw new Error(`Cannot parse amount: "${raw}"`);
   return { amount: abs, type: isNeg ? "DEBIT" : "CREDIT" };
 }
@@ -123,7 +123,7 @@ export function parseCsvBuffer(buffer: Buffer, columnMap: ColumnMap): RawTransac
     let amount: number;
     let type: StatementTransactionType;
 
-    if (columnMap.amount !== -1 && columnMap.amount !== undefined) {
+    if (columnMap.amount !== undefined) {
       const raw = cols[columnMap.amount]?.trim();
       if (!raw) continue;
       try { ({ amount, type } = normalizeAmount(raw)); } catch { continue; }
