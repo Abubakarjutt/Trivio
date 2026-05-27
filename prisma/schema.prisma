@@ -124,9 +124,9 @@ model Organisation {
   budgets           Budget[]
   goals             Goal[]
   recurringItems    RecurringItem[]
-  watchlists              Watchlist[]
-  statementImportBatches  StatementImportBatch[]
-  statementTransactions   StatementTransaction[]
+  watchlists             Watchlist[]
+  statementImportBatches StatementImportBatch[]
+  statementTransactions  StatementTransaction[]
   // CRM
   crmLeads          CrmLead[]
   crmCompanies      CrmCompany[]
@@ -839,4 +839,20 @@ model UsageRecord {
   updatedAt      DateTime     @updatedAt
 
   @@unique([organisationId, month])
+}
+
+// ─── Webhook Idempotency ──────────────────────────────────────────────────────
+
+model WebhookEvent {
+  id          String    @id @default(cuid())
+  provider    String
+  eventId     String
+  status      String    @default("PROCESSING")
+  error       String?
+  processedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([provider, eventId])
+  @@index([provider, status])
 }
