@@ -96,6 +96,7 @@ export async function categorizeBatch(descriptions: string[]): Promise<Categoriz
       stream: false,
       options: { temperature: 0.1, num_predict: 8192 },
     }),
+    signal: AbortSignal.timeout(120_000),
   });
 
   if (!response.ok) {
