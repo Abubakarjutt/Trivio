@@ -124,7 +124,9 @@ model Organisation {
   budgets           Budget[]
   goals             Goal[]
   recurringItems    RecurringItem[]
-  watchlists        Watchlist[]
+  watchlists              Watchlist[]
+  statementImportBatches  StatementImportBatch[]
+  statementTransactions   StatementTransaction[]
   // CRM
   crmLeads          CrmLead[]
   crmCompanies      CrmCompany[]
@@ -594,6 +596,68 @@ model Watchlist {
   updatedAt      DateTime     @updatedAt
 
   @@index([organisationId])
+}
+
+// ─── Statement Import ─────────────────────────────────────────────────────────
+
+enum StatementFileType {
+  PDF
+  CSV
+}
+
+enum StatementImportStatus {
+  PENDING
+  PROCESSING
+  DONE
+  FAILED
+}
+
+enum StatementTransactionType {
+  DEBIT
+  CREDIT
+}
+
+model StatementImportBatch {
+  id               String                @id @default(cuid())
+  organisationId   String
+  organisation     Organisation          @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  filename         String
+  fileType         StatementFileType
+  status           StatementImportStatus @default(PENDING)
+  transactionCount Int                   @default(0)
+  errorMessage     String?
+  createdAt        DateTime              @default(now())
+
+  transactions StatementTransaction[]
+
+  @@index([organisationId])
+}
+
+model StatementTransaction {
+  id             String                   @id @default(cuid())
+  organisationId String
+  organisation   Organisation             @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  importBatchId  String
+  importBatch    StatementImportBatch     @relation(fields: [importBatchId], references: [id], onDelete: Cascade)
+
+  date           DateTime                 @db.Date
+  description    String
+  merchantName   String
+  amount         Decimal                  @db.Decimal(19, 4)
+  type           StatementTransactionType
+
+  category       String
+  mccCode        String
+  mccLabel       String
+
+  isExcluded     Boolean                  @default(false)
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+
+  @@index([organisationId])
+  @@index([importBatchId])
+  @@index([organisationId, date])
+  @@index([organisationId, category])
 }
 
 // ─── CRM Module ───────────────────────────────────────────────────────────────

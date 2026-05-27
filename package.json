@@ -54,6 +54,7 @@
     "next": "15.3.2",
     "next-auth": "^5.0.0-beta.29",
     "nodemailer": "^7.0.13",
+    "pdfjs-dist": "^5.7.284",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "recharts": "^2.15.3",
