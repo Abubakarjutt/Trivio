@@ -119,14 +119,17 @@ async function handleCsvImport(buffer: Buffer, filename: string, organisationId:
   return NextResponse.json({ status: "done", batchId: batch.id, count: rawTransactions.length, skipped: 0 });
 }
 
+// Internal type for the shared streaming import helper
+type EmitFn = (event: string, data: Record<string, unknown>) => void;
+
 // Shared SSE helper used by both PDF and image handlers
 function createSseStream(
-  handler: (emit: (event: string, data: object) => void) => Promise<void>
+  handler: (emit: EmitFn) => Promise<void>
 ): Response {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
-      const emit = (event: string, data: object) => {
+      const emit: EmitFn = (event: string, data: Record<string, unknown>) => {
         controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
       };
       try {
@@ -143,6 +146,63 @@ function createSseStream(
       "Connection": "keep-alive",
     },
   });
+}
+
+/**
+ * Shared logic for PDF and image SSE imports: categorize → dedup → save → emit.
+ * The caller provides the already-parsed raw transactions and the emit function.
+ */
+async function runStreamingImport(
+  emit: EmitFn,
+  rawTransactions: import("@/server/services/statement-parser.service").RawTransaction[],
+  organisationId: string,
+  batchId: string,
+) {
+  emit("progress", { step: "categorizing", pct: 50, count: rawTransactions.length });
+  const categorized = await categorizeBatch(rawTransactions.map((t) => t.description));
+
+  emit("progress", { step: "deduplicating", pct: 75 });
+  const existingRaw = await db.statementTransaction.findMany({
+    where: { organisationId },
+    select: { id: true, date: true, description: true, amount: true },
+  });
+  const existing = existingRaw.map((e) => ({ ...e, amount: Number(e.amount) }));
+  const { duplicates } = detectDuplicates(rawTransactions, existing);
+
+  emit("progress", { step: "saving", pct: 90 });
+  await db.statementTransaction.createMany({
+    data: rawTransactions.map((txn, i) => ({
+      organisationId,
+      importBatchId: batchId,
+      date: new Date(txn.date),
+      description: txn.description,
+      merchantName: categorized[i]?.merchantName ?? txn.description,
+      amount: txn.amount,
+      type: txn.type,
+      category: categorized[i]?.category ?? "Other",
+      mccCode: categorized[i]?.mccCode ?? "0000",
+      mccLabel: categorized[i]?.mccLabel ?? "Uncategorized",
+    })),
+  });
+
+  await db.statementImportBatch.update({ where: { id: batchId }, data: { transactionCount: rawTransactions.length } });
+
+  if (duplicates.length > 0) {
+    const dupDescs = duplicates.map((d) => d.incoming.description);
+    const savedDupes = await db.statementTransaction.findMany({
+      where: { importBatchId: batchId, description: { in: dupDescs } },
+      select: { id: true, date: true, description: true, amount: true },
+    });
+    emit("duplicates", {
+      count: savedDupes.length,
+      items: savedDupes.map((d) => ({ id: d.id, date: d.date, amount: Number(d.amount), description: d.description })),
+      batchId,
+    });
+    return;
+  }
+
+  await db.statementImportBatch.update({ where: { id: batchId }, data: { status: "DONE" } });
+  emit("done", { batchId, count: rawTransactions.length, skipped: 0 });
 }
 
 async function handlePdfImport(buffer: Buffer, filename: string, organisationId: string) {
@@ -166,51 +226,7 @@ async function handlePdfImport(buffer: Buffer, filename: string, organisationId:
         return;
       }
 
-      emit("progress", { step: "categorizing", pct: 50, count: rawTransactions.length });
-      const categorized = await categorizeBatch(rawTransactions.map((t) => t.description));
-
-      emit("progress", { step: "deduplicating", pct: 75 });
-      const existingRaw = await db.statementTransaction.findMany({
-        where: { organisationId },
-        select: { id: true, date: true, description: true, amount: true },
-      });
-      const existing = existingRaw.map((e) => ({ ...e, amount: Number(e.amount) }));
-      const { duplicates } = detectDuplicates(rawTransactions, existing);
-
-      emit("progress", { step: "saving", pct: 90 });
-      await db.statementTransaction.createMany({
-        data: rawTransactions.map((txn, i) => ({
-          organisationId,
-          importBatchId: batchId!,
-          date: new Date(txn.date),
-          description: txn.description,
-          merchantName: categorized[i]?.merchantName ?? txn.description,
-          amount: txn.amount,
-          type: txn.type,
-          category: categorized[i]?.category ?? "Other",
-          mccCode: categorized[i]?.mccCode ?? "0000",
-          mccLabel: categorized[i]?.mccLabel ?? "Uncategorized",
-        })),
-      });
-
-      await db.statementImportBatch.update({ where: { id: batchId }, data: { transactionCount: rawTransactions.length } });
-
-      if (duplicates.length > 0) {
-        const dupDescs = duplicates.map((d) => d.incoming.description);
-        const savedDupes = await db.statementTransaction.findMany({
-          where: { importBatchId: batchId, description: { in: dupDescs } },
-          select: { id: true, date: true, description: true, amount: true },
-        });
-        emit("duplicates", {
-          count: savedDupes.length,
-          items: savedDupes.map((d) => ({ id: d.id, date: d.date, amount: Number(d.amount), description: d.description })),
-          batchId,
-        });
-        return;
-      }
-
-      await db.statementImportBatch.update({ where: { id: batchId }, data: { status: "DONE" } });
-      emit("done", { batchId, count: rawTransactions.length, skipped: 0 });
+      await runStreamingImport(emit, rawTransactions, organisationId, batchId);
     } catch (err) {
       if (batchId) {
         await db.statementImportBatch.update({ where: { id: batchId }, data: { status: "FAILED", errorMessage: String(err) } }).catch(() => {});
@@ -238,51 +254,7 @@ async function handleImageImport(buffer: Buffer, filename: string, organisationI
         return;
       }
 
-      emit("progress", { step: "categorizing", pct: 50, count: rawTransactions.length });
-      const categorized = await categorizeBatch(rawTransactions.map((t) => t.description));
-
-      emit("progress", { step: "deduplicating", pct: 75 });
-      const existingRaw = await db.statementTransaction.findMany({
-        where: { organisationId },
-        select: { id: true, date: true, description: true, amount: true },
-      });
-      const existing = existingRaw.map((e) => ({ ...e, amount: Number(e.amount) }));
-      const { duplicates } = detectDuplicates(rawTransactions, existing);
-
-      emit("progress", { step: "saving", pct: 90 });
-      await db.statementTransaction.createMany({
-        data: rawTransactions.map((txn, i) => ({
-          organisationId,
-          importBatchId: batchId!,
-          date: new Date(txn.date),
-          description: txn.description,
-          merchantName: categorized[i]?.merchantName ?? txn.description,
-          amount: txn.amount,
-          type: txn.type,
-          category: categorized[i]?.category ?? "Other",
-          mccCode: categorized[i]?.mccCode ?? "0000",
-          mccLabel: categorized[i]?.mccLabel ?? "Uncategorized",
-        })),
-      });
-
-      await db.statementImportBatch.update({ where: { id: batchId }, data: { transactionCount: rawTransactions.length } });
-
-      if (duplicates.length > 0) {
-        const dupDescs = duplicates.map((d) => d.incoming.description);
-        const savedDupes = await db.statementTransaction.findMany({
-          where: { importBatchId: batchId, description: { in: dupDescs } },
-          select: { id: true, date: true, description: true, amount: true },
-        });
-        emit("duplicates", {
-          count: savedDupes.length,
-          items: savedDupes.map((d) => ({ id: d.id, date: d.date, amount: Number(d.amount), description: d.description })),
-          batchId,
-        });
-        return;
-      }
-
-      await db.statementImportBatch.update({ where: { id: batchId }, data: { status: "DONE" } });
-      emit("done", { batchId, count: rawTransactions.length, skipped: 0 });
+      await runStreamingImport(emit, rawTransactions, organisationId, batchId);
     } catch (err) {
       if (batchId) {
         await db.statementImportBatch.update({ where: { id: batchId }, data: { status: "FAILED", errorMessage: String(err) } }).catch(() => {});
