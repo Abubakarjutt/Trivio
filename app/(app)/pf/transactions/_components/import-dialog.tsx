@@ -33,7 +33,8 @@ function getFileCategory(file: File): FileCategory | null {
   const name = file.name.toLowerCase();
   if (name.endsWith(".csv")) return "csv";
   if (name.endsWith(".pdf")) return "pdf";
-  if (IMAGE_EXTENSIONS.some((ext) => name.endsWith(ext)) || file.type.startsWith("image/")) return "image";
+  const IMAGE_MIME_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
+  if (IMAGE_EXTENSIONS.some((ext) => name.endsWith(ext)) || IMAGE_MIME_TYPES.includes(file.type)) return "image";
   return null;
 }
 
@@ -68,7 +69,7 @@ export function ImportDialog({ open, onOpenChange, onComplete }: ImportDialogPro
 
   const handleFile = (f: File) => {
     if (!getFileCategory(f)) {
-      toast.error("Only PDF, CSV, and image files (JPEG, PNG, WEBP) are supported");
+      toast.error("Only PDF, CSV, and image files (JPEG, PNG, WEBP, HEIC) are supported");
       return;
     }
     setFile(f);
@@ -91,6 +92,11 @@ export function ImportDialog({ open, onOpenChange, onComplete }: ImportDialogPro
     formData.append("file", file);
 
     const category = getFileCategory(file);
+    if (!category) {
+      setErrorMsg("Unsupported file type. Please upload a PDF, CSV, or image.");
+      setState("error");
+      return;
+    }
 
     if (category === "csv") {
       // CSV: synchronous JSON response
@@ -177,6 +183,8 @@ export function ImportDialog({ open, onOpenChange, onComplete }: ImportDialogPro
   const handleConfirm = async (skipDuplicates: boolean) => {
     if (!batchId) return;
     setState("uploading");
+    setCompletedSteps([]);
+    setProgress(null);
     try {
       const url = `/api/pf/import/${batchId}/confirm?skip=${skipDuplicates}`;
       const res = await fetch(url, {
@@ -237,7 +245,7 @@ export function ImportDialog({ open, onOpenChange, onComplete }: ImportDialogPro
               <input
                 ref={inputRef}
                 type="file"
-                accept=".pdf,.csv,.jpg,.jpeg,.png,.webp,.heic,.heif,image/*"
+                accept=".pdf,.csv,.jpg,.jpeg,.png,.webp,.heic,.heif"
                 className="hidden"
                 onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
               />
