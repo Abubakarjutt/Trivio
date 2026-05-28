@@ -17,6 +17,7 @@ import {
   ChevronRight,
   Sparkles,
   Landmark,
+  CreditCard,
   TrendingUp,
   Target,
   RefreshCw,
@@ -67,6 +68,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: "Personal Finance",
     items: [
+      { label: "Transactions", href: "/pf/transactions", icon: CreditCard, matchPrefix: true },
       { label: "Budgets", href: "/budgets", icon: TrendingUp, matchPrefix: true },
       { label: "Goals", href: "/goals", icon: Target, matchPrefix: true },
       { label: "Recurring", href: "/recurring", icon: RefreshCw, matchPrefix: true },

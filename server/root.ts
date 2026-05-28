@@ -13,6 +13,7 @@ import { subscriptionRouter } from "@/server/routers/subscription";
 import { dashboardRouter } from "@/server/routers/dashboard";
 import { chatRouter } from "@/server/routers/chat";
 // EasyFinance module
+import { statementTransactionsRouter } from "./routers/statementTransactions";
 import { budgetsRouter } from "@/server/routers/budgets";
 import { goalsRouter } from "@/server/routers/goals";
 import { recurringItemsRouter } from "@/server/routers/recurringItems";
@@ -40,6 +41,7 @@ export const appRouter = createTRPCRouter({
   dashboard: dashboardRouter,
   chat: chatRouter,
   // EasyFinance module
+  statementTransactions: statementTransactionsRouter,
   budgets: budgetsRouter,
   goals: goalsRouter,
   recurringItems: recurringItemsRouter,
