@@ -3,21 +3,39 @@
 import { useState, useCallback, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Loader2, Upload, CheckCircle2, XCircle } from "lucide-react";
+import { Loader2, Upload, CheckCircle2, XCircle, Image as ImageIcon } from "lucide-react";
 import { toast } from "sonner";
 
 type ImportState = "idle" | "uploading" | "duplicates" | "done" | "error";
+type FileCategory = "csv" | "pdf" | "image";
 
 interface DuplicateItem { id: string; date: string | Date; amount: number; description: string; }
 interface ProgressStep { step: string; pct: number; count?: number; }
 
-const STEP_LABELS: Record<string, string> = {
+const PDF_STEP_LABELS: Record<string, string> = {
   extracting:    "Extracting text from PDF",
   parsing:       "Parsing transactions",
   categorizing:  "Categorizing with AI",
   deduplicating: "Checking for duplicates",
   saving:        "Saving transactions",
 };
+
+const IMAGE_STEP_LABELS: Record<string, string> = {
+  parsing:       "Reading statement image with AI",
+  categorizing:  "Categorizing with AI",
+  deduplicating: "Checking for duplicates",
+  saving:        "Saving transactions",
+};
+
+const IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"];
+
+function getFileCategory(file: File): FileCategory | null {
+  const name = file.name.toLowerCase();
+  if (name.endsWith(".csv")) return "csv";
+  if (name.endsWith(".pdf")) return "pdf";
+  if (IMAGE_EXTENSIONS.some((ext) => name.endsWith(ext)) || file.type.startsWith("image/")) return "image";
+  return null;
+}
 
 interface ImportDialogProps {
   open: boolean;
@@ -49,9 +67,8 @@ export function ImportDialog({ open, onOpenChange, onComplete }: ImportDialogPro
   };
 
   const handleFile = (f: File) => {
-    const name = f.name.toLowerCase();
-    if (!name.endsWith(".csv") && !name.endsWith(".pdf")) {
-      toast.error("Only PDF and CSV files are supported");
+    if (!getFileCategory(f)) {
+      toast.error("Only PDF, CSV, and image files (JPEG, PNG, WEBP) are supported");
       return;
     }
     setFile(f);
@@ -73,9 +90,9 @@ export function ImportDialog({ open, onOpenChange, onComplete }: ImportDialogPro
     const formData = new FormData();
     formData.append("file", file);
 
-    const isCsv = file.name.toLowerCase().endsWith(".csv");
+    const category = getFileCategory(file);
 
-    if (isCsv) {
+    if (category === "csv") {
       // CSV: synchronous JSON response
       try {
         const res = await fetch("/api/pf/import", { method: "POST", body: formData });
@@ -99,7 +116,9 @@ export function ImportDialog({ open, onOpenChange, onComplete }: ImportDialogPro
       return;
     }
 
-    // PDF: SSE stream
+    // PDF and image: SSE stream
+    const stepLabels = category === "image" ? IMAGE_STEP_LABELS : PDF_STEP_LABELS;
+
     try {
       const res = await fetch("/api/pf/import", { method: "POST", body: formData });
       if (!res.ok) { throw new Error(`Upload failed: ${res.statusText}`); }
@@ -124,7 +143,7 @@ export function ImportDialog({ open, onOpenChange, onComplete }: ImportDialogPro
                 setProgress(d as ProgressStep);
                 if (d.step && d.pct > 10) {
                   setCompletedSteps(() => {
-                    const steps = Object.keys(STEP_LABELS);
+                    const steps = Object.keys(stepLabels);
                     const currentIdx = steps.indexOf(d.step as string);
                     return steps.slice(0, currentIdx);
                   });
@@ -176,7 +195,9 @@ export function ImportDialog({ open, onOpenChange, onComplete }: ImportDialogPro
     }
   };
 
-  const pdfStepKeys = Object.keys(STEP_LABELS);
+  const activeStepLabels = file && getFileCategory(file) === "image" ? IMAGE_STEP_LABELS : PDF_STEP_LABELS;
+  const activeStepKeys = Object.keys(activeStepLabels);
+  const fileCategory = file ? getFileCategory(file) : null;
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) reset(); onOpenChange(o); }}>
@@ -192,7 +213,7 @@ export function ImportDialog({ open, onOpenChange, onComplete }: ImportDialogPro
         {/* IDLE */}
         {state === "idle" && (
           <div className="flex flex-col gap-4">
-            <p className="text-sm text-muted-foreground">Upload a bank or credit card statement (PDF or CSV).</p>
+            <p className="text-sm text-muted-foreground">Upload a bank or credit card statement (PDF, CSV, or photo).</p>
             <div
               onDrop={onDrop}
               onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
@@ -201,16 +222,25 @@ export function ImportDialog({ open, onOpenChange, onComplete }: ImportDialogPro
               className={`flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-8 cursor-pointer transition-colors
                 ${dragging ? "border-primary bg-primary/5" : "border-muted-foreground/25 hover:border-primary/50"}`}
             >
-              <Upload className="h-8 w-8 text-muted-foreground/40 mb-2" />
+              {fileCategory === "image"
+                ? <ImageIcon className="h-8 w-8 text-muted-foreground/40 mb-2" />
+                : <Upload className="h-8 w-8 text-muted-foreground/40 mb-2" />
+              }
               {file ? (
                 <p className="text-sm font-medium">{file.name}</p>
               ) : (
                 <>
-                  <p className="text-sm text-muted-foreground">Drop PDF or CSV here</p>
-                  <p className="text-xs text-muted-foreground/60 mt-1">or click to browse · max 20 MB</p>
+                  <p className="text-sm text-muted-foreground">Drop PDF, CSV, or image here</p>
+                  <p className="text-xs text-muted-foreground/60 mt-1">JPEG · PNG · WEBP · PDF · CSV · max 20 MB</p>
                 </>
               )}
-              <input ref={inputRef} type="file" accept=".pdf,.csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+              <input
+                ref={inputRef}
+                type="file"
+                accept=".pdf,.csv,.jpg,.jpeg,.png,.webp,.heic,.heif,image/*"
+                className="hidden"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
+              />
             </div>
             <div className="flex gap-2 justify-end">
               <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
@@ -222,10 +252,15 @@ export function ImportDialog({ open, onOpenChange, onComplete }: ImportDialogPro
         {/* UPLOADING / PROCESSING */}
         {state === "uploading" && (
           <div className="flex flex-col gap-4">
-            {file?.name.toLowerCase().endsWith(".pdf") ? (
+            {fileCategory === "csv" ? (
+              <div className="flex items-center gap-3 py-4">
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                <p className="text-sm text-muted-foreground">Importing CSV…</p>
+              </div>
+            ) : (
               <>
                 <div className="flex flex-col gap-3">
-                  {pdfStepKeys.map((key, idx) => {
+                  {activeStepKeys.map((key, idx) => {
                     const isDone = completedSteps.includes(key);
                     const isActive = progress?.step === key;
                     const isPending = !isDone && !isActive;
@@ -238,7 +273,7 @@ export function ImportDialog({ open, onOpenChange, onComplete }: ImportDialogPro
                            <span className="text-muted-foreground">{idx + 1}</span>}
                         </div>
                         <div>
-                          <p className={`text-sm ${isPending ? "text-muted-foreground" : "text-foreground"}`}>{STEP_LABELS[key]}</p>
+                          <p className={`text-sm ${isPending ? "text-muted-foreground" : "text-foreground"}`}>{activeStepLabels[key]}</p>
                           {isActive && progress?.count && <p className="text-xs text-primary">{progress.count} transactions found</p>}
                         </div>
                       </div>
@@ -251,11 +286,6 @@ export function ImportDialog({ open, onOpenChange, onComplete }: ImportDialogPro
                   </div>
                 )}
               </>
-            ) : (
-              <div className="flex items-center gap-3 py-4">
-                <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                <p className="text-sm text-muted-foreground">Importing CSV…</p>
-              </div>
             )}
           </div>
         )}
