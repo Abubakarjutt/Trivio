@@ -26,16 +26,19 @@ export const statementTransactionsRouter = createTRPCRouter({
         if (input.dateFrom) where.date.gte = new Date(input.dateFrom);
         if (input.dateTo) where.date.lte = new Date(input.dateTo);
       }
-      if (input.cursor) where.id = { lt: input.cursor };
-
+      const skip = input.cursor ? parseInt(input.cursor, 10) : 0;
       const items = await ctx.db.statementTransaction.findMany({
         where,
         orderBy: [{ date: "desc" }, { createdAt: "desc" }],
         take: input.limit + 1,
+        skip,
       });
 
       let nextCursor: string | undefined;
-      if (items.length > input.limit) nextCursor = items.pop()!.id;
+      if (items.length > input.limit) {
+        items.pop();
+        nextCursor = String(skip + input.limit);
+      }
       return { items, nextCursor };
     }),
 
@@ -43,8 +46,8 @@ export const statementTransactionsRouter = createTRPCRouter({
     .input(z.object({
       id: z.string(),
       category: z.string(),
-      mccCode: z.string().default("0000"),
-      mccLabel: z.string().default("Manual"),
+      mccCode: z.string().optional(),
+      mccLabel: z.string().optional(),
     }))
     .mutation(async ({ ctx, input }) => {
       const txn = await ctx.db.statementTransaction.findFirst({
@@ -53,7 +56,11 @@ export const statementTransactionsRouter = createTRPCRouter({
       if (!txn) throw new TRPCError({ code: "NOT_FOUND" });
       return ctx.db.statementTransaction.update({
         where: { id: input.id },
-        data: { category: input.category, mccCode: input.mccCode, mccLabel: input.mccLabel },
+        data: {
+          category: input.category,
+          ...(input.mccCode !== undefined ? { mccCode: input.mccCode } : {}),
+          ...(input.mccLabel !== undefined ? { mccLabel: input.mccLabel } : {}),
+        },
       });
     }),
 
