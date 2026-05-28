@@ -603,6 +603,7 @@ model Watchlist {
 enum StatementFileType {
   PDF
   CSV
+  IMAGE
 }
 
 enum StatementImportStatus {
