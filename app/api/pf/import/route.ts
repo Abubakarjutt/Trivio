@@ -4,8 +4,11 @@ import { db } from "@/lib/db";
 import { autoDetectColumns, parseCsvBuffer, detectDuplicates } from "@/server/services/statement-parser.service";
 import { categorizeBatch } from "@/server/services/statement-categorization.service";
 import { extractTextFromPdf, parseTransactionsFromText } from "@/server/services/pdf-statement.service";
+import { parseTransactionsFromImage } from "@/server/services/image-statement.service";
 
 const MAX_SIZE_BYTES = 20 * 1024 * 1024; // 20 MB
+
+const IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"];
 
 export async function POST(request: NextRequest) {
   const session = await auth();
@@ -41,17 +44,17 @@ export async function POST(request: NextRequest) {
   const name = file.name.toLowerCase();
   const isCsv = name.endsWith(".csv") || file.type === "text/csv";
   const isPdf = name.endsWith(".pdf") || file.type === "application/pdf";
+  const isImage = IMAGE_EXTENSIONS.some((ext) => name.endsWith(ext)) || file.type.startsWith("image/");
 
-  if (!isCsv && !isPdf) {
-    return NextResponse.json({ error: "Only PDF and CSV files are supported" }, { status: 422 });
+  if (!isCsv && !isPdf && !isImage) {
+    return NextResponse.json({ error: "Only PDF, CSV, and image files are supported" }, { status: 422 });
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());
 
-  if (isCsv) {
-    return handleCsvImport(buffer, file.name, organisationId);
-  }
-  return handlePdfImport(buffer, file.name, organisationId);
+  if (isCsv) return handleCsvImport(buffer, file.name, organisationId);
+  if (isPdf)  return handlePdfImport(buffer, file.name, organisationId);
+  return handleImageImport(buffer, file.name, organisationId);
 }
 
 async function handleCsvImport(buffer: Buffer, filename: string, organisationId: string) {
@@ -116,100 +119,175 @@ async function handleCsvImport(buffer: Buffer, filename: string, organisationId:
   return NextResponse.json({ status: "done", batchId: batch.id, count: rawTransactions.length, skipped: 0 });
 }
 
-async function handlePdfImport(buffer: Buffer, filename: string, organisationId: string) {
+// Shared SSE helper used by both PDF and image handlers
+function createSseStream(
+  handler: (emit: (event: string, data: object) => void) => Promise<void>
+): Response {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
       const emit = (event: string, data: object) => {
         controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
       };
-
-      let batchId: string | undefined;
-
       try {
-        const batch = await db.statementImportBatch.create({
-          data: { organisationId, filename, fileType: "PDF", status: "PROCESSING", transactionCount: 0 },
-        });
-        batchId = batch.id;
-
-        emit("progress", { step: "extracting", pct: 10 });
-        const text = await extractTextFromPdf(buffer);
-
-        emit("progress", { step: "parsing", pct: 30 });
-        const rawTransactions = await parseTransactionsFromText(text);
-
-        if (rawTransactions.length === 0) {
-          await db.statementImportBatch.update({ where: { id: batchId }, data: { status: "FAILED", errorMessage: "No transactions found" } });
-          emit("error", { message: "No transactions found in PDF. The format may not be supported." });
-          controller.close();
-          return;
-        }
-
-        emit("progress", { step: "categorizing", pct: 50, count: rawTransactions.length });
-        const categorized = await categorizeBatch(rawTransactions.map((t) => t.description));
-
-        emit("progress", { step: "deduplicating", pct: 75 });
-        const existingRaw = await db.statementTransaction.findMany({
-          where: { organisationId },
-          select: { id: true, date: true, description: true, amount: true },
-        });
-        const existing = existingRaw.map((e) => ({ ...e, amount: Number(e.amount) }));
-        const { duplicates } = detectDuplicates(rawTransactions, existing);
-
-        emit("progress", { step: "saving", pct: 90 });
-        await db.statementTransaction.createMany({
-          data: rawTransactions.map((txn, i) => ({
-            organisationId,
-            importBatchId: batchId!,
-            date: new Date(txn.date),
-            description: txn.description,
-            merchantName: categorized[i]?.merchantName ?? txn.description,
-            amount: txn.amount,
-            type: txn.type,
-            category: categorized[i]?.category ?? "Other",
-            mccCode: categorized[i]?.mccCode ?? "0000",
-            mccLabel: categorized[i]?.mccLabel ?? "Uncategorized",
-          })),
-        });
-
-        await db.statementImportBatch.update({
-          where: { id: batchId },
-          data: { transactionCount: rawTransactions.length },
-        });
-
-        if (duplicates.length > 0) {
-          const dupDescs = duplicates.map((d) => d.incoming.description);
-          const savedDupes = await db.statementTransaction.findMany({
-            where: { importBatchId: batchId, description: { in: dupDescs } },
-            select: { id: true, date: true, description: true, amount: true },
-          });
-          emit("duplicates", {
-            count: savedDupes.length,
-            items: savedDupes.map((d) => ({ id: d.id, date: d.date, amount: Number(d.amount), description: d.description })),
-            batchId,
-          });
-          controller.close();
-          return;
-        }
-
-        await db.statementImportBatch.update({ where: { id: batchId }, data: { status: "DONE" } });
-        emit("done", { batchId, count: rawTransactions.length, skipped: 0 });
-        controller.close();
-      } catch (err) {
-        if (batchId) {
-          await db.statementImportBatch.update({ where: { id: batchId }, data: { status: "FAILED", errorMessage: String(err) } }).catch(() => {});
-        }
-        emit("error", { message: err instanceof Error ? err.message : "Unknown error" });
+        await handler(emit);
+      } finally {
         controller.close();
       }
     },
   });
-
   return new Response(stream, {
     headers: {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       "Connection": "keep-alive",
     },
+  });
+}
+
+async function handlePdfImport(buffer: Buffer, filename: string, organisationId: string) {
+  return createSseStream(async (emit) => {
+    let batchId: string | undefined;
+    try {
+      const batch = await db.statementImportBatch.create({
+        data: { organisationId, filename, fileType: "PDF", status: "PROCESSING", transactionCount: 0 },
+      });
+      batchId = batch.id;
+
+      emit("progress", { step: "extracting", pct: 10 });
+      const text = await extractTextFromPdf(buffer);
+
+      emit("progress", { step: "parsing", pct: 30 });
+      const rawTransactions = await parseTransactionsFromText(text);
+
+      if (rawTransactions.length === 0) {
+        await db.statementImportBatch.update({ where: { id: batchId }, data: { status: "FAILED", errorMessage: "No transactions found" } });
+        emit("error", { message: "No transactions found in PDF. The format may not be supported." });
+        return;
+      }
+
+      emit("progress", { step: "categorizing", pct: 50, count: rawTransactions.length });
+      const categorized = await categorizeBatch(rawTransactions.map((t) => t.description));
+
+      emit("progress", { step: "deduplicating", pct: 75 });
+      const existingRaw = await db.statementTransaction.findMany({
+        where: { organisationId },
+        select: { id: true, date: true, description: true, amount: true },
+      });
+      const existing = existingRaw.map((e) => ({ ...e, amount: Number(e.amount) }));
+      const { duplicates } = detectDuplicates(rawTransactions, existing);
+
+      emit("progress", { step: "saving", pct: 90 });
+      await db.statementTransaction.createMany({
+        data: rawTransactions.map((txn, i) => ({
+          organisationId,
+          importBatchId: batchId!,
+          date: new Date(txn.date),
+          description: txn.description,
+          merchantName: categorized[i]?.merchantName ?? txn.description,
+          amount: txn.amount,
+          type: txn.type,
+          category: categorized[i]?.category ?? "Other",
+          mccCode: categorized[i]?.mccCode ?? "0000",
+          mccLabel: categorized[i]?.mccLabel ?? "Uncategorized",
+        })),
+      });
+
+      await db.statementImportBatch.update({ where: { id: batchId }, data: { transactionCount: rawTransactions.length } });
+
+      if (duplicates.length > 0) {
+        const dupDescs = duplicates.map((d) => d.incoming.description);
+        const savedDupes = await db.statementTransaction.findMany({
+          where: { importBatchId: batchId, description: { in: dupDescs } },
+          select: { id: true, date: true, description: true, amount: true },
+        });
+        emit("duplicates", {
+          count: savedDupes.length,
+          items: savedDupes.map((d) => ({ id: d.id, date: d.date, amount: Number(d.amount), description: d.description })),
+          batchId,
+        });
+        return;
+      }
+
+      await db.statementImportBatch.update({ where: { id: batchId }, data: { status: "DONE" } });
+      emit("done", { batchId, count: rawTransactions.length, skipped: 0 });
+    } catch (err) {
+      if (batchId) {
+        await db.statementImportBatch.update({ where: { id: batchId }, data: { status: "FAILED", errorMessage: String(err) } }).catch(() => {});
+      }
+      emit("error", { message: err instanceof Error ? err.message : "Unknown error" });
+    }
+  });
+}
+
+async function handleImageImport(buffer: Buffer, filename: string, organisationId: string) {
+  return createSseStream(async (emit) => {
+    let batchId: string | undefined;
+    try {
+      const batch = await db.statementImportBatch.create({
+        data: { organisationId, filename, fileType: "IMAGE", status: "PROCESSING", transactionCount: 0 },
+      });
+      batchId = batch.id;
+
+      emit("progress", { step: "parsing", pct: 20 });
+      const rawTransactions = await parseTransactionsFromImage(buffer);
+
+      if (rawTransactions.length === 0) {
+        await db.statementImportBatch.update({ where: { id: batchId }, data: { status: "FAILED", errorMessage: "No transactions found" } });
+        emit("error", { message: "No transactions found in image. Ensure the statement is clearly visible and try again." });
+        return;
+      }
+
+      emit("progress", { step: "categorizing", pct: 50, count: rawTransactions.length });
+      const categorized = await categorizeBatch(rawTransactions.map((t) => t.description));
+
+      emit("progress", { step: "deduplicating", pct: 75 });
+      const existingRaw = await db.statementTransaction.findMany({
+        where: { organisationId },
+        select: { id: true, date: true, description: true, amount: true },
+      });
+      const existing = existingRaw.map((e) => ({ ...e, amount: Number(e.amount) }));
+      const { duplicates } = detectDuplicates(rawTransactions, existing);
+
+      emit("progress", { step: "saving", pct: 90 });
+      await db.statementTransaction.createMany({
+        data: rawTransactions.map((txn, i) => ({
+          organisationId,
+          importBatchId: batchId!,
+          date: new Date(txn.date),
+          description: txn.description,
+          merchantName: categorized[i]?.merchantName ?? txn.description,
+          amount: txn.amount,
+          type: txn.type,
+          category: categorized[i]?.category ?? "Other",
+          mccCode: categorized[i]?.mccCode ?? "0000",
+          mccLabel: categorized[i]?.mccLabel ?? "Uncategorized",
+        })),
+      });
+
+      await db.statementImportBatch.update({ where: { id: batchId }, data: { transactionCount: rawTransactions.length } });
+
+      if (duplicates.length > 0) {
+        const dupDescs = duplicates.map((d) => d.incoming.description);
+        const savedDupes = await db.statementTransaction.findMany({
+          where: { importBatchId: batchId, description: { in: dupDescs } },
+          select: { id: true, date: true, description: true, amount: true },
+        });
+        emit("duplicates", {
+          count: savedDupes.length,
+          items: savedDupes.map((d) => ({ id: d.id, date: d.date, amount: Number(d.amount), description: d.description })),
+          batchId,
+        });
+        return;
+      }
+
+      await db.statementImportBatch.update({ where: { id: batchId }, data: { status: "DONE" } });
+      emit("done", { batchId, count: rawTransactions.length, skipped: 0 });
+    } catch (err) {
+      if (batchId) {
+        await db.statementImportBatch.update({ where: { id: batchId }, data: { status: "FAILED", errorMessage: String(err) } }).catch(() => {});
+      }
+      emit("error", { message: err instanceof Error ? err.message : "Unknown error" });
+    }
   });
 }
