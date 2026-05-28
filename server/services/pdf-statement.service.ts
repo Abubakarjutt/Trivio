@@ -11,9 +11,18 @@ const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "gemma4:e4b";
 export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
   // Dynamic import avoids SSR/webpack bundling issues with pdfjs-dist
   const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs" as string);
-  // Disable web worker — not available in Node.js environment
+
+  // pdfjs v5 requires a truthy workerSrc even in Node.js — an empty string is
+  // falsy and causes "Setting up fake worker failed: No GlobalWorkerOptions.workerSrc".
+  // Resolve the bundled worker file as an absolute file:// URL so Node.js can load it.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (pdfjsLib as any).GlobalWorkerOptions.workerSrc = "";
+  if (!(pdfjsLib as any).GlobalWorkerOptions.workerSrc ||
+      (pdfjsLib as any).GlobalWorkerOptions.workerSrc === "./pdf.worker.mjs") {
+    const { join } = await import("path");
+    const workerPath = join(process.cwd(), "node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (pdfjsLib as any).GlobalWorkerOptions.workerSrc = `file://${workerPath}`;
+  }
 
   const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
   const pdf = await loadingTask.promise;
