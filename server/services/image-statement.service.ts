@@ -65,12 +65,15 @@ export async function parseTransactionsFromImage(buffer: Buffer): Promise<RawTra
     if (!Array.isArray(parsed)) return [];
 
     return (parsed as Array<Partial<RawTransaction>>)
-      .filter((item) => item.date && item.description && item.amount != null && item.type)
+      .filter((item) => {
+        const t = String(item.type ?? "").toUpperCase();
+        return item.date && item.description && item.amount != null && (t === "DEBIT" || t === "CREDIT");
+      })
       .map((item) => ({
         date: String(item.date),
         description: String(item.description),
         amount: Number(item.amount),
-        type: item.type as "DEBIT" | "CREDIT",
+        type: String(item.type).toUpperCase() as "DEBIT" | "CREDIT",
       }));
   } catch {
     console.warn("[image-statement.service] Ollama request failed — returning empty transaction list.");

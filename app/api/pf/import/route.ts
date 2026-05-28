@@ -6,6 +6,9 @@ import { categorizeBatch } from "@/server/services/statement-categorization.serv
 import { extractTextFromPdf, parseTransactionsFromText } from "@/server/services/pdf-statement.service";
 import { parseTransactionsFromImage } from "@/server/services/image-statement.service";
 
+// Allow up to 3 minutes for Ollama inference (PDF/image extraction can be slow)
+export const maxDuration = 180;
+
 const MAX_SIZE_BYTES = 20 * 1024 * 1024; // 20 MB
 
 const IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"];
@@ -44,7 +47,8 @@ export async function POST(request: NextRequest) {
   const name = file.name.toLowerCase();
   const isCsv = name.endsWith(".csv") || file.type === "text/csv";
   const isPdf = name.endsWith(".pdf") || file.type === "application/pdf";
-  const isImage = IMAGE_EXTENSIONS.some((ext) => name.endsWith(ext)) || file.type.startsWith("image/");
+  const IMAGE_MIME_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"];
+  const isImage = IMAGE_EXTENSIONS.some((ext) => name.endsWith(ext)) || IMAGE_MIME_TYPES.includes(file.type);
 
   if (!isCsv && !isPdf && !isImage) {
     return NextResponse.json({ error: "Only PDF, CSV, and image files are supported" }, { status: 422 });
