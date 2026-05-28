@@ -1,0 +1,320 @@
+"use client";
+
+import { useState, useCallback, useRef } from "react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Loader2, Upload, CheckCircle2, XCircle } from "lucide-react";
+import { toast } from "sonner";
+
+type ImportState = "idle" | "uploading" | "duplicates" | "done" | "error";
+
+interface DuplicateItem { id: string; date: string | Date; amount: number; description: string; }
+interface ProgressStep { step: string; pct: number; count?: number; }
+
+const STEP_LABELS: Record<string, string> = {
+  extracting:    "Extracting text from PDF",
+  parsing:       "Parsing transactions",
+  categorizing:  "Categorizing with AI",
+  deduplicating: "Checking for duplicates",
+  saving:        "Saving transactions",
+};
+
+interface ImportDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onComplete: () => void;
+}
+
+export function ImportDialog({ open, onOpenChange, onComplete }: ImportDialogProps) {
+  const [state, setState] = useState<ImportState>("idle");
+  const [file, setFile] = useState<File | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const [progress, setProgress] = useState<ProgressStep | null>(null);
+  const [completedSteps, setCompletedSteps] = useState<string[]>([]);
+  const [duplicates, setDuplicates] = useState<DuplicateItem[]>([]);
+  const [batchId, setBatchId] = useState<string | null>(null);
+  const [resultCount, setResultCount] = useState(0);
+  const [errorMsg, setErrorMsg] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const reset = () => {
+    setState("idle");
+    setFile(null);
+    setProgress(null);
+    setCompletedSteps([]);
+    setDuplicates([]);
+    setBatchId(null);
+    setResultCount(0);
+    setErrorMsg("");
+  };
+
+  const handleFile = (f: File) => {
+    const name = f.name.toLowerCase();
+    if (!name.endsWith(".csv") && !name.endsWith(".pdf")) {
+      toast.error("Only PDF and CSV files are supported");
+      return;
+    }
+    setFile(f);
+  };
+
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+    const f = e.dataTransfer.files[0];
+    if (f) handleFile(f);
+  }, []);
+
+  const handleImport = async () => {
+    if (!file) return;
+    setState("uploading");
+    setCompletedSteps([]);
+    setProgress(null);
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const isCsv = file.name.toLowerCase().endsWith(".csv");
+
+    if (isCsv) {
+      // CSV: synchronous JSON response
+      try {
+        const res = await fetch("/api/pf/import", { method: "POST", body: formData });
+        const data = await res.json() as { status: string; batchId?: string; count?: number; duplicates?: DuplicateItem[]; error?: string };
+        if (!res.ok || data.error) throw new Error(data.error ?? "Import failed");
+
+        if (data.status === "duplicates" && data.batchId && data.duplicates) {
+          setBatchId(data.batchId);
+          setDuplicates(data.duplicates);
+          setState("duplicates");
+        } else {
+          setResultCount(data.count ?? 0);
+          setState("done");
+          onComplete();
+          toast.success(`${data.count} transactions imported`);
+        }
+      } catch (e) {
+        setErrorMsg(e instanceof Error ? e.message : "Unknown error");
+        setState("error");
+      }
+      return;
+    }
+
+    // PDF: SSE stream
+    try {
+      const res = await fetch("/api/pf/import", { method: "POST", body: formData });
+      if (!res.ok) { throw new Error(`Upload failed: ${res.statusText}`); }
+
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let currentEvent = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        for (const line of chunk.split("\n")) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith("event: ")) {
+            currentEvent = trimmed.slice(7);
+          } else if (trimmed.startsWith("data: ")) {
+            try {
+              const d = JSON.parse(trimmed.slice(6));
+              if (currentEvent === "progress") {
+                setProgress(d as ProgressStep);
+                if (d.step && d.pct > 10) {
+                  setCompletedSteps(() => {
+                    const steps = Object.keys(STEP_LABELS);
+                    const currentIdx = steps.indexOf(d.step as string);
+                    return steps.slice(0, currentIdx);
+                  });
+                }
+              } else if (currentEvent === "duplicates") {
+                setBatchId(d.batchId);
+                setDuplicates(d.items ?? []);
+                setState("duplicates");
+              } else if (currentEvent === "done") {
+                setResultCount(d.count ?? 0);
+                setState("done");
+                onComplete();
+                toast.success(`${d.count} transactions imported`);
+              } else if (currentEvent === "error") {
+                throw new Error(d.message ?? "Import error");
+              }
+            } catch (parseErr) {
+              if (parseErr instanceof SyntaxError) continue;
+              throw parseErr;
+            }
+            currentEvent = "";
+          }
+        }
+      }
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : "Unknown error");
+      setState("error");
+    }
+  };
+
+  const handleConfirm = async (skipDuplicates: boolean) => {
+    if (!batchId) return;
+    setState("uploading");
+    try {
+      const url = `/api/pf/import/${batchId}/confirm?skip=${skipDuplicates}`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ duplicateIds: duplicates.map((d) => d.id) }),
+      });
+      const data = await res.json() as { count: number; skipped: number };
+      setResultCount(data.count);
+      setState("done");
+      onComplete();
+      toast.success(`${data.count} transactions imported${data.skipped ? `, ${data.skipped} duplicates skipped` : ""}`);
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : "Unknown error");
+      setState("error");
+    }
+  };
+
+  const pdfStepKeys = Object.keys(STEP_LABELS);
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) reset(); onOpenChange(o); }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>
+            {state === "duplicates" ? "Possible Duplicates Found" :
+             state === "done" ? "Import Complete" :
+             state === "error" ? "Import Failed" : "Import Statement"}
+          </DialogTitle>
+        </DialogHeader>
+
+        {/* IDLE */}
+        {state === "idle" && (
+          <div className="flex flex-col gap-4">
+            <p className="text-sm text-muted-foreground">Upload a bank or credit card statement (PDF or CSV).</p>
+            <div
+              onDrop={onDrop}
+              onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+              onDragLeave={() => setDragging(false)}
+              onClick={() => inputRef.current?.click()}
+              className={`flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-8 cursor-pointer transition-colors
+                ${dragging ? "border-primary bg-primary/5" : "border-muted-foreground/25 hover:border-primary/50"}`}
+            >
+              <Upload className="h-8 w-8 text-muted-foreground/40 mb-2" />
+              {file ? (
+                <p className="text-sm font-medium">{file.name}</p>
+              ) : (
+                <>
+                  <p className="text-sm text-muted-foreground">Drop PDF or CSV here</p>
+                  <p className="text-xs text-muted-foreground/60 mt-1">or click to browse · max 20 MB</p>
+                </>
+              )}
+              <input ref={inputRef} type="file" accept=".pdf,.csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }} />
+            </div>
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+              <Button disabled={!file} onClick={handleImport}>Import</Button>
+            </div>
+          </div>
+        )}
+
+        {/* UPLOADING / PROCESSING */}
+        {state === "uploading" && (
+          <div className="flex flex-col gap-4">
+            {file?.name.toLowerCase().endsWith(".pdf") ? (
+              <>
+                <div className="flex flex-col gap-3">
+                  {pdfStepKeys.map((key, idx) => {
+                    const isDone = completedSteps.includes(key);
+                    const isActive = progress?.step === key;
+                    const isPending = !isDone && !isActive;
+                    return (
+                      <div key={key} className="flex items-center gap-3">
+                        <div className={`h-5 w-5 rounded-full flex items-center justify-center text-xs flex-shrink-0
+                          ${isDone ? "bg-emerald-500 text-white" : isActive ? "bg-primary" : "bg-muted border"}`}>
+                          {isDone ? <CheckCircle2 className="h-3 w-3" /> :
+                           isActive ? <Loader2 className="h-3 w-3 animate-spin text-white" /> :
+                           <span className="text-muted-foreground">{idx + 1}</span>}
+                        </div>
+                        <div>
+                          <p className={`text-sm ${isPending ? "text-muted-foreground" : "text-foreground"}`}>{STEP_LABELS[key]}</p>
+                          {isActive && progress?.count && <p className="text-xs text-primary">{progress.count} transactions found</p>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {progress && (
+                  <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                    <div className="h-full bg-primary rounded-full transition-all duration-500" style={{ width: `${progress.pct}%` }} />
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="flex items-center gap-3 py-4">
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                <p className="text-sm text-muted-foreground">Importing CSV…</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* DUPLICATES */}
+        {state === "duplicates" && (
+          <div className="flex flex-col gap-4">
+            <p className="text-sm text-muted-foreground">{duplicates.length} transaction{duplicates.length !== 1 ? "s" : ""} may already exist in your records.</p>
+            <div className="flex flex-col gap-2 max-h-48 overflow-y-auto">
+              {duplicates.map((d) => (
+                <div key={d.id} className="flex items-center justify-between rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 px-3 py-2">
+                  <div>
+                    <p className="text-sm font-medium">{d.description}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {new Date(d.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                    </p>
+                  </div>
+                  <p className="text-sm font-medium text-red-500">−${Number(d.amount).toFixed(2)}</p>
+                </div>
+              ))}
+            </div>
+            <div className="flex flex-col gap-2">
+              <Button variant="outline" onClick={() => handleConfirm(true)}>
+                Skip duplicates — import new transactions only
+              </Button>
+              <Button onClick={() => handleConfirm(false)}>
+                Import all — keep duplicates
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* DONE */}
+        {state === "done" && (
+          <div className="flex flex-col items-center gap-4 py-4">
+            <CheckCircle2 className="h-12 w-12 text-emerald-500" />
+            <div className="text-center">
+              <p className="font-medium">{resultCount} transactions imported</p>
+              <p className="text-sm text-muted-foreground mt-1">Categories have been auto-assigned. Edit any row in the table.</p>
+            </div>
+            <Button onClick={() => { onOpenChange(false); reset(); }}>View Transactions</Button>
+          </div>
+        )}
+
+        {/* ERROR */}
+        {state === "error" && (
+          <div className="flex flex-col items-center gap-4 py-4">
+            <XCircle className="h-12 w-12 text-red-500" />
+            <div className="text-center">
+              <p className="font-medium text-red-500">Import failed</p>
+              <p className="text-sm text-muted-foreground mt-1">{errorMsg}</p>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
+              <Button onClick={reset}>Try again</Button>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
