@@ -59,6 +59,74 @@ describe("statementTransactions.list", () => {
     const where = findMany.mock.calls[0][0].where;
     expect(where.isExcluded).toBeUndefined();
   });
+
+  it("applies month filter as gte/lt date range", async () => {
+    const findMany = vi.fn().mockResolvedValue([]);
+    const caller = createCaller(makeCtx({ statementTransaction: { findMany } }));
+    await caller.list({ month: "2026-05" });
+    const where = findMany.mock.calls[0][0].where;
+    expect(where.date.gte).toEqual(new Date(2026, 4, 1));   // May 1 local
+    expect(where.date.lt).toEqual(new Date(2026, 5, 1));    // Jun 1 local
+  });
+
+  it("applies dateFrom/dateTo when no month is given", async () => {
+    const findMany = vi.fn().mockResolvedValue([]);
+    const caller = createCaller(makeCtx({ statementTransaction: { findMany } }));
+    await caller.list({ dateFrom: "2026-05-01", dateTo: "2026-05-31" });
+    const where = findMany.mock.calls[0][0].where;
+    expect(where.date.gte).toEqual(new Date("2026-05-01"));
+    expect(where.date.lte).toEqual(new Date("2026-05-31"));
+  });
+
+  it("applies category filter", async () => {
+    const findMany = vi.fn().mockResolvedValue([]);
+    const caller = createCaller(makeCtx({ statementTransaction: { findMany } }));
+    await caller.list({ category: "Transport" });
+    expect(findMany.mock.calls[0][0].where.category).toBe("Transport");
+  });
+
+  it("applies type filter", async () => {
+    const findMany = vi.fn().mockResolvedValue([]);
+    const caller = createCaller(makeCtx({ statementTransaction: { findMany } }));
+    await caller.list({ type: "DEBIT" });
+    expect(findMany.mock.calls[0][0].where.type).toBe("DEBIT");
+  });
+
+  it("applies search filter on merchantName", async () => {
+    const findMany = vi.fn().mockResolvedValue([]);
+    const caller = createCaller(makeCtx({ statementTransaction: { findMany } }));
+    await caller.list({ search: "star" });
+    expect(findMany.mock.calls[0][0].where.merchantName).toEqual({ contains: "star", mode: "insensitive" });
+  });
+
+  it("sets nextCursor when more items exist than limit", async () => {
+    // Return limit+1 items — the router should pop the last and set nextCursor
+    const items = Array.from({ length: 4 }, (_, i) => ({
+      id: `t${i}`, organisationId: ORG, date: new Date(), description: "x",
+      merchantName: "M", amount: dec(1), type: "DEBIT", category: "Other",
+      mccCode: "0000", mccLabel: "", isExcluded: false, importBatchId: null,
+      createdAt: new Date(), updatedAt: new Date(),
+    }));
+    const findMany = vi.fn().mockResolvedValue(items);
+    const caller = createCaller(makeCtx({ statementTransaction: { findMany } }));
+    const result = await caller.list({ limit: 3 });
+    expect(result.items).toHaveLength(3);         // last item popped
+    expect(result.nextCursor).toBe("3");           // skip=0+limit=3
+  });
+
+  it("uses cursor as skip offset for pagination", async () => {
+    const findMany = vi.fn().mockResolvedValue([]);
+    const caller = createCaller(makeCtx({ statementTransaction: { findMany } }));
+    await caller.list({ cursor: "50" });
+    expect(findMany.mock.calls[0][0].skip).toBe(50);
+  });
+
+  it("returns no nextCursor when result set fits in one page", async () => {
+    const findMany = vi.fn().mockResolvedValue([]);
+    const caller = createCaller(makeCtx({ statementTransaction: { findMany } }));
+    const result = await caller.list({ limit: 50 });
+    expect(result.nextCursor).toBeUndefined();
+  });
 });
 
 // ─── updateCategory ───────────────────────────────────────────────────────────
@@ -144,6 +212,49 @@ describe("statementTransactions.deleteByBatch", () => {
   });
 });
 
+// ─── deleteTransaction ────────────────────────────────────────────────────────
+
+describe("statementTransactions.deleteTransaction", () => {
+  it("deletes a transaction that belongs to the org", async () => {
+    const deleteFn = vi.fn().mockResolvedValue({ id: "t1" });
+    const caller = createCaller(makeCtx({
+      statementTransaction: {
+        findFirst: vi.fn().mockResolvedValue({ id: "t1", organisationId: ORG }),
+        delete: deleteFn,
+      },
+    }));
+    const result = await caller.deleteTransaction({ id: "t1" });
+    expect(deleteFn).toHaveBeenCalledWith({ where: { id: "t1" } });
+    expect(result.success).toBe(true);
+  });
+
+  it("throws NOT_FOUND when transaction does not belong to org", async () => {
+    const caller = createCaller(makeCtx({
+      statementTransaction: { findFirst: vi.fn().mockResolvedValue(null) },
+    }));
+    await expect(caller.deleteTransaction({ id: "missing" })).rejects.toThrow("NOT_FOUND");
+  });
+});
+
+// ─── listBatches ─────────────────────────────────────────────────────────────
+
+describe("statementTransactions.listBatches", () => {
+  it("returns import batches for the org ordered by newest first", async () => {
+    const mockBatches = [
+      { id: "b2", filename: "June.pdf", status: "DONE", transactionCount: 22, fileType: "PDF", createdAt: new Date() },
+      { id: "b1", filename: "May.csv",  status: "DONE", transactionCount: 15, fileType: "CSV", createdAt: new Date() },
+    ];
+    const findMany = vi.fn().mockResolvedValue(mockBatches);
+    const caller = createCaller(makeCtx({ statementImportBatch: { findMany } }));
+    const result = await caller.listBatches();
+    expect(result).toHaveLength(2);
+    expect(result[0].filename).toBe("June.pdf");
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ orderBy: { createdAt: "desc" }, take: 20 })
+    );
+  });
+});
+
 // ─── summary ─────────────────────────────────────────────────────────────────
 
 describe("statementTransactions.summary", () => {
@@ -164,5 +275,39 @@ describe("statementTransactions.summary", () => {
     expect(result.totalDebits).toBeCloseTo(821.50);
     expect(result.totalCredits).toBeCloseTo(3200.00);
     expect(result.latestBatch?.id).toBe("b1");
+  });
+
+  it("returns zeros when no transactions exist", async () => {
+    const caller = createCaller(makeCtx({
+      statementTransaction: {
+        count: vi.fn().mockResolvedValue(0),
+        aggregate: vi.fn().mockResolvedValue({ _sum: { amount: null } }),
+      },
+      statementImportBatch: { findFirst: vi.fn().mockResolvedValue(null) },
+    }));
+    const result = await caller.summary({});
+    expect(result.totalCount).toBe(0);
+    expect(result.totalDebits).toBe(0);
+    expect(result.totalCredits).toBe(0);
+    expect(result.latestBatch).toBeNull();
+  });
+
+  it("applies month filter in the where clause for all three aggregates", async () => {
+    const count     = vi.fn().mockResolvedValue(5);
+    const aggregate = vi.fn().mockResolvedValue({ _sum: { amount: dec(0) } });
+    const caller = createCaller(makeCtx({
+      statementTransaction: { count, aggregate },
+      statementImportBatch: { findFirst: vi.fn().mockResolvedValue(null) },
+    }));
+    await caller.summary({ month: "2026-05" });
+
+    // All DB calls should have the date range scoped to May 2026
+    const countWhere = count.mock.calls[0][0].where;
+    expect(countWhere.date.gte).toEqual(new Date(2026, 4, 1));
+    expect(countWhere.date.lt).toEqual(new Date(2026, 5, 1));
+
+    const debitWhere = aggregate.mock.calls[0][0].where;
+    expect(debitWhere.type).toBe("DEBIT");
+    expect(debitWhere.date.gte).toEqual(new Date(2026, 4, 1));
   });
 });

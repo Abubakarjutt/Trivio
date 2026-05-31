@@ -152,6 +152,34 @@ describe("parseCsvBuffer", () => {
     const txns = parseCsvBuffer(Buffer.from("Date,Description,Amount"), autoDetectColumns(["Date", "Description", "Amount"]));
     expect(txns).toHaveLength(0);
   });
+
+  it("handles Windows-style CRLF line endings", () => {
+    const csv = "Date,Description,Amount\r\n2026-05-01,Netflix,15.99";
+    const txns = parseCsvBuffer(Buffer.from(csv), autoDetectColumns(["Date", "Description", "Amount"]));
+    expect(txns).toHaveLength(1);
+    expect(txns[0].amount).toBeCloseTo(15.99);
+  });
+
+  it("handles quoted fields containing commas", () => {
+    const csv = 'Date,Description,Amount\n2026-05-01,"Coffee, Tea & Co",6.50';
+    const txns = parseCsvBuffer(Buffer.from(csv), autoDetectColumns(["Date", "Description", "Amount"]));
+    expect(txns[0].description).toBe("Coffee, Tea & Co");
+    expect(txns[0].amount).toBeCloseTo(6.50);
+  });
+
+  it("parses DD-MMM-YYYY date format", () => {
+    const csv = "Date,Description,Amount\n15-Jan-2026,Tesco,20.00";
+    const txns = parseCsvBuffer(Buffer.from(csv), autoDetectColumns(["Date", "Description", "Amount"]));
+    expect(txns[0].date).toBe("2026-01-15");
+  });
+
+  it("skips debit/credit rows where both columns are empty or zero", () => {
+    const csv = "Date,Memo,Debit,Credit\n2026-05-01,Mystery,0.00,0.00\n2026-05-02,Valid,10.00,";
+    const map = autoDetectColumns(["Date", "Memo", "Debit", "Credit"]);
+    const txns = parseCsvBuffer(Buffer.from(csv), map);
+    expect(txns).toHaveLength(1);
+    expect(txns[0].description).toBe("Valid");
+  });
 });
 
 // ─── levenshteinSimilarity ────────────────────────────────────────────────────
@@ -169,6 +197,14 @@ describe("levenshteinSimilarity", () => {
   it("returns high similarity for minor differences", () => {
     const sim = levenshteinSimilarity("SQ *STARBUCKS", "SQ *STARBUCKS #2");
     expect(sim).toBeGreaterThan(0.8);
+  });
+
+  it("returns 1.0 for two empty strings", () => {
+    expect(levenshteinSimilarity("", "")).toBe(1);
+  });
+
+  it("is case-insensitive", () => {
+    expect(levenshteinSimilarity("Netflix", "NETFLIX")).toBe(1);
   });
 });
 
@@ -212,5 +248,31 @@ describe("detectDuplicates", () => {
     const { safe, duplicates } = detectDuplicates(incoming, []);
     expect(safe).toHaveLength(1);
     expect(duplicates).toHaveLength(0);
+  });
+
+  it("handles existing.date as an ISO string (not a Date object)", () => {
+    const existingStr = [{ id: "ex-s", date: "2026-05-01T00:00:00.000Z", description: "Starbucks", amount: 6.40 }];
+    const incoming = [{ date: "2026-05-01", description: "Starbucks", amount: 6.40, type: "DEBIT" as const }];
+    const { duplicates } = detectDuplicates(incoming, existingStr);
+    expect(duplicates).toHaveLength(1);
+    expect(duplicates[0].existingId).toBe("ex-s");
+  });
+
+  it("tolerates tiny floating-point differences in amount (< 0.001)", () => {
+    const incoming = [{ date: "2026-05-02", description: "Netflix", amount: 15.990001, type: "DEBIT" as const }];
+    const { duplicates } = detectDuplicates(incoming, existing);
+    expect(duplicates).toHaveLength(1);
+  });
+
+  it("correctly separates a mixed batch into safe + duplicate buckets", () => {
+    const incoming = [
+      { date: "2026-05-01", description: "Starbucks",   amount: 6.40,  type: "DEBIT" as const }, // dup
+      { date: "2026-05-02", description: "Netflix",     amount: 15.99, type: "DEBIT" as const }, // dup
+      { date: "2026-05-10", description: "New Merchant", amount: 50.00, type: "DEBIT" as const }, // safe
+    ];
+    const { safe, duplicates } = detectDuplicates(incoming, existing);
+    expect(safe).toHaveLength(1);
+    expect(safe[0].description).toBe("New Merchant");
+    expect(duplicates).toHaveLength(2);
   });
 });
