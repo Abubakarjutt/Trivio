@@ -1,12 +1,13 @@
 /**
  * ImageStatementService
- * Uses Ollama's vision API to extract transactions from a bank statement image.
- * Mirrors the fallback pattern from pdf-statement.service.ts.
+ * Uses the Gemini API's vision capability to extract transactions from a
+ * bank statement image.
  */
 import type { RawTransaction } from "./statement-parser.service";
 
-const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "gemma4:e4b";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? "";
+const GEMINI_MODEL   = process.env.GEMINI_MODEL   ?? "gemma-4-26b-a4b-it";
+const GEMINI_URL     = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 const IMAGE_PARSE_PROMPT = `You are a bank statement parser. Extract all financial transactions visible in this bank or credit card statement image.
 
@@ -22,40 +23,41 @@ Rules:
 - Skip: header rows, running balance rows, opening/closing balance lines
 - If a line is not a transaction, omit it`;
 
-export async function parseTransactionsFromImage(buffer: Buffer): Promise<RawTransaction[]> {
-  try {
-    const health = await fetch(`${OLLAMA_BASE_URL}/api/tags`, { signal: AbortSignal.timeout(3000) });
-    if (!health.ok) throw new Error("not reachable");
-  } catch {
-    console.warn("[image-statement.service] Ollama not reachable — returning empty transaction list.");
+export async function parseTransactionsFromImage(buffer: Buffer, mimeType = "image/jpeg"): Promise<RawTransaction[]> {
+  if (!GEMINI_API_KEY) {
+    console.warn("[image-statement.service] GEMINI_API_KEY not set — returning empty transaction list.");
     return [];
   }
 
   try {
     const base64Image = buffer.toString("base64");
 
-    const response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+    const response = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: OLLAMA_MODEL,
-        messages: [
-          {
-            role: "user",
-            content: IMAGE_PARSE_PROMPT,
-            images: [base64Image],
-          },
-        ],
-        stream: false,
-        options: { temperature: 0.1, num_predict: 8192 },
+        contents: [{
+          parts: [
+            { text: IMAGE_PARSE_PROMPT },
+            { inlineData: { mimeType, data: base64Image } },
+          ],
+        }],
+        generationConfig: { temperature: 0.1, maxOutputTokens: 8192 },
       }),
       signal: AbortSignal.timeout(120_000),
     });
 
-    if (!response.ok) return [];
+    if (!response.ok) {
+      console.warn(`[image-statement.service] Gemini API error ${response.status} — returning empty list.`);
+      return [];
+    }
 
-    const data = await response.json() as { message?: { content?: string } };
-    const content = data.message?.content ?? "";
+    const data = await response.json() as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean }> } }>;
+    };
+    // Thinking models return thought parts before the answer — skip them.
+    const parts = data.candidates?.[0]?.content?.parts ?? [];
+    const content = parts.find((p) => !p.thought)?.text ?? "";
     const raw = content.replace(/^```(?:json)?\n?/m, "").replace(/```\s*$/m, "").trim();
     const match = raw.match(/\[[\s\S]*\]/);
     if (!match) return [];
@@ -75,8 +77,8 @@ export async function parseTransactionsFromImage(buffer: Buffer): Promise<RawTra
         amount: Number(item.amount),
         type: String(item.type).toUpperCase() as "DEBIT" | "CREDIT",
       }));
-  } catch {
-    console.warn("[image-statement.service] Ollama request failed — returning empty transaction list.");
+  } catch (err) {
+    console.warn("[image-statement.service] Gemini request failed — returning empty transaction list.", err);
     return [];
   }
 }

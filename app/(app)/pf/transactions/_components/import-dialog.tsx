@@ -3,10 +3,10 @@
 import { useState, useCallback, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Loader2, Upload, CheckCircle2, XCircle, Image as ImageIcon } from "lucide-react";
+import { Loader2, Upload, CheckCircle2, XCircle, Image as ImageIcon, BookmarkCheck, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 
-type ImportState = "idle" | "uploading" | "duplicates" | "done" | "error";
+type ImportState = "idle" | "uploading" | "duplicates" | "done" | "already_imported" | "error";
 type FileCategory = "csv" | "pdf" | "image";
 
 interface DuplicateItem { id: string; date: string | Date; amount: number; description: string; }
@@ -45,15 +45,16 @@ interface ImportDialogProps {
 }
 
 export function ImportDialog({ open, onOpenChange, onComplete }: ImportDialogProps) {
-  const [state, setState] = useState<ImportState>("idle");
-  const [file, setFile] = useState<File | null>(null);
-  const [dragging, setDragging] = useState(false);
-  const [progress, setProgress] = useState<ProgressStep | null>(null);
+  const [state, setState]               = useState<ImportState>("idle");
+  const [file, setFile]                 = useState<File | null>(null);
+  const [dragging, setDragging]         = useState(false);
+  const [progress, setProgress]         = useState<ProgressStep | null>(null);
   const [completedSteps, setCompletedSteps] = useState<string[]>([]);
-  const [duplicates, setDuplicates] = useState<DuplicateItem[]>([]);
-  const [batchId, setBatchId] = useState<string | null>(null);
-  const [resultCount, setResultCount] = useState(0);
-  const [errorMsg, setErrorMsg] = useState("");
+  const [duplicates, setDuplicates]     = useState<DuplicateItem[]>([]);
+  const [batchId, setBatchId]           = useState<string | null>(null);
+  const [resultCount, setResultCount]   = useState(0);
+  const [skipDuplicates, setSkipDuplicates] = useState(false);
+  const [errorMsg, setErrorMsg]         = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   const reset = () => {
@@ -64,6 +65,7 @@ export function ImportDialog({ open, onOpenChange, onComplete }: ImportDialogPro
     setDuplicates([]);
     setBatchId(null);
     setResultCount(0);
+    setSkipDuplicates(false);
     setErrorMsg("");
   };
 
@@ -99,7 +101,6 @@ export function ImportDialog({ open, onOpenChange, onComplete }: ImportDialogPro
     }
 
     if (category === "csv") {
-      // CSV: synchronous JSON response
       try {
         const res = await fetch("/api/pf/import", { method: "POST", body: formData });
         const data = await res.json() as { status: string; batchId?: string; count?: number; duplicates?: DuplicateItem[]; error?: string };
@@ -180,13 +181,14 @@ export function ImportDialog({ open, onOpenChange, onComplete }: ImportDialogPro
     }
   };
 
-  const handleConfirm = async (skipDuplicates: boolean) => {
+  const handleConfirm = async (skip: boolean) => {
     if (!batchId) return;
+    setSkipDuplicates(skip);
     setState("uploading");
     setCompletedSteps([]);
     setProgress(null);
     try {
-      const url = `/api/pf/import/${batchId}/confirm?skip=${skipDuplicates}`;
+      const url = `/api/pf/import/${batchId}/confirm?skip=${skip}`;
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -194,9 +196,13 @@ export function ImportDialog({ open, onOpenChange, onComplete }: ImportDialogPro
       });
       const data = await res.json() as { count: number; skipped: number };
       setResultCount(data.count);
-      setState("done");
       onComplete();
-      toast.success(`${data.count} transactions imported${data.skipped ? `, ${data.skipped} duplicates skipped` : ""}`);
+      if (data.count === 0 && skip) {
+        setState("already_imported");
+      } else {
+        setState("done");
+        toast.success(`${data.count} transactions imported${data.skipped ? `, ${data.skipped} duplicates skipped` : ""}`);
+      }
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : "Unknown error");
       setState("error");
@@ -212,9 +218,10 @@ export function ImportDialog({ open, onOpenChange, onComplete }: ImportDialogPro
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>
-            {state === "duplicates" ? "Possible Duplicates Found" :
-             state === "done" ? "Import Complete" :
-             state === "error" ? "Import Failed" : "Import Statement"}
+            {state === "duplicates"       ? "Possible Duplicates Found" :
+             state === "done"             ? "Import Complete" :
+             state === "already_imported" ? "Already Imported" :
+             state === "error"            ? "Import Failed" : "Import Statement"}
           </DialogTitle>
         </DialogHeader>
 
@@ -250,6 +257,17 @@ export function ImportDialog({ open, onOpenChange, onComplete }: ImportDialogPro
                 onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
               />
             </div>
+
+            {/* Privacy notice */}
+            <div className="flex items-start gap-2 rounded-lg bg-emerald-50 border border-emerald-200 dark:bg-emerald-950/20 dark:border-emerald-800 px-3 py-2.5">
+              <ShieldCheck className="h-4 w-4 text-emerald-600 mt-0.5 flex-shrink-0" />
+              <p className="text-xs text-emerald-700 dark:text-emerald-400 leading-relaxed">
+                <span className="font-semibold">Privacy:</span>{" "}
+                Your account number, IBAN, card number, and contact details are automatically
+                redacted before any data leaves this app. Only transaction rows are sent to AI for parsing.
+              </p>
+            </div>
+
             <div className="flex gap-2 justify-end">
               <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
               <Button disabled={!file} onClick={handleImport}>Import</Button>
@@ -308,7 +326,7 @@ export function ImportDialog({ open, onOpenChange, onComplete }: ImportDialogPro
                   <div>
                     <p className="text-sm font-medium">{d.description}</p>
                     <p className="text-xs text-muted-foreground">
-                      {new Date(d.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                      {new Date(d.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })}
                     </p>
                   </div>
                   <p className="text-sm font-medium text-red-500">−${Number(d.amount).toFixed(2)}</p>
@@ -331,8 +349,22 @@ export function ImportDialog({ open, onOpenChange, onComplete }: ImportDialogPro
           <div className="flex flex-col items-center gap-4 py-4">
             <CheckCircle2 className="h-12 w-12 text-emerald-500" />
             <div className="text-center">
-              <p className="font-medium">{resultCount} transactions imported</p>
+              <p className="font-medium">{resultCount} transaction{resultCount !== 1 ? "s" : ""} imported</p>
               <p className="text-sm text-muted-foreground mt-1">Categories have been auto-assigned. Edit any row in the table.</p>
+            </div>
+            <Button onClick={() => { onOpenChange(false); reset(); }}>View Transactions</Button>
+          </div>
+        )}
+
+        {/* ALREADY IMPORTED */}
+        {state === "already_imported" && (
+          <div className="flex flex-col items-center gap-4 py-4">
+            <BookmarkCheck className="h-12 w-12 text-blue-500" />
+            <div className="text-center">
+              <p className="font-medium">Already in your records</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                All transactions in this statement were already imported. Nothing was added.
+              </p>
             </div>
             <Button onClick={() => { onOpenChange(false); reset(); }}>View Transactions</Button>
           </div>

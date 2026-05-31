@@ -2,9 +2,20 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, orgProcedure } from "@/server/trpc";
 
+/** Convert a "YYYY-MM" string into an inclusive [gte, lt) date range. */
+function monthRange(month: string): { gte: Date; lt: Date } {
+  const [y, m] = month.split("-").map(Number);
+  return {
+    gte: new Date(y, m - 1, 1),
+    lt:  new Date(y, m,     1),
+  };
+}
+
 export const statementTransactionsRouter = createTRPCRouter({
   list: orgProcedure
     .input(z.object({
+      /** "YYYY-MM" month filter — takes precedence over dateFrom/dateTo when set */
+      month: z.string().optional(),
       dateFrom: z.string().optional(),
       dateTo: z.string().optional(),
       category: z.string().optional(),
@@ -21,11 +32,15 @@ export const statementTransactionsRouter = createTRPCRouter({
       if (input.category) where.category = input.category;
       if (input.type) where.type = input.type;
       if (input.search) where.merchantName = { contains: input.search, mode: "insensitive" };
-      if (input.dateFrom || input.dateTo) {
+
+      if (input.month) {
+        where.date = monthRange(input.month);
+      } else if (input.dateFrom || input.dateTo) {
         where.date = {};
         if (input.dateFrom) where.date.gte = new Date(input.dateFrom);
         if (input.dateTo) where.date.lte = new Date(input.dateTo);
       }
+
       const skip = input.cursor ? parseInt(input.cursor, 10) : 0;
       const items = await ctx.db.statementTransaction.findMany({
         where,
@@ -77,6 +92,17 @@ export const statementTransactionsRouter = createTRPCRouter({
       });
     }),
 
+  deleteTransaction: orgProcedure
+    .input(z.object({ id: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const txn = await ctx.db.statementTransaction.findFirst({
+        where: { id: input.id, organisationId: ctx.organisationId },
+      });
+      if (!txn) throw new TRPCError({ code: "NOT_FOUND" });
+      await ctx.db.statementTransaction.delete({ where: { id: input.id } });
+      return { success: true };
+    }),
+
   deleteByBatch: orgProcedure
     .input(z.object({ batchId: z.string() }))
     .mutation(async ({ ctx, input }) => {
@@ -101,17 +127,23 @@ export const statementTransactionsRouter = createTRPCRouter({
     ),
 
   summary: orgProcedure
-    .query(async ({ ctx }) => {
+    .input(z.object({
+      /** "YYYY-MM" month filter — undefined = all time */
+      month: z.string().optional(),
+    }))
+    .query(async ({ ctx, input }) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const baseWhere: any = { organisationId: ctx.organisationId, isExcluded: false };
+      if (input.month) baseWhere.date = monthRange(input.month);
+
       const [totalCount, debitsAgg, creditsAgg, latestBatch] = await Promise.all([
-        ctx.db.statementTransaction.count({
-          where: { organisationId: ctx.organisationId, isExcluded: false },
-        }),
+        ctx.db.statementTransaction.count({ where: baseWhere }),
         ctx.db.statementTransaction.aggregate({
-          where: { organisationId: ctx.organisationId, isExcluded: false, type: "DEBIT" },
+          where: { ...baseWhere, type: "DEBIT" },
           _sum: { amount: true },
         }),
         ctx.db.statementTransaction.aggregate({
-          where: { organisationId: ctx.organisationId, isExcluded: false, type: "CREDIT" },
+          where: { ...baseWhere, type: "CREDIT" },
           _sum: { amount: true },
         }),
         ctx.db.statementImportBatch.findFirst({

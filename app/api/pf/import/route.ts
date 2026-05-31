@@ -6,7 +6,7 @@ import { categorizeBatch } from "@/server/services/statement-categorization.serv
 import { extractTextFromPdf, parseTransactionsFromText } from "@/server/services/pdf-statement.service";
 import { parseTransactionsFromImage } from "@/server/services/image-statement.service";
 
-// Allow up to 3 minutes for Ollama inference (PDF/image extraction can be slow)
+// Allow up to 3 minutes for Gemini inference (PDF/image extraction can be slow)
 export const maxDuration = 180;
 
 const MAX_SIZE_BYTES = 20 * 1024 * 1024; // 20 MB
@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
 
   if (isCsv) return handleCsvImport(buffer, file.name, organisationId);
   if (isPdf)  return handlePdfImport(buffer, file.name, organisationId);
-  return handleImageImport(buffer, file.name, organisationId);
+  return handleImageImport(buffer, file.name, file.type || "image/jpeg", organisationId);
 }
 
 async function handleCsvImport(buffer: Buffer, filename: string, organisationId: string) {
@@ -240,7 +240,7 @@ async function handlePdfImport(buffer: Buffer, filename: string, organisationId:
   });
 }
 
-async function handleImageImport(buffer: Buffer, filename: string, organisationId: string) {
+async function handleImageImport(buffer: Buffer, filename: string, mimeType: string, organisationId: string) {
   return createSseStream(async (emit) => {
     let batchId: string | undefined;
     try {
@@ -250,7 +250,7 @@ async function handleImageImport(buffer: Buffer, filename: string, organisationI
       batchId = batch.id;
 
       emit("progress", { step: "parsing", pct: 20 });
-      const rawTransactions = await parseTransactionsFromImage(buffer);
+      const rawTransactions = await parseTransactionsFromImage(buffer, mimeType);
 
       if (rawTransactions.length === 0) {
         await db.statementImportBatch.update({ where: { id: batchId }, data: { status: "FAILED", errorMessage: "No transactions found" } });

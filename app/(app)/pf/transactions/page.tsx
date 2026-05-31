@@ -6,10 +6,11 @@ import { PageHeader } from "@/app/(app)/_components/page-header";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { Loader2, CreditCard, TrendingDown, TrendingUp, RefreshCw } from "lucide-react";
+import { Loader2, CreditCard, TrendingDown, TrendingUp, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { ImportDialog } from "./_components/import-dialog";
 import { CATEGORY_DEFINITIONS } from "@/server/services/statement-categorization.service";
+import { MonthPicker, currentMonth } from "@/app/(app)/pf/_components/month-picker";
 
 const CATEGORY_COLORS: Record<string, string> = {
   "Food & Dining":     "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300",
@@ -36,27 +37,32 @@ function fmt(n: number) {
 export default function PfTransactionsPage() {
   const utils = trpc.useUtils();
   const [importOpen, setImportOpen] = useState(false);
-  const [category, setCategory] = useState<string>("__all__");
-  const [type, setType] = useState<string>("__all__");
-  const [search, setSearch] = useState("");
-  const [cursor, setCursor] = useState<string | undefined>(undefined);
+  const [month, setMonth]           = useState<string | undefined>(() => currentMonth());
+  const [category, setCategory]     = useState<string>("__all__");
+  const [type, setType]             = useState<string>("__all__");
+  const [search, setSearch]         = useState("");
+  const [cursor, setCursor]         = useState<string | undefined>(undefined);
 
-  const { data: summary } = trpc.statementTransactions.summary.useQuery();
+  const { data: summary } = trpc.statementTransactions.summary.useQuery({ month });
 
   const { data, isLoading } = trpc.statementTransactions.list.useQuery({
+    month,
     category: category === "__all__" ? undefined : category,
-    type: type === "__all__" ? undefined : (type as "DEBIT" | "CREDIT"),
-    search: search || undefined,
+    type:     type     === "__all__" ? undefined : (type as "DEBIT" | "CREDIT"),
+    search:   search || undefined,
     cursor,
     limit: 50,
   });
 
   const updateCategory = trpc.statementTransactions.updateCategory.useMutation({
-    onSuccess: () => utils.statementTransactions.list.invalidate(),
+    onSuccess: () => {
+      utils.statementTransactions.list.invalidate();
+      utils.statementTransactions.summary.invalidate();
+    },
     onError: (e) => toast.error(e.message),
   });
 
-  const toggleExclude = trpc.statementTransactions.toggleExclude.useMutation({
+  const deleteTransaction = trpc.statementTransactions.deleteTransaction.useMutation({
     onSuccess: () => {
       utils.statementTransactions.list.invalidate();
       utils.statementTransactions.summary.invalidate();
@@ -65,6 +71,14 @@ export default function PfTransactionsPage() {
   });
 
   const categories = CATEGORY_DEFINITIONS.map((c) => c.name);
+
+  function handleMonthChange(m: string | undefined) {
+    setMonth(m);
+    setCursor(undefined);
+    setSearch("");
+    setCategory("__all__");
+    setType("__all__");
+  }
 
   return (
     <div className="flex flex-col gap-6 p-6">
@@ -79,13 +93,23 @@ export default function PfTransactionsPage() {
         }
       />
 
+      {/* Month picker */}
+      <div className="flex items-center justify-between">
+        <MonthPicker month={month} onChange={handleMonthChange} />
+      </div>
+
       {/* Summary strip */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
-          { label: "Transactions", value: summary?.totalCount?.toLocaleString() ?? "—", icon: RefreshCw, color: "text-foreground" },
-          { label: "Total Debits",  value: summary ? fmt(summary.totalDebits) : "—",   icon: TrendingDown, color: "text-red-500" },
-          { label: "Total Credits", value: summary ? fmt(summary.totalCredits) : "—",  icon: TrendingUp,   color: "text-emerald-500" },
-          { label: "Latest Import", value: summary?.latestBatch ? `${summary.latestBatch.transactionCount} txns` : "None", icon: CreditCard, color: "text-muted-foreground" },
+          { label: "Total Debits",  value: summary ? fmt(summary.totalDebits)  : "—", icon: TrendingDown, color: "text-red-500" },
+          { label: "Total Credits", value: summary ? fmt(summary.totalCredits) : "—", icon: TrendingUp,   color: "text-emerald-500" },
+          {
+            label: "Net",
+            value: summary ? fmt(summary.totalCredits - summary.totalDebits) : "—",
+            icon:  RefreshCw,
+            color: "text-foreground",
+          },
+          { label: "Count", value: summary?.totalCount?.toLocaleString() ?? "—", icon: CreditCard, color: "text-muted-foreground" },
         ].map(({ label, value, icon: Icon, color }) => (
           <div key={label} className="rounded-lg border bg-card p-4">
             <div className="flex items-center justify-between">
@@ -134,11 +158,23 @@ export default function PfTransactionsPage() {
       ) : !data?.items.length ? (
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-16 text-center">
           <CreditCard className="h-10 w-10 text-muted-foreground/40 mb-3" />
-          <p className="text-sm font-medium text-muted-foreground">No transactions yet</p>
-          <p className="text-xs text-muted-foreground/60 mt-1">Import a bank or credit card statement to get started</p>
-          <Button size="sm" variant="outline" className="mt-4" onClick={() => setImportOpen(true)}>
-            Import Statement
-          </Button>
+          {month ? (
+            <>
+              <p className="text-sm font-medium text-muted-foreground">No transactions in this month</p>
+              <p className="text-xs text-muted-foreground/60 mt-1">Your data may be in a different year — use &laquo; to jump back</p>
+              <Button size="sm" variant="outline" className="mt-4" onClick={() => setMonth(undefined)}>
+                View all transactions
+              </Button>
+            </>
+          ) : (
+            <>
+              <p className="text-sm font-medium text-muted-foreground">No transactions yet</p>
+              <p className="text-xs text-muted-foreground/60 mt-1">Import a bank statement to get started</p>
+              <Button size="sm" variant="outline" className="mt-4" onClick={() => setImportOpen(true)}>
+                Import Statement
+              </Button>
+            </>
+          )}
         </div>
       ) : (
         <div className="rounded-lg border overflow-hidden">
@@ -154,9 +190,9 @@ export default function PfTransactionsPage() {
             </thead>
             <tbody>
               {data.items.map((txn) => (
-                <tr key={txn.id} className={`border-b last:border-0 hover:bg-muted/20 transition-colors ${txn.isExcluded ? "opacity-40" : ""}`}>
+                <tr key={txn.id} className="border-b last:border-0 hover:bg-muted/20 transition-colors">
                   <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
-                    {new Date(txn.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                    {new Date(txn.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })}
                   </td>
                   <td className="px-4 py-3">
                     <div className="font-medium">{txn.merchantName}</div>
@@ -165,9 +201,7 @@ export default function PfTransactionsPage() {
                   <td className="px-4 py-3">
                     <Select
                       value={txn.category}
-                      onValueChange={(newCat) =>
-                        updateCategory.mutate({ id: txn.id, category: newCat })
-                      }
+                      onValueChange={(newCat) => updateCategory.mutate({ id: txn.id, category: newCat })}
                     >
                       <SelectTrigger className={`h-6 px-2 text-xs border-0 rounded-full w-auto ${CATEGORY_COLORS[txn.category] ?? CATEGORY_COLORS["Other"]}`}>
                         <SelectValue />
@@ -182,11 +216,15 @@ export default function PfTransactionsPage() {
                   </td>
                   <td className="px-4 py-3">
                     <button
-                      onClick={() => toggleExclude.mutate({ id: txn.id })}
-                      className="text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors"
-                      title={txn.isExcluded ? "Un-exclude" : "Exclude"}
+                      onClick={() => {
+                        if (confirm("Delete this transaction? This cannot be undone.")) {
+                          deleteTransaction.mutate({ id: txn.id });
+                        }
+                      }}
+                      className="text-gray-300 hover:text-red-500 transition-colors"
+                      title="Delete transaction"
                     >
-                      {txn.isExcluded ? "↩" : "×"}
+                      <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   </td>
                 </tr>
@@ -207,6 +245,8 @@ export default function PfTransactionsPage() {
         open={importOpen}
         onOpenChange={setImportOpen}
         onComplete={() => {
+          setMonth(undefined); // show All time so imported transactions are visible
+          setCursor(undefined);
           utils.statementTransactions.list.invalidate();
           utils.statementTransactions.summary.invalidate();
         }}

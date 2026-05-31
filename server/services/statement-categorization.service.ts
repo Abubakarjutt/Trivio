@@ -1,11 +1,11 @@
 /**
  * StatementCategorizationService
- * MCC lookup table + Ollama-powered batch categorization.
- * Mirrors the fallback pattern from extraction.service.ts.
+ * MCC lookup table + Gemini-powered batch categorization.
  */
 
-const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "gemma4:e4b";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? "";
+const GEMINI_MODEL   = process.env.GEMINI_MODEL   ?? "gemma-4-26b-a4b-it";
+const GEMINI_URL     = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 export interface CategoryDefinition {
   name: string;
@@ -76,53 +76,64 @@ Input descriptions:
 ${JSON.stringify(descriptions)}`;
 }
 
-export async function categorizeBatch(descriptions: string[]): Promise<CategorizationResult[]> {
-  if (descriptions.length === 0) return [];
+async function callGemini(prompt: string): Promise<string> {
+  if (!GEMINI_API_KEY) throw new Error("GEMINI_API_KEY is not set");
 
-  try {
-    const health = await fetch(`${OLLAMA_BASE_URL}/api/tags`, { signal: AbortSignal.timeout(3000) });
-    if (!health.ok) throw new Error("not reachable");
-  } catch {
-    console.warn("[statement-categorization.service] Ollama not reachable — using fallback categories.");
-    return descriptions.map(fallback);
-  }
-
-  const response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+  const response = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: OLLAMA_MODEL,
-      messages: [{ role: "user", content: buildCategorizationPrompt(descriptions) }],
-      stream: false,
-      options: { temperature: 0.1, num_predict: 8192 },
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0.1, maxOutputTokens: 8192 },
     }),
     signal: AbortSignal.timeout(120_000),
   });
 
   if (!response.ok) {
-    console.warn(`[statement-categorization.service] Ollama failed (${response.status}) — using fallback.`);
+    const err = await response.text().catch(() => response.statusText);
+    throw new Error(`Gemini API error ${response.status}: ${err}`);
+  }
+
+  const data = await response.json() as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean }> } }>;
+  };
+  // Thinking models return thought parts before the answer — skip them.
+  const parts = data.candidates?.[0]?.content?.parts ?? [];
+  const answerPart = parts.find((p) => !p.thought);
+  return answerPart?.text ?? "";
+}
+
+export async function categorizeBatch(descriptions: string[]): Promise<CategorizationResult[]> {
+  if (descriptions.length === 0) return [];
+
+  if (!GEMINI_API_KEY) {
+    console.warn("[statement-categorization.service] GEMINI_API_KEY not set — using fallback categories.");
     return descriptions.map(fallback);
   }
 
-  const data = await response.json() as { message?: { content?: string } };
-  const content = data.message?.content ?? "";
-  const raw = content.replace(/^```(?:json)?\n?/m, "").replace(/```\s*$/m, "").trim();
-  const jsonMatch = raw.match(/\[[\s\S]*\]/);
-  if (!jsonMatch) return descriptions.map(fallback);
+  try {
+    const content = await callGemini(buildCategorizationPrompt(descriptions));
+    const raw = content.replace(/^```(?:json)?\n?/m, "").replace(/```\s*$/m, "").trim();
+    const jsonMatch = raw.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) return descriptions.map(fallback);
 
-  let parsed: unknown;
-  try { parsed = JSON.parse(jsonMatch[0]); } catch { return descriptions.map(fallback); }
-  if (!Array.isArray(parsed)) return descriptions.map(fallback);
+    let parsed: unknown;
+    try { parsed = JSON.parse(jsonMatch[0]); } catch { return descriptions.map(fallback); }
+    if (!Array.isArray(parsed)) return descriptions.map(fallback);
 
-  return descriptions.map((desc, i) => {
-    const item = (parsed as Array<Partial<CategorizationResult>>)[i];
-    if (!item?.mccCode) return fallback(desc);
-    return {
-      description: desc,
-      merchantName: item.merchantName ?? desc,
-      mccCode: item.mccCode,
-      mccLabel: item.mccLabel ?? "Unknown",
-      category: mapMccToCategory(item.mccCode),
-    };
-  });
+    return descriptions.map((desc, i) => {
+      const item = (parsed as Array<Partial<CategorizationResult>>)[i];
+      if (!item?.mccCode) return fallback(desc);
+      return {
+        description: desc,
+        merchantName: item.merchantName ?? desc,
+        mccCode: item.mccCode,
+        mccLabel: item.mccLabel ?? "Unknown",
+        category: mapMccToCategory(item.mccCode),
+      };
+    });
+  } catch (err) {
+    console.warn("[statement-categorization.service] Gemini request failed — using fallback.", err);
+    return descriptions.map(fallback);
+  }
 }

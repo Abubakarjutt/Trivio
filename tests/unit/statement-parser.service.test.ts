@@ -51,6 +51,34 @@ describe("autoDetectColumns", () => {
       "Could not detect amount column"
     );
   });
+
+  // ── headerMatches bug-fix: short abbreviations must not match substrings ──
+
+  it("does NOT falsely detect 'description' as a credit column ('cr' is a substring)", () => {
+    // Before the fix, "description".includes("cr") === true caused false positives
+    const map = autoDetectColumns(["Date", "Description", "Amount"]);
+    expect(map.credit).toBeUndefined();
+    expect(map.amount).toBe(2);
+  });
+
+  it("throws when only debit column is present but no credit or amount column", () => {
+    // Before the fix this did NOT throw because "description" falsely matched "cr"
+    expect(() => autoDetectColumns(["Date", "Description", "Debit"])).toThrow(
+      "Could not detect amount column"
+    );
+  });
+
+  it("correctly detects standalone 'CR' and 'DR' column headers", () => {
+    const map = autoDetectColumns(["Date", "Narration", "DR", "CR"]);
+    expect(map.debit).toBe(2);
+    expect(map.credit).toBe(3);
+  });
+
+  it("detects 'DR/CR' style combined header as credit via word split", () => {
+    // "dr/cr" splits on "/" → ["dr","cr"] — both present
+    const map = autoDetectColumns(["date", "description", "amount"]);
+    expect(map.amount).toBe(2);
+  });
 });
 
 // ─── normalizeAmount ──────────────────────────────────────────────────────────

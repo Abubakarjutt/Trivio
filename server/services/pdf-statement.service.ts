@@ -1,12 +1,14 @@
 /**
  * PdfStatementService
- * Extracts text from PDF files using pdfjs-dist, then uses Ollama to parse
- * transaction rows from the extracted text.
+ * Extracts text from PDF files using pdfjs-dist, then uses the Gemini API
+ * to parse transaction rows from the extracted text.
  */
 import type { RawTransaction } from "./statement-parser.service";
+import { redactPii } from "./pii-redaction.service";
 
-const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "gemma4:e4b";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? "";
+const GEMINI_MODEL   = process.env.GEMINI_MODEL   ?? "gemma-4-26b-a4b-it";
+const GEMINI_URL     = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
   // Dynamic import avoids SSR/webpack bundling issues with pdfjs-dist
@@ -58,31 +60,41 @@ Statement text:
 `;
 
 export async function parseTransactionsFromText(text: string): Promise<RawTransaction[]> {
-  try {
-    const health = await fetch(`${OLLAMA_BASE_URL}/api/tags`, { signal: AbortSignal.timeout(3000) });
-    if (!health.ok) throw new Error("not reachable");
-  } catch {
-    console.warn("[pdf-statement.service] Ollama not reachable — returning empty transaction list.");
+  if (!GEMINI_API_KEY) {
+    console.warn("[pdf-statement.service] GEMINI_API_KEY not set — returning empty transaction list.");
     return [];
   }
 
+  // Redact PII (account numbers, IBANs, card numbers, emails, phones) before
+  // sending to the external Gemini API. Transaction rows are unaffected.
+  const { redacted, stats } = redactPii(text.slice(0, 200_000));
+  const piiFound = Object.values(stats).some((n) => n > 0);
+  if (piiFound) {
+    console.info("[pdf-statement.service] PII redacted before Gemini call:", stats);
+  }
+
   try {
-    const response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+    const response = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: OLLAMA_MODEL,
-        messages: [{ role: "user", content: `${PARSE_PROMPT}${text.slice(0, 12000)}` }],
-        stream: false,
-        options: { temperature: 0.1, num_predict: 8192 },
+        contents: [{ parts: [{ text: `${PARSE_PROMPT}${redacted}` }] }],
+        generationConfig: { temperature: 0.1, maxOutputTokens: 16384 },
       }),
       signal: AbortSignal.timeout(120_000),
     });
 
-    if (!response.ok) return [];
+    if (!response.ok) {
+      console.warn(`[pdf-statement.service] Gemini API error ${response.status} — returning empty list.`);
+      return [];
+    }
 
-    const data = await response.json() as { message?: { content?: string } };
-    const content = data.message?.content ?? "";
+    const data = await response.json() as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean }> } }>;
+    };
+    // Thinking models return thought parts before the answer — skip them.
+    const parts = data.candidates?.[0]?.content?.parts ?? [];
+    const content = parts.find((p) => !p.thought)?.text ?? "";
     const raw = content.replace(/^```(?:json)?\n?/m, "").replace(/```\s*$/m, "").trim();
     const match = raw.match(/\[[\s\S]*\]/);
     if (!match) return [];
@@ -102,8 +114,8 @@ export async function parseTransactionsFromText(text: string): Promise<RawTransa
         amount: Number(item.amount),
         type: String(item.type).toUpperCase() as "DEBIT" | "CREDIT",
       }));
-  } catch {
-    console.warn("[pdf-statement.service] Ollama request failed — returning empty transaction list.");
+  } catch (err) {
+    console.warn("[pdf-statement.service] Gemini request failed — returning empty transaction list.", err);
     return [];
   }
 }

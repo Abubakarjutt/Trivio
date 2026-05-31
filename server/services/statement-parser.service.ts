@@ -44,14 +44,28 @@ const DEBIT_HEADERS = ["debit", "debit amount", "withdrawal", "withdrawals", "dr
 const CREDIT_HEADERS = ["credit", "credit amount", "deposit", "deposits", "cr", "in"];
 const DESC_HEADERS = ["description", "memo", "narration", "particulars", "details", "reference", "transaction details", "payee", "narrative"];
 
+/**
+ * Match a header `h` against a pattern `p`.
+ * Short patterns (≤ 3 chars, e.g. "cr", "dr", "in") must be whole-word matches
+ * to avoid false positives like "description".includes("cr").
+ * Longer patterns use substring matching as before.
+ */
+function headerMatches(h: string, p: string): boolean {
+  if (p.length <= 3) {
+    // exact or whole-word (split on non-alpha boundaries like spaces, slashes, underscores)
+    return h === p || h.split(/[^a-z]+/).includes(p);
+  }
+  return h.includes(p);
+}
+
 export function autoDetectColumns(headers: string[]): ColumnMap {
   const lower = headers.map((h) => h.toLowerCase().trim());
 
-  const dateIdx = lower.findIndex((h) => DATE_HEADERS.some((d) => h.includes(d)));
-  const descIdx = lower.findIndex((h) => DESC_HEADERS.some((d) => h.includes(d)));
-  const amountIdx = lower.findIndex((h) => AMOUNT_HEADERS.some((a) => h.includes(a)));
-  const debitIdx = lower.findIndex((h) => DEBIT_HEADERS.some((d) => h.includes(d)));
-  const creditIdx = lower.findIndex((h) => CREDIT_HEADERS.some((c) => h.includes(c)));
+  const dateIdx   = lower.findIndex((h) => DATE_HEADERS.some((d)   => headerMatches(h, d)));
+  const descIdx   = lower.findIndex((h) => DESC_HEADERS.some((d)   => headerMatches(h, d)));
+  const amountIdx = lower.findIndex((h) => AMOUNT_HEADERS.some((a) => headerMatches(h, a)));
+  const debitIdx  = lower.findIndex((h) => DEBIT_HEADERS.some((d)  => headerMatches(h, d)));
+  const creditIdx = lower.findIndex((h) => CREDIT_HEADERS.some((c) => headerMatches(h, c)));
 
   if (dateIdx === -1)
     throw new Error("Could not detect date column. Expected headers like: date, txn date, transaction date");

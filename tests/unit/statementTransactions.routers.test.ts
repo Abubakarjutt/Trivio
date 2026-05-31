@@ -159,7 +159,7 @@ describe("statementTransactions.summary", () => {
         findFirst: vi.fn().mockResolvedValue({ id: "b1", filename: "May.pdf", transactionCount: 47, createdAt: new Date() }),
       },
     }));
-    const result = await caller.summary();
+    const result = await caller.summary({});
     expect(result.totalCount).toBe(47);
     expect(result.totalDebits).toBeCloseTo(821.50);
     expect(result.totalCredits).toBeCloseTo(3200.00);
