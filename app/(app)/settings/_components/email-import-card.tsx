@@ -49,6 +49,8 @@ export function EmailImportCard({ initialToken }: EmailImportCardProps) {
         </button>
       </div>
 
+      <SetupSteps />
+
       {!confirmReset ? (
         <button
           type="button"
@@ -75,6 +77,65 @@ export function EmailImportCard({ initialToken }: EmailImportCardProps) {
             <Button size="sm" variant="outline" onClick={() => setConfirmReset(false)} className="text-xs h-7">
               Cancel
             </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SetupSteps() {
+  const [showSetup, setShowSetup] = useState(false);
+  return (
+    <div className="space-y-2">
+      <button
+        type="button"
+        onClick={() => setShowSetup((v) => !v)}
+        className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+      >
+        <span>{showSetup ? "▾" : "▸"}</span>
+        How to set up
+      </button>
+
+      {showSetup && (
+        <div className="space-y-3">
+          <div className="rounded-lg border border-border/40 bg-muted/30 p-3 space-y-1.5">
+            <p className="text-xs font-bold text-foreground">
+              Option A — Add directly in your bank app <span className="font-normal text-muted-foreground">(recommended)</span>
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Most banks let you add a second notification email. No forwarding rules needed — works forever.
+            </p>
+            <ol className="text-xs text-muted-foreground space-y-0.5 list-decimal list-inside">
+              <li>Log into your bank's app or portal</li>
+              <li>Go to <span className="font-medium text-foreground">Notifications / Alerts settings</span></li>
+              <li>Add your import address as a notification email</li>
+              <li>Enable transaction / spending alerts</li>
+            </ol>
+          </div>
+
+          <div className="rounded-lg border border-border/40 bg-muted/30 p-3 space-y-1.5">
+            <p className="text-xs font-bold text-foreground">
+              Option B — Gmail or Outlook forwarding filter
+            </p>
+            <p className="text-xs text-muted-foreground">
+              If your bank only supports one email, create a filter to auto-forward bank emails.
+            </p>
+            <div className="space-y-1.5">
+              <p className="text-xs font-semibold text-foreground">Gmail:</p>
+              <ol className="text-xs text-muted-foreground space-y-0.5 list-decimal list-inside">
+                <li>Settings → <span className="font-medium text-foreground">Filters → Create filter</span></li>
+                <li><span className="font-medium text-foreground">From:</span> enter your bank's email address</li>
+                <li>Click <span className="font-medium text-foreground">Create filter</span> → check <span className="font-medium text-foreground">Forward it to</span></li>
+                <li>Add your import address and save</li>
+              </ol>
+              <p className="text-xs font-semibold text-foreground pt-1">Outlook:</p>
+              <ol className="text-xs text-muted-foreground space-y-0.5 list-decimal list-inside">
+                <li>Settings → Mail → <span className="font-medium text-foreground">Rules → Add new rule</span></li>
+                <li>Condition: <span className="font-medium text-foreground">From</span> → your bank's email</li>
+                <li>Action: <span className="font-medium text-foreground">Forward to</span> → your import address</li>
+              </ol>
+            </div>
           </div>
         </div>
       )}
