@@ -17,13 +17,20 @@ export default {
     const payload = await buildPayload(raw, message.to, message.from);
 
     // Fire-and-forget — Cloudflare retries on 5xx but we always return 200 from Next.js
-    await fetch(`${env.APP_URL}/api/email/inbound`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-webhook-secret": env.WEBHOOK_SECRET,
-      },
-      body: JSON.stringify(payload),
-    });
+    try {
+      const res = await fetch(`${env.APP_URL}/api/email/inbound`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-webhook-secret": env.WEBHOOK_SECRET,
+        },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        console.error(`[email-worker] webhook returned ${res.status}`);
+      }
+    } catch (err) {
+      console.error("[email-worker] failed to post to webhook:", err);
+    }
   },
 };

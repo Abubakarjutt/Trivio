@@ -1,4 +1,5 @@
 // app/api/email/inbound/route.ts
+import { timingSafeEqual } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import {
@@ -39,8 +40,14 @@ interface InboundEmailPayload {
 }
 
 export async function POST(request: NextRequest) {
-  const secret = request.headers.get("x-webhook-secret");
-  if (!secret || secret !== process.env.EMAIL_WEBHOOK_SECRET) {
+  const expected = process.env.EMAIL_WEBHOOK_SECRET;
+  const secret   = request.headers.get("x-webhook-secret");
+  if (!expected || !secret) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const secretsMatch = expected.length === secret.length &&
+    timingSafeEqual(Buffer.from(expected), Buffer.from(secret));
+  if (!secretsMatch) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -118,7 +125,9 @@ export async function POST(request: NextRequest) {
     });
 
     return NextResponse.json({ ok: true });
-  } catch {
+  } catch (err) {
+    // Always return 200 — prevents Cloudflare Worker from retrying on app errors
+    console.error("[email-inbound] unhandled error:", err);
     return NextResponse.json({ ok: true });
   }
 }
