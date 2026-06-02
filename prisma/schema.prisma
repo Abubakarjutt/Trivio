@@ -624,10 +624,11 @@ model StatementImportBatch {
   organisation     Organisation          @relation(fields: [organisationId], references: [id], onDelete: Cascade)
   filename         String
   fileType         StatementFileType
-  status           StatementImportStatus @default(PENDING)
-  transactionCount Int                   @default(0)
-  errorMessage     String?
-  createdAt        DateTime              @default(now())
+  status               StatementImportStatus @default(PENDING)
+  transactionCount     Int                   @default(0)
+  errorMessage         String?
+  pendingDuplicatesJson Json?
+  createdAt            DateTime              @default(now())
 
   transactions StatementTransaction[]
 

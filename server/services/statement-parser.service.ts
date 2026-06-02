@@ -179,6 +179,17 @@ function descriptionMatches(a: string, b: string): boolean {
   return false;
 }
 
+export function deduplicateIncoming(transactions: RawTransaction[]): RawTransaction[] {
+  const seen: RawTransaction[] = [];
+  for (const txn of transactions) {
+    const isDupe = seen.some(
+      (s) => s.date === txn.date && Math.abs(s.amount - txn.amount) <= 0.001 && descriptionMatches(s.description, txn.description)
+    );
+    if (!isDupe) seen.push(txn);
+  }
+  return seen;
+}
+
 export function detectDuplicates(incoming: RawTransaction[], existing: ExistingTransaction[]): DedupeResult {
   const safe: RawTransaction[] = [];
   const duplicates: DuplicateMatch[] = [];

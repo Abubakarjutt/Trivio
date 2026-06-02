@@ -9,7 +9,7 @@ import { toast } from "sonner";
 type ImportState = "idle" | "uploading" | "duplicates" | "done" | "already_imported" | "error";
 type FileCategory = "csv" | "pdf" | "image";
 
-interface DuplicateItem { id: string; date: string | Date; amount: number; description: string; }
+interface DuplicateItem { date: string | Date; amount: number; description: string; }
 interface ProgressStep { step: string; pct: number; count?: number; }
 
 const PDF_STEP_LABELS: Record<string, string> = {
@@ -67,6 +67,7 @@ export function ImportDialog({ open, onOpenChange, onComplete }: ImportDialogPro
     setResultCount(0);
     setSkipDuplicates(false);
     setErrorMsg("");
+    if (inputRef.current) inputRef.current.value = "";
   };
 
   const handleFile = (f: File) => {
@@ -189,11 +190,7 @@ export function ImportDialog({ open, onOpenChange, onComplete }: ImportDialogPro
     setProgress(null);
     try {
       const url = `/api/pf/import/${batchId}/confirm?skip=${skip}`;
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ duplicateIds: duplicates.map((d) => d.id) }),
-      });
+      const res = await fetch(url, { method: "POST" });
       const data = await res.json() as { count: number; skipped: number };
       setResultCount(data.count);
       onComplete();
@@ -321,8 +318,8 @@ export function ImportDialog({ open, onOpenChange, onComplete }: ImportDialogPro
           <div className="flex flex-col gap-4">
             <p className="text-sm text-muted-foreground">{duplicates.length} transaction{duplicates.length !== 1 ? "s" : ""} may already exist in your records.</p>
             <div className="flex flex-col gap-2 max-h-48 overflow-y-auto">
-              {duplicates.map((d) => (
-                <div key={d.id} className="flex items-center justify-between rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 px-3 py-2">
+              {duplicates.map((d, i) => (
+                <div key={i} className="flex items-center justify-between rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 px-3 py-2">
                   <div>
                     <p className="text-sm font-medium">{d.description}</p>
                     <p className="text-xs text-muted-foreground">
