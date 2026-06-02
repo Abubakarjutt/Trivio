@@ -104,6 +104,7 @@ model Organisation {
   stripeSubscriptionId String?          @unique
   onboardingStep       OnboardingStep   @default(BUSINESS_INFO)
   onboardingComplete   Boolean          @default(false)
+  emailImportToken     String           @unique @default(cuid())
   createdAt            DateTime         @default(now())
   updatedAt            DateTime         @updatedAt
 
@@ -133,6 +134,8 @@ model Organisation {
   crmPipelines      CrmPipeline[]
   crmDeals          CrmDeal[]
   crmActivities     CrmActivity[]
+
+  @@index([emailImportToken])
 }
 
 model User {
@@ -604,6 +607,7 @@ enum StatementFileType {
   PDF
   CSV
   IMAGE
+  EMAIL
 }
 
 enum StatementImportStatus {

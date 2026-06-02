@@ -45,6 +45,13 @@ export const orgRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const userId = ctx.session.user.id;
+
+      // Guard: user must exist in DB (JWT can be stale after a DB reset or account deletion)
+      const userExists = await ctx.db.user.findUnique({ where: { id: userId }, select: { id: true } });
+      if (!userExists) {
+        throw new TRPCError({ code: "UNAUTHORIZED", message: "User account not found. Please sign out and sign in again." });
+      }
+
       let org = await ctx.db.organisation.findFirst({
         where: { users: { some: { id: userId } } },
       });
@@ -128,5 +135,16 @@ export const orgRouter = createTRPCRouter({
         data: input,
       });
     }),
+
+  resetEmailImportToken: orgProcedure.mutation(async ({ ctx }) => {
+    const { createId } = await import("@paralleldrive/cuid2");
+    const newToken = createId();
+    const updated = await ctx.db.organisation.update({
+      where: { id: ctx.organisationId },
+      data: { emailImportToken: newToken },
+      select: { emailImportToken: true },
+    });
+    return { emailImportToken: updated.emailImportToken };
+  }),
 });
 

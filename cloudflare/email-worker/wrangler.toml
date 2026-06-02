@@ -1,0 +1,11 @@
+# cloudflare/email-worker/wrangler.toml
+name = "autoaccounts-email-worker"
+main = "index.ts"
+compatibility_date = "2024-09-02"
+
+# Secrets — set via: wrangler secret put APP_URL / WEBHOOK_SECRET
+# APP_URL     = https://app.trivio-ai.com
+# WEBHOOK_SECRET = (random string, must match EMAIL_WEBHOOK_SECRET in Next.js .env)
+
+[email]
+# Catch-all route configured in Cloudflare dashboard for import.trivio-ai.com

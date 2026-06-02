@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { CreditCard, User, Building2, ChevronRight, Download } from "lucide-react";
+import { EmailImportCard } from "./_components/email-import-card";
 
 export default async function SettingsPage() {
   const session = await auth();
@@ -14,6 +15,8 @@ export default async function SettingsPage() {
   });
 
   if (!user?.organisationId) redirect("/onboarding");
+
+  const emailImportToken = user.organisation?.emailImportToken ?? "";
 
   const tierLabel = user.organisation?.subscriptionTier === "PRO" ? "Pro" : "Free";
   const tierColor = user.organisation?.subscriptionTier === "PRO"
@@ -115,6 +118,11 @@ export default async function SettingsPage() {
               </div>
             </div>
           </div>
+
+          {/* Email Import */}
+          {emailImportToken && (
+            <EmailImportCard initialToken={emailImportToken} />
+          )}
         </div>
       </main>
     </div>

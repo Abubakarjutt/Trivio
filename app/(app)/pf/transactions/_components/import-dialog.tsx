@@ -42,9 +42,10 @@ interface ImportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onComplete: () => void;
+  emailImportToken?: string | null;
 }
 
-export function ImportDialog({ open, onOpenChange, onComplete }: ImportDialogProps) {
+export function ImportDialog({ open, onOpenChange, onComplete, emailImportToken }: ImportDialogProps) {
   const [state, setState]               = useState<ImportState>("idle");
   const [file, setFile]                 = useState<File | null>(null);
   const [dragging, setDragging]         = useState(false);
@@ -264,6 +265,35 @@ export function ImportDialog({ open, onOpenChange, onComplete }: ImportDialogPro
                 redacted before any data leaves this app. Only transaction rows are sent to AI for parsing.
               </p>
             </div>
+
+            {/* Email auto-import banner */}
+            {emailImportToken && (
+              <div className="rounded-xl border border-blue-200 bg-gradient-to-br from-blue-50 to-green-50 p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-sm">⚡</span>
+                  <div>
+                    <p className="text-xs font-bold text-blue-800">Auto-import via Email</p>
+                    <p className="text-[11px] text-blue-600">Set up once — transactions arrive automatically</p>
+                  </div>
+                </div>
+                <p className="text-[11px] text-gray-500 mb-1.5">Forward bank alert emails to:</p>
+                <div className="flex items-center justify-between rounded-md border border-blue-200 bg-white px-2.5 py-1.5">
+                  <span className="font-mono text-[11px] text-blue-700 truncate">
+                    {emailImportToken}@import.trivio-ai.com
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(`${emailImportToken}@import.trivio-ai.com`);
+                      toast.success("Copied!");
+                    }}
+                    className="ml-2 text-[11px] font-semibold text-blue-600 hover:text-blue-800 flex-shrink-0"
+                  >
+                    Copy
+                  </button>
+                </div>
+              </div>
+            )}
 
             <div className="flex gap-2 justify-end">
               <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>

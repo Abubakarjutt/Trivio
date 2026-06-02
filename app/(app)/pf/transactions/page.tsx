@@ -43,6 +43,8 @@ export default function PfTransactionsPage() {
   const [search, setSearch]         = useState("");
   const [cursor, setCursor]         = useState<string | undefined>(undefined);
 
+  const { data: org } = trpc.org.get.useQuery();
+
   const { data: summary } = trpc.statementTransactions.summary.useQuery({ month });
 
   const { data, isLoading } = trpc.statementTransactions.list.useQuery({
@@ -244,6 +246,7 @@ export default function PfTransactionsPage() {
       <ImportDialog
         open={importOpen}
         onOpenChange={setImportOpen}
+        emailImportToken={org?.emailImportToken}
         onComplete={() => {
           setMonth(undefined); // show All time so imported transactions are visible
           setCursor(undefined);
