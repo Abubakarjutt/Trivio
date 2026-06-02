@@ -1,8 +1,7 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { Sidebar } from "./_components/sidebar";
-import { ChatPanel } from "./_components/chat-panel";
+import { AppShell } from "./_components/app-shell";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
@@ -13,21 +12,15 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     include: { organisation: true },
   });
 
-  if (!user?.organisation?.onboardingComplete) {
+  if (!user) {
+    // User exists in session (JWT) but not in DB — stale token or account deleted.
+    // Redirect to login so they can authenticate with a valid account.
+    redirect("/login");
+  }
+
+  if (!user.organisation?.onboardingComplete) {
     redirect("/onboarding");
   }
 
-  return (
-    <div className="flex h-screen overflow-hidden bg-canvas">
-      <aside className="hidden md:flex md:shrink-0 shadow-[1px_0_0_0_hsl(220_16%_88%)]">
-        <Sidebar orgName={user.organisation.name} />
-      </aside>
-      <main className="flex flex-1 flex-col overflow-hidden">
-        <div className="flex-1 overflow-y-auto">
-          {children}
-        </div>
-      </main>
-      <ChatPanel />
-    </div>
-  );
+  return <AppShell orgName={user.organisation.name}>{children}</AppShell>;
 }

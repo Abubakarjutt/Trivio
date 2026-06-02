@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Loader2, CreditCard, TrendingDown, TrendingUp, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { ImportDialog } from "./_components/import-dialog";
+import { TransactionCard } from "./_components/transaction-card";
 import { CATEGORY_DEFINITIONS } from "@/server/services/statement-categorization.service";
 import { MonthPicker, currentMonth } from "@/app/(app)/pf/_components/month-picker";
 
@@ -124,15 +125,15 @@ export default function PfTransactionsPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
         <Input
           placeholder="Search merchants..."
-          className="h-8 w-48 text-sm"
+          className="h-8 w-full sm:w-48 text-sm"
           value={search}
           onChange={(e) => { setSearch(e.target.value); setCursor(undefined); }}
         />
         <Select value={category} onValueChange={(v) => { setCategory(v); setCursor(undefined); }}>
-          <SelectTrigger className="h-8 w-44 text-sm">
+          <SelectTrigger className="h-8 w-full sm:w-44 text-sm">
             <SelectValue placeholder="Category: All" />
           </SelectTrigger>
           <SelectContent>
@@ -141,7 +142,7 @@ export default function PfTransactionsPage() {
           </SelectContent>
         </Select>
         <Select value={type} onValueChange={(v) => { setType(v); setCursor(undefined); }}>
-          <SelectTrigger className="h-8 w-36 text-sm">
+          <SelectTrigger className="h-8 w-full sm:w-36 text-sm">
             <SelectValue placeholder="Type: All" />
           </SelectTrigger>
           <SelectContent>
@@ -179,7 +180,9 @@ export default function PfTransactionsPage() {
           )}
         </div>
       ) : (
-        <div className="rounded-lg border overflow-hidden">
+        <>
+        {/* Desktop table */}
+        <div className="hidden md:block rounded-lg border overflow-hidden">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-muted/40">
@@ -241,6 +244,27 @@ export default function PfTransactionsPage() {
             </div>
           )}
         </div>
+
+        {/* Mobile card list */}
+        <div className="md:hidden flex flex-col divide-y rounded-lg border overflow-hidden bg-card">
+          {data.items.map((txn) => (
+            <TransactionCard
+              key={txn.id}
+              txn={{ ...txn, amount: Number(txn.amount) }}
+              onCategoryChange={(id, cat) => updateCategory.mutate({ id, category: cat })}
+              onDelete={(id) => deleteTransaction.mutate({ id })}
+              fmt={fmt}
+            />
+          ))}
+          {data.nextCursor && (
+            <div className="flex justify-center py-3">
+              <Button variant="ghost" size="sm" onClick={() => setCursor(data.nextCursor)}>
+                Load more
+              </Button>
+            </div>
+          )}
+        </div>
+        </>
       )}
 
       <ImportDialog

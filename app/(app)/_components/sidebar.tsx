@@ -87,13 +87,14 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-function NavItemComponent({ icon: Icon, href, label, matchPrefix }: NavItem) {
+function NavItemComponent({ icon: Icon, href, label, matchPrefix, onNavigate }: NavItem & { onNavigate?: () => void }) {
   const pathname = usePathname();
   const active = matchPrefix ? pathname.startsWith(href) : pathname === href;
 
   return (
     <Link
       href={href}
+      onClick={onNavigate}
       className={cn(
         "relative group flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm transition-all duration-150",
         active
@@ -113,7 +114,7 @@ function NavItemComponent({ icon: Icon, href, label, matchPrefix }: NavItem) {
   );
 }
 
-export function Sidebar({ orgName }: { orgName: string }) {
+export function Sidebar({ orgName, onNavigate }: { orgName: string; onNavigate?: () => void }) {
   return (
     <div
       className="flex flex-col h-full bg-[hsl(var(--sidebar-background))]"
@@ -144,7 +145,7 @@ export function Sidebar({ orgName }: { orgName: string }) {
               </p>
             )}
             {group.items.map((item, i) => (
-              <NavItemComponent key={i} {...item} />
+              <NavItemComponent key={i} {...item} onNavigate={onNavigate} />
             ))}
           </div>
         ))}
@@ -154,6 +155,7 @@ export function Sidebar({ orgName }: { orgName: string }) {
       <div className="border-t border-sidebar-border/40 px-3 py-3 space-y-0.5">
         <Link
           href="/settings"
+          onClick={onNavigate}
           className="flex items-center gap-3 rounded-md px-3 py-2 text-sm text-sidebar-foreground/50 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground/90 transition-all duration-150"
         >
           <Settings className="h-[15px] w-[15px] shrink-0 text-sidebar-foreground/30" />
@@ -161,7 +163,7 @@ export function Sidebar({ orgName }: { orgName: string }) {
         </Link>
         <button
           className="w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm text-sidebar-foreground/50 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground/90 transition-all duration-150"
-          onClick={() => signOut({ callbackUrl: "/login" })}
+          onClick={() => { onNavigate?.(); signOut({ callbackUrl: "/login" }); }}
         >
           <LogOut className="h-[15px] w-[15px] shrink-0 text-sidebar-foreground/30" />
           <span>Sign out</span>
