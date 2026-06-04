@@ -4,7 +4,7 @@ export const resend = new Resend(process.env.RESEND_API_KEY);
 
 export async function sendPasswordResetEmail(email: string, resetUrl: string) {
   await resend.emails.send({
-    from: "AutoAccounts <onboarding@resend.dev>",
+    from: process.env.EMAIL_FROM ?? "AutoAccounts <noreply@autoaccounts.app>",
     to: email,
     subject: "Reset your AutoAccounts password",
     html: `
