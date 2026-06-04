@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Loader2, Plus, Trash2, Archive, TrendingUp } from "lucide-react";
+import { Loader2, Plus, Trash2, Archive, TrendingUp, Zap } from "lucide-react";
 import { toast } from "sonner";
 
 const PERIODS = ["WEEKLY", "MONTHLY", "QUARTERLY", "YEARLY"] as const;
@@ -27,6 +27,35 @@ function UtilBar({ pct }: { pct: number }) {
 }
 
 export default function BudgetsPage() {
+  const { data: orgData } = trpc.org.get.useQuery();
+
+  if (orgData && orgData.plan !== "PRO") {
+    return (
+      <div className="flex flex-col gap-6 p-6">
+        <PageHeader
+          title="Budgets"
+          description="Set spending limits by category and track utilization."
+        />
+        <div className="rounded-2xl border border-border/40 bg-card p-8 text-center max-w-md mx-auto">
+          <div className="flex items-center justify-center w-12 h-12 rounded-full bg-primary/10 mx-auto mb-4">
+            <Zap className="h-5 w-5 text-primary" />
+          </div>
+          <h2 className="font-semibold text-lg mb-2">Pro feature</h2>
+          <p className="text-sm text-muted-foreground mb-6">
+            Budget tracking is available on the Pro plan. Upgrade to set spending limits and track utilization across categories.
+          </p>
+          <a
+            href="/settings/billing"
+            className="inline-flex items-center justify-center h-10 px-6 rounded-xl text-sm font-semibold text-white"
+            style={{ background: "#1A6644" }}
+          >
+            Upgrade to Pro →
+          </a>
+        </div>
+      </div>
+    );
+  }
+
   const utils = trpc.useUtils();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ name: "", category: "", limitAmount: "", period: "MONTHLY" });
