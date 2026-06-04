@@ -91,6 +91,18 @@ enum OnboardingStep {
   COMPLETE
 }
 
+enum Plan {
+  FREE
+  PRO
+}
+
+enum LsSubscriptionStatus {
+  active
+  cancelled
+  past_due
+  expired
+}
+
 // ─── Organisation & Users ─────────────────────────────────────────────────────
 
 model Organisation {
@@ -105,6 +117,10 @@ model Organisation {
   onboardingStep       OnboardingStep   @default(BUSINESS_INFO)
   onboardingComplete   Boolean          @default(false)
   emailImportToken     String           @unique @default(cuid())
+  plan                   Plan                  @default(FREE)
+  lsCustomerId           String?
+  lsSubscriptionId       String?               @unique
+  lsSubscriptionStatus   LsSubscriptionStatus?
   createdAt            DateTime         @default(now())
   updatedAt            DateTime         @updatedAt
 
@@ -861,4 +877,14 @@ model WebhookEvent {
 
   @@unique([provider, eventId])
   @@index([provider, status])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  email     String
+  token     String   @unique @default(cuid())
+  expires   DateTime
+  createdAt DateTime @default(now())
+
+  @@index([email])
 }
