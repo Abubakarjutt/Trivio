@@ -59,7 +59,12 @@ export default function RegisterPage() {
         password: form.password,
         redirect: false,
       });
-      if (result?.ok) router.push("/onboarding");
+      if (result?.ok) {
+        router.push("/onboarding");
+      } else {
+        toast({ variant: "destructive", title: "Account created but sign-in failed. Please sign in manually." });
+        router.push("/login");
+      }
     },
     onError: (err) => toast({ variant: "destructive", title: err.message }),
   });
