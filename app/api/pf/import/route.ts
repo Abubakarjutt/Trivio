@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { checkAiExtractionLimit, checkTransactionLimit } from "@/lib/plan";
 import { autoDetectColumns, parseCsvBuffer, detectDuplicates, deduplicateIncoming } from "@/server/services/statement-parser.service";
 import { categorizeBatch } from "@/server/services/statement-categorization.service";
 import { extractTextFromPdf, parseTransactionsFromText } from "@/server/services/pdf-statement.service";
@@ -53,6 +54,38 @@ export async function POST(request: NextRequest) {
   if (!isCsv && !isPdf && !isImage) {
     return NextResponse.json({ error: "Only PDF, CSV, and image files are supported" }, { status: 422 });
   }
+
+  // ── Plan enforcement ─────────────────────────────────────────────────────
+  const org = await db.organisation.findUnique({
+    where: { id: organisationId },
+    select: { plan: true },
+  });
+  const plan = (org?.plan ?? "FREE") as "FREE" | "PRO";
+
+  if (isCsv) {
+    const { allowed, used, limit } = await checkTransactionLimit(organisationId, plan);
+    if (!allowed) {
+      return NextResponse.json(
+        {
+          error: `Free plan limit reached: ${used}/${limit} transactions imported this month. Upgrade to Pro for unlimited imports.`,
+          limitReached: "transactions",
+        },
+        { status: 403 }
+      );
+    }
+  } else {
+    const { allowed, used, limit } = await checkAiExtractionLimit(organisationId, plan);
+    if (!allowed) {
+      return NextResponse.json(
+        {
+          error: `Free plan limit reached: ${used}/${limit} AI extractions used this month. Upgrade to Pro for unlimited extractions.`,
+          limitReached: "ai_extractions",
+        },
+        { status: 403 }
+      );
+    }
+  }
+  // ─────────────────────────────────────────────────────────────────────────
 
   const buffer = Buffer.from(await file.arrayBuffer());
 
