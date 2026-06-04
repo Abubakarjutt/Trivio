@@ -1,164 +1,48 @@
 "use client";
 
-import { useEffect } from "react";
-import { useSearchParams } from "next/navigation";
-import { trpc as api } from "@/lib/trpc/client";
-import { Button } from "@/components/ui/button";
-import { Check, Zap } from "lucide-react";
-import { toast } from "sonner";
-// sonner is already installed as a shadcn/ui dependency
-import { Suspense } from "react";
+import { trpc } from "@/lib/trpc/client";
+import { buildCheckoutUrl } from "@/lib/lemonsqueezy";
+import { useSession } from "next-auth/react";
 
-function BillingContent() {
-  const searchParams = useSearchParams();
-  const { data: status, isLoading } = api.subscription.getStatus.useQuery();
-  const checkoutMutation = api.subscription.createCheckoutSession.useMutation();
-  const portalMutation = api.subscription.createPortalSession.useMutation();
+const FREE_AI_LIMIT = 2;
+const FREE_TX_LIMIT = 50;
 
-  useEffect(() => {
-    if (searchParams.get("success") === "1") {
-      toast.success("Subscription updated! Welcome to Pro.");
-    }
-  }, [searchParams]);
+const FEATURES = [
+  "Unlimited AI statement extractions",
+  "Unlimited transaction imports",
+  "Budget & Goals tracking",
+  "Full reports & CSV export",
+];
 
-  if (isLoading) {
+export default function BillingPage() {
+  const { data: session } = useSession();
+  const { data: org } = trpc.org.get.useQuery();
+
+  if (!org) {
     return (
-      <div className="flex items-center justify-center py-20">
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      <div className="flex flex-col min-h-full">
+        <header className="sticky top-0 z-10 flex items-center gap-4 border-b border-border/40 bg-background/95 backdrop-blur px-8 py-4">
+          <div>
+            <h1 className="text-xl font-semibold tracking-tight">Billing &amp; Subscription</h1>
+            <p className="text-sm text-muted-foreground">Manage your plan</p>
+          </div>
+        </header>
+        <main className="flex-1 px-8 py-8">
+          <div className="text-sm text-muted-foreground">Loading...</div>
+        </main>
       </div>
     );
   }
 
-  const isPro = status?.tier === "PRO" || status?.tier === "BUSINESS";
-  const extractionCount = status?.aiExtractionCount ?? 0;
-  const extractionLimit = status?.aiExtractionLimit ?? 5;
-  const pct = extractionLimit > 0 ? Math.min(100, Math.round((extractionCount / extractionLimit) * 100)) : 0;
+  const isPro = org.plan === "PRO";
+  const checkoutUrl =
+    session?.user?.email && org.id
+      ? buildCheckoutUrl(session.user.email, org.id)
+      : "#";
 
-  async function handleCheckout(plan: "pro_monthly" | "pro_annual") {
-    try {
-      const result = await checkoutMutation.mutateAsync({ plan });
-      window.location.href = result.url;
-    } catch {
-      toast.error("Failed to open checkout. Make sure Stripe is configured.");
-    }
-  }
+  const aiUsed = org.aiExtractionsUsed ?? 0;
+  const txUsed = org.transactionsUsed ?? 0;
 
-  async function handlePortal() {
-    try {
-      const result = await portalMutation.mutateAsync();
-      window.location.href = result.url;
-    } catch {
-      toast.error("Failed to open billing portal. Make sure Stripe is configured.");
-    }
-  }
-
-  return (
-    <div className="flex flex-col gap-6 max-w-2xl">
-      {/* Current plan */}
-      <div className="rounded-2xl border border-border/40 bg-card shadow-card p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="font-semibold">Current Plan</h2>
-          <span
-            className={`text-xs font-bold uppercase tracking-[0.08em] px-2.5 py-1 rounded-full ${
-              isPro ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"
-            }`}
-          >
-            {isPro ? "Pro" : "Free"}
-          </span>
-        </div>
-
-        {!isPro && (
-          <div>
-            <p className="text-sm text-muted-foreground mb-3">
-              AI extractions this month
-            </p>
-            <div className="flex items-center gap-3">
-              <div className="flex-1 bg-muted rounded-full h-2">
-                <div
-                  className={`h-2 rounded-full transition-all ${pct >= 100 ? "bg-destructive" : "bg-primary"}`}
-                  style={{ width: `${pct}%` }}
-                />
-              </div>
-              <span className="text-sm font-mono tabular-nums text-muted-foreground whitespace-nowrap">
-                {extractionCount} / {extractionLimit}
-              </span>
-            </div>
-          </div>
-        )}
-
-        {isPro && (
-          <p className="text-sm text-muted-foreground">
-            You have unlimited AI extractions and access to all Pro features.
-          </p>
-        )}
-      </div>
-
-      {/* Upgrade or manage */}
-      {isPro ? (
-        <div className="rounded-2xl border border-border/40 bg-card shadow-card p-6">
-          <h2 className="font-semibold mb-2">Manage Subscription</h2>
-          <p className="text-sm text-muted-foreground mb-4">
-            Update your payment method, view invoices, or cancel your subscription.
-          </p>
-          <Button onClick={handlePortal} disabled={portalMutation.isPending}>
-            {portalMutation.isPending ? "Opening…" : "Manage Billing"}
-          </Button>
-        </div>
-      ) : (
-        <div>
-          <h2 className="font-semibold mb-4">Upgrade to Pro</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Pro Monthly */}
-            <div className="rounded-2xl border border-border/40 bg-card shadow-card p-5 flex flex-col">
-              <div className="flex items-center gap-2 mb-1">
-                <Zap className="h-4 w-4 text-primary" />
-                <span className="font-semibold">Pro Monthly</span>
-              </div>
-              <p className="text-2xl font-bold mt-2">$29 <span className="text-sm font-normal text-muted-foreground">/ month</span></p>
-              <ul className="mt-4 flex flex-col gap-1.5 text-sm text-muted-foreground flex-1">
-                {["Unlimited AI extractions", "Up to 5 team members", "Priority support"].map((f) => (
-                  <li key={f} className="flex items-center gap-2">
-                    <Check className="h-3.5 w-3.5 text-primary shrink-0" />
-                    {f}
-                  </li>
-                ))}
-              </ul>
-              <Button className="mt-4" onClick={() => handleCheckout("pro_monthly")} disabled={checkoutMutation.isPending}>
-                Upgrade Monthly
-              </Button>
-            </div>
-
-            {/* Pro Annual */}
-            <div className="rounded-2xl border border-primary/30 bg-primary/5 shadow-card p-5 flex flex-col relative">
-              <span className="absolute top-3 right-3 text-[10px] font-bold uppercase tracking-[0.08em] px-2 py-0.5 rounded-full bg-primary/10 text-primary">
-                Best Value
-              </span>
-              <div className="flex items-center gap-2 mb-1">
-                <Zap className="h-4 w-4 text-primary" />
-                <span className="font-semibold">Pro Annual</span>
-              </div>
-              <p className="text-2xl font-bold mt-2">$290 <span className="text-sm font-normal text-muted-foreground">/ year</span></p>
-              <p className="text-xs text-primary font-medium mt-0.5">Save 2 months vs monthly</p>
-              <ul className="mt-4 flex flex-col gap-1.5 text-sm text-muted-foreground flex-1">
-                {["Everything in Pro Monthly", "2 months free", "Annual billing"].map((f) => (
-                  <li key={f} className="flex items-center gap-2">
-                    <Check className="h-3.5 w-3.5 text-primary shrink-0" />
-                    {f}
-                  </li>
-                ))}
-              </ul>
-              <Button className="mt-4" onClick={() => handleCheckout("pro_annual")} disabled={checkoutMutation.isPending}>
-                Upgrade Annual
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-export default function BillingPage() {
   return (
     <div className="flex flex-col min-h-full">
       <header className="sticky top-0 z-10 flex items-center gap-4 border-b border-border/40 bg-background/95 backdrop-blur px-8 py-4">
@@ -167,10 +51,102 @@ export default function BillingPage() {
           <p className="text-sm text-muted-foreground">Manage your plan</p>
         </div>
       </header>
-      <main className="flex-1 px-8 py-8">
-        <Suspense fallback={<div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />}>
-          <BillingContent />
-        </Suspense>
+
+      <main className="flex-1 px-8 py-8 max-w-lg space-y-4">
+
+        {/* Plan badge */}
+        <div className="flex items-center justify-between rounded-xl border border-border/40 bg-card p-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1">
+              Current plan
+            </p>
+            <p className="text-lg font-semibold">{isPro ? "Pro" : "Free"}</p>
+            {isPro && org.lsSubscriptionStatus === "cancelled" && (
+              <p className="text-xs text-amber-600 mt-1">
+                Cancelled — access until end of billing period
+              </p>
+            )}
+          </div>
+          <span
+            className="px-3 py-1 rounded-full text-xs font-bold"
+            style={{
+              background: isPro ? "#EBF5F0" : "hsl(var(--muted))",
+              color: isPro ? "#1A6644" : "hsl(var(--muted-foreground))",
+            }}
+          >
+            {isPro ? "PRO" : "FREE"}
+          </span>
+        </div>
+
+        {/* Usage stats — Free only */}
+        {!isPro && (
+          <div className="rounded-xl border border-border/40 bg-card p-4 space-y-4">
+            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+              This month&apos;s usage
+            </p>
+
+            <div>
+              <div className="flex justify-between text-sm mb-1.5">
+                <span className="text-muted-foreground">AI statement extractions</span>
+                <span className="font-semibold">{aiUsed} / {FREE_AI_LIMIT}</span>
+              </div>
+              <div className="h-2 rounded-full bg-muted overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all"
+                  style={{
+                    width: `${Math.min((aiUsed / FREE_AI_LIMIT) * 100, 100)}%`,
+                    background: aiUsed >= FREE_AI_LIMIT ? "#EF4444" : "#1A6644",
+                  }}
+                />
+              </div>
+            </div>
+
+            <div>
+              <div className="flex justify-between text-sm mb-1.5">
+                <span className="text-muted-foreground">Transactions imported</span>
+                <span className="font-semibold">{txUsed} / {FREE_TX_LIMIT}</span>
+              </div>
+              <div className="h-2 rounded-full bg-muted overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all"
+                  style={{
+                    width: `${Math.min((txUsed / FREE_TX_LIMIT) * 100, 100)}%`,
+                    background: txUsed >= FREE_TX_LIMIT ? "#EF4444" : "#1A6644",
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* CTA */}
+        {isPro ? (
+          <a
+            href="https://app.lemonsqueezy.com/my-orders"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center justify-center w-full h-11 rounded-xl text-sm font-semibold border border-border/40 text-foreground hover:border-border transition-colors"
+          >
+            Manage subscription →
+          </a>
+        ) : (
+          <div className="space-y-3">
+            <a
+              href={checkoutUrl}
+              className="inline-flex items-center justify-center w-full h-11 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
+              style={{ background: "#1A6644" }}
+            >
+              Upgrade to Pro — $9/month
+            </a>
+            <ul className="space-y-1.5">
+              {FEATURES.map((f) => (
+                <li key={f} className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span className="text-green-600">✓</span> {f}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </main>
     </div>
   );

@@ -116,10 +116,24 @@ export const orgRouter = createTRPCRouter({
     }),
 
   get: orgProcedure.query(async ({ ctx }) => {
-    return ctx.db.organisation.findUnique({
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    const org = await ctx.db.organisation.findUnique({
       where: { id: ctx.organisationId },
       include: { taxRegime: { include: { rates: true } } },
     });
+
+    const [aiExtractionsUsed, transactionsUsed] = await Promise.all([
+      ctx.db.statementImportBatch.count({
+        where: { organisationId: ctx.organisationId, createdAt: { gte: monthStart } },
+      }),
+      ctx.db.statementTransaction.count({
+        where: { organisationId: ctx.organisationId, createdAt: { gte: monthStart } },
+      }),
+    ]);
+
+    return { ...org, aiExtractionsUsed, transactionsUsed };
   }),
 
   update: orgProcedure
