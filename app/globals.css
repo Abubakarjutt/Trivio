@@ -48,25 +48,25 @@
 /* ─── Design tokens ─────────────────────────────────────── */
 @layer base {
   :root {
-    --background: 38 30% 97%;
-    --foreground: 222 30% 11%;
+    --background: 48 19% 95%;       /* #F4F3EF cream */
+    --foreground: 225 21% 7%;       /* #0F1117 ink */
     --card: 0 0% 100%;
-    --card-foreground: 222 30% 11%;
+    --card-foreground: 225 21% 7%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222 30% 11%;
-    --primary: 221 78% 38%;
+    --popover-foreground: 225 21% 7%;
+    --primary: 153 59% 25%;         /* #1A6644 forest green */
     --primary-foreground: 0 0% 100%;
-    --secondary: 38 25% 91%;
-    --secondary-foreground: 222 25% 20%;
-    --muted: 38 20% 93%;
-    --muted-foreground: 220 12% 48%;
-    --accent: 38 22% 90%;
-    --accent-foreground: 222 25% 18%;
-    --destructive: 0 72% 51%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 220 16% 88%;
-    --input: 220 16% 88%;
-    --ring: 221 78% 38%;
+    --secondary: 150 33% 94%;       /* #EBF5F0 green-dim */
+    --secondary-foreground: 225 21% 7%;
+    --muted: 150 33% 94%;
+    --muted-foreground: 223 9% 46%; /* #6B7180 */
+    --accent: 150 33% 94%;
+    --accent-foreground: 225 21% 7%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 45 18% 87%;           /* #E4E1D8 warm border */
+    --input: 45 18% 87%;
+    --ring: 153 59% 25%;
     --radius: 0.625rem;
 
     /* Sidebar — obsidian navy */
@@ -138,6 +138,32 @@
     @apply tracking-tight;
   }
 }
+
+/* ── Hero stagger animations ── */
+@keyframes fadeSlideUp {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.hero-animate {
+  animation: fadeSlideUp 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.hero-animate-1  { animation-delay: 0ms; }
+.hero-animate-2  { animation-delay: 80ms; }
+.hero-animate-3  { animation-delay: 180ms; }
+.hero-animate-4  { animation-delay: 280ms; }
+.hero-animate-5  { animation-delay: 360ms; }
+.hero-animate-6  { animation-delay: 480ms; }
+
+.toast-in {
+  animation: fadeSlideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.toast-in-1 { animation-delay: 700ms; }
+.toast-in-2 { animation-delay: 900ms; }
+.toast-in-3 { animation-delay: 1100ms; }
 
 @layer utilities {
   /* Financial number rendering */
