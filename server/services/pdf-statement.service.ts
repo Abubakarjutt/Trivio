@@ -115,7 +115,15 @@ async function callGemini(prompt: string): Promise<RawTransaction[]> {
   });
 
   if (!response.ok) {
-    throw new Error(`Gemini API error ${response.status}: ${await response.text().catch(() => "")}`);
+    const body = await response.text().catch(() => "");
+    if (response.status === 429) {
+      const retryMatch = body.match(/"retryDelay":\s*"(\d+)s"/);
+      const retryAfter = retryMatch ? parseInt(retryMatch[1]) + 2 : 30;
+      const err = new Error(`Gemini rate limit — retry after ${retryAfter}s`) as Error & { retryAfter: number };
+      err.retryAfter = retryAfter;
+      throw err;
+    }
+    throw new Error(`Gemini API error ${response.status}: ${body}`);
   }
 
   const data = await response.json() as {
