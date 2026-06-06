@@ -504,16 +504,17 @@ New regimes can be added by implementing the interface and registering in the re
 
 ---
 
-## 7. Security Architecture
+## 7. Security & Compliance Architecture
 
 - **Authentication**: JWT sessions via NextAuth.js; refresh token rotation.
 - **Authorisation**: Organisation-scoped middleware on every tRPC procedure validates `organisationId` matches session.
 - **Data isolation**: `organisationId` in every WHERE clause; Prisma middleware enforces this automatically.
 - **File uploads**: Pre-signed S3 URLs (client uploads directly to S3, never through app server).
 - **Secrets**: Environment variables; AWS Secrets Manager in production.
-- **Rate limiting**: Redis-backed rate limiter on auth endpoints and AI extraction endpoints.
+- **Rate limiting**: In-memory rate limiter on GDPR export/deletion endpoints (3/hr and 2/hr respectively). See note in `docs/gdpr-explanation.md` on horizontal-scaling implications.
 - **Input validation**: Zod schemas on all tRPC inputs.
-- **Audit log**: Every mutation writes to `AuditLog` table — immutable append-only record.
+- **Audit log**: `AuditLog` table captures CREATE, UPDATE, VOID, DELETE, EXPORT, LOGIN, LOGOUT events. `organisationId` is nullable so audit rows survive organisation deletion (Art. 30 / Art. 17 compliance).
+- **GDPR**: Full GDPR compliance layer implemented. See [`docs/gdpr-reference.md`](./gdpr-reference.md) for the controls inventory, [`docs/gdpr-explanation.md`](./gdpr-explanation.md) for design decisions, and [`docs/gdpr-howto.md`](./gdpr-howto.md) for operator procedures.
 
 ---
 
