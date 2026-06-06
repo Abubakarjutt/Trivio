@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { CreditCard, User, Building2, ChevronRight, Download } from "lucide-react";
 import { EmailImportCard } from "./_components/email-import-card";
+import { PrivacyTab } from "./_components/privacy-tab";
 
 export default async function SettingsPage() {
   const session = await auth();
@@ -123,6 +124,14 @@ export default async function SettingsPage() {
           {emailImportToken && (
             <EmailImportCard initialToken={emailImportToken} />
           )}
+
+          {/* Privacy & Data (GDPR) */}
+          <div className="rounded-xl border border-border bg-card p-6 space-y-4">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              Privacy & Data
+            </h2>
+            <PrivacyTab />
+          </div>
         </div>
       </main>
     </div>

@@ -51,6 +51,9 @@ export default function RegisterPage() {
   const router = useRouter();
   const { toast } = useToast();
   const [form, setForm] = useState({ name: "", email: "", password: "", confirmPassword: "" });
+  const [gdprConsent, setGdprConsent] = useState(false);
+
+  const recordConsent = trpc.gdpr.recordConsent.useMutation();
 
   const register = trpc.auth.register.useMutation({
     onSuccess: async () => {
@@ -60,6 +63,7 @@ export default function RegisterPage() {
         redirect: false,
       });
       if (result?.ok) {
+        void recordConsent.mutate();
         router.push("/onboarding");
       } else {
         toast({ variant: "destructive", title: "Account created but sign-in failed. Please sign in manually." });
@@ -73,6 +77,10 @@ export default function RegisterPage() {
     e.preventDefault();
     if (form.password !== form.confirmPassword) {
       toast({ variant: "destructive", title: "Passwords do not match" });
+      return;
+    }
+    if (!gdprConsent) {
+      toast({ variant: "destructive", title: "Please accept the Privacy Policy to continue" });
       return;
     }
     register.mutate({ name: form.name, email: form.email, password: form.password });
@@ -321,11 +329,28 @@ export default function RegisterPage() {
                 </div>
               </div>
 
-              {/* Divider */}
+              {/* GDPR consent */}
+              <div className="flex items-start gap-3 pt-1">
+                <input
+                  id="gdprConsent"
+                  type="checkbox"
+                  checked={gdprConsent}
+                  onChange={(e) => setGdprConsent(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 accent-green-700 cursor-pointer shrink-0"
+                />
+                <label htmlFor="gdprConsent" className="text-xs text-slate-500 leading-relaxed cursor-pointer">
+                  I have read and agree to the{" "}
+                  <Link href="/privacy" className="underline underline-offset-2 hover:text-slate-700 font-medium">
+                    Privacy Policy
+                  </Link>
+                  {" "}and consent to the processing of my personal data to provide this service.
+                </label>
+              </div>
+
               <div className="pt-1">
                 <Button
                   type="submit"
-                  disabled={register.isPending}
+                  disabled={register.isPending || !gdprConsent}
                   className="w-full h-12 text-base font-semibold rounded-xl"
                   style={{ background: "#1A6644" }}
                 >
@@ -333,13 +358,6 @@ export default function RegisterPage() {
                   {register.isPending ? "Creating account…" : "Create account →"}
                 </Button>
               </div>
-
-              <p className="text-xs text-slate-400 text-center pt-1">
-                By creating an account you agree to our{" "}
-                <Link href="/terms" className="underline underline-offset-2 hover:text-slate-600 transition-colors">Terms</Link>
-                {" "}and{" "}
-                <Link href="/privacy" className="underline underline-offset-2 hover:text-slate-600 transition-colors">Privacy Policy</Link>.
-              </p>
             </form>
 
             {/* Divider */}
