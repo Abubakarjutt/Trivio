@@ -5,6 +5,7 @@ import GoogleProvider from "next-auth/providers/google";
 import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
 import { z } from "zod";
+import { writeAuditLog } from "@/server/routers/gdpr";
 
 const credentialsSchema = z.object({
   email: z.string().email(),
@@ -61,6 +62,21 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         session.user.id = token.id as string;
       }
       return session;
+    },
+  },
+  events: {
+    async signIn({ user }) {
+      if (!user.id) return;
+      const u = await db.user.findUnique({ where: { id: user.id }, select: { organisationId: true } });
+      if (!u?.organisationId) return;
+      await writeAuditLog({ db, organisationId: u.organisationId, userId: user.id, action: "LOGIN", entityType: "User", entityId: user.id });
+    },
+    async signOut(message) {
+      const userId = ("token" in message ? message.token?.id : undefined) as string | undefined;
+      if (!userId) return;
+      const u = await db.user.findUnique({ where: { id: userId }, select: { organisationId: true } });
+      if (!u?.organisationId) return;
+      await writeAuditLog({ db, organisationId: u.organisationId, userId, action: "LOGOUT", entityType: "User", entityId: userId });
     },
   },
 });
