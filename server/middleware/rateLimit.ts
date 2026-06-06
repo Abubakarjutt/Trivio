@@ -45,5 +45,7 @@ export function createRateLimiter(limit: number, windowMs: number) {
 }
 
 // Shared limiters for common use cases
-export const authRateLimiter = createRateLimiter(10, 60_000);      // 10/min for auth
-export const extractionRateLimiter = createRateLimiter(20, 60_000); // 20/min for AI extraction
+export const authRateLimiter = createRateLimiter(10, 60_000);           // 10/min for auth
+export const extractionRateLimiter = createRateLimiter(20, 60_000);     // 20/min for AI extraction
+export const exportRateLimiter = createRateLimiter(3, 60 * 60_000);     // 3/hour for data export
+export const deletionRateLimiter = createRateLimiter(2, 60 * 60_000);   // 2/hour for account deletion

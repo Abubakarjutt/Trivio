@@ -63,7 +63,9 @@ export default function RegisterPage() {
         redirect: false,
       });
       if (result?.ok) {
-        void recordConsent.mutate();
+        await recordConsent.mutateAsync().catch(() => {
+          // Non-blocking — consent can be re-recorded from support if needed
+        });
         router.push("/onboarding");
       } else {
         toast({ variant: "destructive", title: "Account created but sign-in failed. Please sign in manually." });

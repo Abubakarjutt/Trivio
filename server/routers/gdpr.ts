@@ -2,6 +2,8 @@ import { z } from "zod";
 import { createTRPCRouter, orgProcedure, protectedProcedure } from "@/server/trpc";
 import { TRPCError } from "@trpc/server";
 import type { PrismaClient } from "@prisma/client";
+import { headers } from "next/headers";
+import { exportRateLimiter, deletionRateLimiter } from "@/server/middleware/rateLimit";
 
 // ── Audit helper ──────────────────────────────────────────────────────────────
 
@@ -47,6 +49,7 @@ export const gdprRouter = createTRPCRouter({
   // ── Data export (GDPR portability) ─────────────────────────────────────────
   exportData: orgProcedure.mutation(async ({ ctx }) => {
     const userId = ctx.session.user.id;
+    exportRateLimiter(`${userId}:exportData`);
 
     const [user, org, invoices, bills, contacts, journalEntries, budgets, chatMessages] =
       await Promise.all([
@@ -120,11 +123,26 @@ export const gdprRouter = createTRPCRouter({
     .input(z.object({ confirmText: z.literal("DELETE") }))
     .mutation(async ({ ctx }) => {
       const userId = ctx.session.user.id;
+      deletionRateLimiter(`${userId}:deleteAccount`);
+
       const user = await ctx.db.user.findUnique({
         where: { id: userId },
         select: { email: true, organisationId: true },
       });
       if (!user) throw new TRPCError({ code: "NOT_FOUND" });
+
+      // Write audit log BEFORE the transaction so it survives if the org cascade-deletes audit rows
+      if (user.organisationId) {
+        await writeAuditLog({
+          db: ctx.db,
+          organisationId: user.organisationId,
+          userId,
+          action: "DELETE",
+          entityType: "Account",
+          entityId: userId,
+          after: { reason: "GDPR right to erasure" },
+        });
+      }
 
       await ctx.db.$transaction(async (tx) => {
         // Anonymise user PII
@@ -186,10 +204,30 @@ export const gdprRouter = createTRPCRouter({
 
   // ── Record GDPR consent ─────────────────────────────────────────────────────
   recordConsent: protectedProcedure.mutation(async ({ ctx }) => {
+    const userId = ctx.session.user.id;
+    const headersList = await headers();
+    const ip = headersList.get("x-forwarded-for")?.split(",")[0]?.trim()
+      ?? headersList.get("x-real-ip")
+      ?? "unknown";
+
+    const consentAt = new Date();
     await ctx.db.user.update({
-      where: { id: ctx.session.user.id },
-      data: { gdprConsentAt: new Date() },
+      where: { id: userId },
+      data: { gdprConsentAt: consentAt },
     });
+
+    if (ctx.organisationId) {
+      await writeAuditLog({
+        db: ctx.db,
+        organisationId: ctx.organisationId,
+        userId,
+        action: "CREATE",
+        entityType: "GdprConsent",
+        entityId: userId,
+        after: { consentAt: consentAt.toISOString(), policyVersion: "2026-06", ipAddress: ip },
+      });
+    }
+
     return { success: true };
   }),
 });

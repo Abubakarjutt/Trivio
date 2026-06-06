@@ -2,7 +2,7 @@ import { auth } from "@/lib/auth";
 import { NextResponse } from "next/server";
 
 // Exact match for "/" and prefix match for everything else
-const PUBLIC_PREFIXES = ["/login", "/register", "/forgot-password", "/reset-password", "/api/auth", "/api/trpc", "/api/chat", "/pricing", "/api/webhooks"];
+const PUBLIC_PREFIXES = ["/login", "/register", "/forgot-password", "/reset-password", "/privacy", "/api/auth", "/api/trpc", "/api/chat", "/pricing", "/api/webhooks"];
 const ONBOARDING_ROUTE = "/onboarding";
 const DASHBOARD_ROUTE = "/dashboard";
 
