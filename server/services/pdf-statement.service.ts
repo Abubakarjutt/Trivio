@@ -7,7 +7,7 @@ import type { RawTransaction } from "./statement-parser.service";
 import { redactPii } from "./pii-redaction.service";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? "";
-const GEMINI_MODEL   = process.env.GEMINI_MODEL   ?? "gemini-2.5-flash";
+const GEMINI_MODEL   = process.env.GEMINI_MODEL   ?? "gemma-4-26b-a4b-it";
 const GEMINI_URL     = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 // pdfjs-dist v5 doesn't export NodeCMapReaderFactory, so we provide one that
@@ -72,25 +72,28 @@ export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
   return pages.join("\n\n--- PAGE BREAK ---\n\n");
 }
 
-const PARSE_PROMPT = `You are a bank statement parser. Extract ALL financial transactions from the text below.
+const PARSE_PROMPT = `Given the bank statement text below, return a JSON array of ALL transactions.
 
-Return ONLY a valid JSON array. No markdown fences, no commentary.
+Each transaction must have these fields:
+- date: convert to YYYY-MM-DD format
+- description: payee, merchant, or transaction reference text
+- amount: the transaction amount as a positive number (NEVER use the balance/running-total column)
+- type: "DEBIT" if money left the account (payments, withdrawals, fees), "CREDIT" if money entered (deposits, refunds, interest)
 
-Required shape:
-[{ "date": "YYYY-MM-DD", "description": "merchant or description", "amount": 123.45, "type": "DEBIT" or "CREDIT" }]
-
-Rules:
-- date: YYYY-MM-DD format only
-- amount: always a positive number (never negative)
-- type: DEBIT = money leaving the account, CREDIT = money entering the account
-- Include EVERY row that moved money: payments, deposits, transfers, direct debits, standing orders, ATM withdrawals, bank fees, service charges, interest charges, interest credits, foreign exchange fees — everything
-- Do NOT skip a row because it also shows a running balance; ignore the balance column, extract the transaction amount
-- Skip ONLY the opening/closing balance summary lines and column header rows — nothing else
-- If a row has a date and an amount that changed the account balance, include it
-- When in doubt, include the row rather than omit it
+IMPORTANT rules:
+- Bank statements have columns like: Date | Description | Debit | Credit | Balance
+- The BALANCE column shows the running account total — IGNORE it, never use it as the amount
+- Include EVERY row that has a date: card payments, direct debits, standing orders, transfers, ATM withdrawals, bank fees, service charges, interest charges, interest credits, refunds, foreign-exchange fees
+- Exclude ONLY: column header rows and explicit "Opening Balance" / "Closing Balance" summary lines
+- If a row has a date and changed the account balance, include it — when in doubt, include it
+- amounts must be positive numbers; direction is captured in the "type" field
 
 Statement text:
 `;
+
+const PARSE_PROMPT_SUFFIX = `
+
+JSON array:`;
 
 async function callGemini(prompt: string): Promise<RawTransaction[]> {
   const response = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
@@ -98,9 +101,9 @@ async function callGemini(prompt: string): Promise<RawTransaction[]> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.1, maxOutputTokens: 16384 },
+      generationConfig: { temperature: 0, maxOutputTokens: 16384 },
     }),
-    signal: AbortSignal.timeout(60_000),
+    signal: AbortSignal.timeout(90_000),
   });
 
   if (!response.ok) {
@@ -148,7 +151,7 @@ export async function parseTransactionsFromText(text: string): Promise<RawTransa
     console.info("[pdf-statement.service] PII redacted before Gemini call:", stats);
   }
 
-  const prompt = `${PARSE_PROMPT}${redacted}`;
+  const prompt = `${PARSE_PROMPT}${redacted}${PARSE_PROMPT_SUFFIX}`;
   const MAX_ATTEMPTS = 3;
   const RETRY_DELAY_MS = 2000;
 
