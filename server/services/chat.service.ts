@@ -139,7 +139,7 @@ Reports:
 Format: TOOL_CALL: {"tool":"name","args":{...}}
 `;
 
-function localDateString(): string {
+export function localDateString(): string {
   const now = new Date();
   const y = now.getFullYear();
   const m = String(now.getMonth() + 1).padStart(2, "0");
@@ -147,7 +147,7 @@ function localDateString(): string {
   return `${y}-${m}-${d}`;
 }
 
-function buildSystemPrompt(orgContext: {
+export function buildSystemPrompt(orgContext: {
   orgName: string;
   currency: string;
   accounts: { code: string; name: string; type: string }[];

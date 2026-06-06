@@ -47,6 +47,7 @@ describe("parseTransactionsFromText", () => {
   afterEach(() => {
     process.env = OLD_ENV;
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it("returns empty array when GEMINI_API_KEY is not set", async () => {
@@ -137,24 +138,85 @@ describe("parseTransactionsFromText", () => {
     expect(result[0].type).toBe("DEBIT");
   });
 
-  it("returns empty array on HTTP error from Gemini", async () => {
+  // ── Retry logic ─────────────────────────────────────────────────────────────
+
+  it("retries on transient HTTP error and succeeds on the second attempt", async () => {
     process.env.GEMINI_API_KEY = "test-key";
+    vi.useFakeTimers();
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ status: 500, ok: false, text: async () => "err" } as unknown as Response)
+      .mockResolvedValueOnce(geminiResponse(VALID_TRANSACTIONS_JSON) as unknown as Response);
+
+    const { parseTransactionsFromText } = await import("@/server/services/pdf-statement.service");
+    const promise = parseTransactionsFromText("text");
+    await vi.runAllTimersAsync();
+
+    const result = await promise;
+    expect(result).toHaveLength(3);
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries when Gemini returns 0 transactions and succeeds on the second attempt", async () => {
+    process.env.GEMINI_API_KEY = "test-key";
+    vi.useFakeTimers();
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(geminiResponse("[]") as unknown as Response)
+      .mockResolvedValueOnce(geminiResponse(VALID_TRANSACTIONS_JSON) as unknown as Response);
+
+    const { parseTransactionsFromText } = await import("@/server/services/pdf-statement.service");
+    const promise = parseTransactionsFromText("text");
+    await vi.runAllTimersAsync();
+
+    const result = await promise;
+    expect(result).toHaveLength(3);
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries on network-level error and succeeds on the third attempt", async () => {
+    process.env.GEMINI_API_KEY = "test-key";
+    vi.useFakeTimers();
+    vi.mocked(fetch)
+      .mockRejectedValueOnce(new TypeError("network error"))
+      .mockRejectedValueOnce(new TypeError("network error"))
+      .mockResolvedValueOnce(geminiResponse(VALID_TRANSACTIONS_JSON) as unknown as Response);
+
+    const { parseTransactionsFromText } = await import("@/server/services/pdf-statement.service");
+    const promise = parseTransactionsFromText("text");
+    await vi.runAllTimersAsync();
+
+    const result = await promise;
+    expect(result).toHaveLength(3);
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(3);
+  });
+
+  it("throws a user-friendly error after all 3 attempts fail with HTTP error", async () => {
+    process.env.GEMINI_API_KEY = "test-key";
+    vi.useFakeTimers();
     vi.mocked(fetch).mockResolvedValue({
       status: 500, ok: false, text: async () => "Internal Server Error",
     } as unknown as Response);
 
     const { parseTransactionsFromText } = await import("@/server/services/pdf-statement.service");
-    const result = await parseTransactionsFromText("text");
-    expect(result).toHaveLength(0);
+    const promise = parseTransactionsFromText("text");
+    // Attach catch BEFORE advancing timers to avoid unhandled-rejection warnings
+    const assertion = expect(promise).rejects.toThrow("AI parsing service unavailable after 3 attempts");
+    await vi.advanceTimersByTimeAsync(10_000);
+    await assertion;
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(3);
   });
 
-  it("returns empty array when fetch throws (network error)", async () => {
+  it("throws a user-friendly error after all 3 attempts fail with network error", async () => {
     process.env.GEMINI_API_KEY = "test-key";
-    vi.mocked(fetch).mockRejectedValue(new Error("fetch failed"));
+    vi.useFakeTimers();
+    vi.mocked(fetch).mockRejectedValue(new TypeError("network error"));
 
     const { parseTransactionsFromText } = await import("@/server/services/pdf-statement.service");
-    const result = await parseTransactionsFromText("text");
-    expect(result).toHaveLength(0);
+    const promise = parseTransactionsFromText("text");
+    // Attach catch BEFORE advancing timers to avoid unhandled-rejection warnings
+    const assertion = expect(promise).rejects.toThrow("AI parsing service unavailable after 3 attempts");
+    await vi.advanceTimersByTimeAsync(10_000);
+    await assertion;
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(3);
   });
 
   it("truncates text to 200,000 chars and redacts PII before sending to Gemini", async () => {

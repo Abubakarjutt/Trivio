@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { parseToolCalls } from "@/server/services/chat.service";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { parseToolCalls, localDateString, buildSystemPrompt } from "@/server/services/chat.service";
 
 describe("ChatService", () => {
   describe("parseToolCalls", () => {
@@ -110,5 +110,90 @@ Line 4`;
       expect(toolCalls[0].tool).toBe("list_contacts");
       expect(toolCalls[0].args.type).toBe("CUSTOMER");
     });
+  });
+});
+
+// ─── localDateString ──────────────────────────────────────────────────────────
+
+describe("localDateString", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("returns a string in YYYY-MM-DD format", () => {
+    expect(localDateString()).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it("matches today's local date components (not UTC)", () => {
+    const now = new Date();
+    const expected = [
+      String(now.getFullYear()),
+      String(now.getMonth() + 1).padStart(2, "0"),
+      String(now.getDate()).padStart(2, "0"),
+    ].join("-");
+    expect(localDateString()).toBe(expected);
+  });
+
+  it("uses local time, not UTC — returns the right date when UTC rolls past midnight", () => {
+    // Simulate a moment when UTC is already 2026-06-06 00:30 but local time is still 2026-06-05
+    // (i.e. UTC-1 or later offset). We freeze local Date so getDate() returns the 5th.
+    const fakeNow = new Date(2026, 5, 5, 23, 30, 0); // local June 5 23:30
+    vi.setSystemTime(fakeNow);
+
+    expect(localDateString()).toBe("2026-06-05");
+  });
+});
+
+// ─── buildSystemPrompt ────────────────────────────────────────────────────────
+
+describe("buildSystemPrompt", () => {
+  const baseCtx = {
+    orgName: "Acme Ltd",
+    currency: "USD",
+    accounts: [{ code: "1000", name: "Cash", type: "ASSET" }],
+    contacts: [{ name: "Jane Doe", type: "CUSTOMER" }],
+  };
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("contains today's local date in YYYY-MM-DD format", () => {
+    const now = new Date();
+    const today = [
+      String(now.getFullYear()),
+      String(now.getMonth() + 1).padStart(2, "0"),
+      String(now.getDate()).padStart(2, "0"),
+    ].join("-");
+
+    expect(buildSystemPrompt(baseCtx)).toContain(`Today's date: ${today}`);
+  });
+
+  it("contains the relative-date resolution instruction (prevents hallucinated dates)", () => {
+    const prompt = buildSystemPrompt(baseCtx);
+    expect(prompt).toContain("resolve them to an explicit YYYY-MM-DD date using today's date above");
+    expect(prompt).toContain("Never guess or use a date from your training data");
+  });
+
+  it("includes the org name and currency", () => {
+    const prompt = buildSystemPrompt(baseCtx);
+    expect(prompt).toContain("Acme Ltd");
+    expect(prompt).toContain("USD");
+  });
+
+  it("includes account codes in the prompt context", () => {
+    const prompt = buildSystemPrompt(baseCtx);
+    expect(prompt).toContain("1000");
+    expect(prompt).toContain("Cash");
+  });
+
+  it("includes contact names in the prompt context", () => {
+    const prompt = buildSystemPrompt(baseCtx);
+    expect(prompt).toContain("Jane Doe");
+  });
+
+  it("uses the frozen local date when system time is mocked", () => {
+    vi.setSystemTime(new Date(2026, 5, 5, 23, 30, 0)); // local June 5
+    expect(buildSystemPrompt(baseCtx)).toContain("Today's date: 2026-06-05");
   });
 });
