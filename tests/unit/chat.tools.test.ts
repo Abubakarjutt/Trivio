@@ -45,6 +45,15 @@ const mockDb = {
     create: vi.fn(),
     update: vi.fn(),
   },
+  budget: {
+    findFirst: vi.fn(),
+    findMany: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+  },
+  statementTransaction: {
+    findMany: vi.fn(),
+  },
 } as unknown as Parameters<typeof executeToolCall>[0];
 
 const ORG = "org-123";
@@ -1201,6 +1210,220 @@ describe("Chat Tool Execution", () => {
       expect(r.success).toBe(true);
       const aging = (r.data as Record<string, unknown>).aging as Record<string, number>;
       expect(aging["1-30"]).toBe(300); // outstanding = 300, overdue 20 days
+    });
+  });
+
+  // ── set_budget ───────────────────────────────────────────────────────────────
+
+  describe("set_budget", () => {
+    it("creates a new budget when none exists", async () => {
+      (mockDb.budget.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+      (mockDb.budget.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+        category: "Food & Dining",
+        limitAmount: dec(5000),
+        period: "MONTHLY",
+      });
+
+      const r = await call("set_budget", { category: "Food & Dining", limitAmount: 5000 });
+
+      expect(r.success).toBe(true);
+      expect(mockDb.budget.create).toHaveBeenCalledTimes(1);
+      expect(mockDb.budget.update).not.toHaveBeenCalled();
+      const data = r.data as Record<string, unknown>;
+      expect(data.category).toBe("Food & Dining");
+      expect(data.limitAmount).toBe(5000);
+      expect(data.action).toBe("created");
+    });
+
+    it("updates an existing budget", async () => {
+      (mockDb.budget.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "bud-1" });
+      (mockDb.budget.update as ReturnType<typeof vi.fn>).mockResolvedValue({
+        category: "Transport",
+        limitAmount: dec(3000),
+        period: "MONTHLY",
+      });
+
+      const r = await call("set_budget", { category: "Transport", limitAmount: 3000 });
+
+      expect(r.success).toBe(true);
+      expect(mockDb.budget.update).toHaveBeenCalledTimes(1);
+      expect(mockDb.budget.create).not.toHaveBeenCalled();
+      const data = r.data as Record<string, unknown>;
+      expect(data.action).toBe("updated");
+    });
+
+    it("uses custom period when provided", async () => {
+      (mockDb.budget.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+      (mockDb.budget.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+        category: "Shopping",
+        limitAmount: dec(10000),
+        period: "QUARTERLY",
+      });
+
+      const r = await call("set_budget", { category: "Shopping", limitAmount: 10000, period: "QUARTERLY" });
+
+      expect(r.success).toBe(true);
+      const createArgs = (mockDb.budget.create as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(createArgs.data.period).toBe("QUARTERLY");
+    });
+
+    it("defaults to MONTHLY period for unknown period values", async () => {
+      (mockDb.budget.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+      (mockDb.budget.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+        category: "Other",
+        limitAmount: dec(1000),
+        period: "MONTHLY",
+      });
+
+      const r = await call("set_budget", { category: "Other", limitAmount: 1000, period: "INVALID" });
+
+      expect(r.success).toBe(true);
+      const createArgs = (mockDb.budget.create as ReturnType<typeof vi.fn>).mock.calls[0][0];
+      expect(createArgs.data.period).toBe("MONTHLY");
+    });
+
+    it("rejects missing category", async () => {
+      const r = await call("set_budget", { limitAmount: 5000 });
+      expect(r.success).toBe(false);
+      expect(r.error).toContain("category");
+    });
+
+    it("rejects zero limitAmount", async () => {
+      const r = await call("set_budget", { category: "Food & Dining", limitAmount: 0 });
+      expect(r.success).toBe(false);
+      expect(r.error).toContain("limitAmount");
+    });
+
+    it("rejects negative limitAmount", async () => {
+      const r = await call("set_budget", { category: "Food & Dining", limitAmount: -500 });
+      expect(r.success).toBe(false);
+    });
+  });
+
+  // ── set_budgets ──────────────────────────────────────────────────────────────
+
+  describe("set_budgets", () => {
+    it("saves multiple budgets and returns count", async () => {
+      (mockDb.budget.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+      (mockDb.budget.create as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ category: "Food & Dining", limitAmount: dec(5000), period: "MONTHLY" })
+        .mockResolvedValueOnce({ category: "Transport",     limitAmount: dec(2000), period: "MONTHLY" })
+        .mockResolvedValueOnce({ category: "Shopping",      limitAmount: dec(3000), period: "MONTHLY" });
+
+      const r = await call("set_budgets", {
+        budgets: [
+          { category: "Food & Dining", limitAmount: 5000 },
+          { category: "Transport",     limitAmount: 2000 },
+          { category: "Shopping",      limitAmount: 3000 },
+        ],
+      });
+
+      expect(r.success).toBe(true);
+      const data = r.data as Record<string, unknown>;
+      expect(data.saved).toBe(3);
+      const budgets = data.budgets as Array<{ category: string; limitAmount: number }>;
+      expect(budgets).toHaveLength(3);
+      expect(budgets[0].category).toBe("Food & Dining");
+      expect(budgets[1].category).toBe("Transport");
+      expect(budgets[2].category).toBe("Shopping");
+    });
+
+    it("updates existing budgets during a readjustment", async () => {
+      (mockDb.budget.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "bud-1" });
+      (mockDb.budget.update as ReturnType<typeof vi.fn>)
+        .mockResolvedValueOnce({ category: "Food & Dining", limitAmount: dec(4500), period: "MONTHLY" })
+        .mockResolvedValueOnce({ category: "Transport",     limitAmount: dec(1800), period: "MONTHLY" });
+
+      const r = await call("set_budgets", {
+        budgets: [
+          { category: "Food & Dining", limitAmount: 4500 },
+          { category: "Transport",     limitAmount: 1800 },
+        ],
+      });
+
+      expect(r.success).toBe(true);
+      expect(mockDb.budget.update).toHaveBeenCalledTimes(2);
+      expect(mockDb.budget.create).not.toHaveBeenCalled();
+    });
+
+    it("rejects missing budgets array", async () => {
+      const r = await call("set_budgets", {});
+      expect(r.success).toBe(false);
+      expect(r.error).toContain("budgets array");
+    });
+
+    it("rejects empty budgets array", async () => {
+      const r = await call("set_budgets", { budgets: [] });
+      expect(r.success).toBe(false);
+    });
+  });
+
+  // ── list_budgets ─────────────────────────────────────────────────────────────
+
+  describe("list_budgets", () => {
+    it("returns all budgets with spent and remaining amounts", async () => {
+      (mockDb.budget.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+        { id: "b1", category: "Food & Dining", limitAmount: dec(5000), period: "MONTHLY" },
+        { id: "b2", category: "Transport",     limitAmount: dec(2000), period: "MONTHLY" },
+      ]);
+      (mockDb.statementTransaction.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+        { category: "Food & Dining", amount: dec(1200) },
+        { category: "Food & Dining", amount: dec(800) },
+        { category: "Transport",     amount: dec(500) },
+      ]);
+
+      const r = await call("list_budgets", {});
+
+      expect(r.success).toBe(true);
+      const data = r.data as { budgets: Array<{ category: string; limit: number; spent: number; remaining: number; period: string }> };
+      expect(data.budgets).toHaveLength(2);
+
+      const food = data.budgets.find((b) => b.category === "Food & Dining")!;
+      expect(food.limit).toBe(5000);
+      expect(food.spent).toBe(2000);
+      expect(food.remaining).toBe(3000);
+
+      const transport = data.budgets.find((b) => b.category === "Transport")!;
+      expect(transport.spent).toBe(500);
+      expect(transport.remaining).toBe(1500);
+    });
+
+    it("returns empty list when no budgets are set", async () => {
+      (mockDb.budget.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+      (mockDb.statementTransaction.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+      const r = await call("list_budgets", {});
+
+      expect(r.success).toBe(true);
+      const data = r.data as { budgets: unknown[] };
+      expect(data.budgets).toHaveLength(0);
+    });
+
+    it("clamps remaining to 0 when spending exceeds limit", async () => {
+      (mockDb.budget.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+        { id: "b1", category: "Entertainment", limitAmount: dec(1000), period: "MONTHLY" },
+      ]);
+      (mockDb.statementTransaction.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+        { category: "Entertainment", amount: dec(1500) },
+      ]);
+
+      const r = await call("list_budgets", {});
+
+      const data = r.data as { budgets: Array<{ remaining: number }> };
+      expect(data.budgets[0].remaining).toBe(0);
+    });
+
+    it("categories with no transactions show zero spent", async () => {
+      (mockDb.budget.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
+        { id: "b1", category: "Travel", limitAmount: dec(8000), period: "MONTHLY" },
+      ]);
+      (mockDb.statementTransaction.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+      const r = await call("list_budgets", {});
+
+      const data = r.data as { budgets: Array<{ category: string; spent: number; remaining: number }> };
+      expect(data.budgets[0].spent).toBe(0);
+      expect(data.budgets[0].remaining).toBe(8000);
     });
   });
 });
