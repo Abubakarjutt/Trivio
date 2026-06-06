@@ -7,7 +7,7 @@ import type { RawTransaction } from "./statement-parser.service";
 import { redactPii } from "./pii-redaction.service";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? "";
-const GEMINI_MODEL   = process.env.GEMINI_MODEL   ?? "gemma-4-26b-a4b-it";
+const GEMINI_MODEL   = process.env.GEMINI_MODEL   ?? "gemini-1.5-flash";
 const GEMINI_URL     = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 // pdfjs-dist v5 doesn't export NodeCMapReaderFactory, so we provide one that
@@ -100,7 +100,7 @@ async function callGemini(prompt: string): Promise<RawTransaction[]> {
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: { temperature: 0.1, maxOutputTokens: 16384 },
     }),
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(60_000),
   });
 
   if (!response.ok) {
