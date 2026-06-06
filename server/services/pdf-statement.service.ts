@@ -72,7 +72,7 @@ export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
   return pages.join("\n\n--- PAGE BREAK ---\n\n");
 }
 
-const PARSE_PROMPT = `You are a bank statement parser. Extract all financial transactions from the text below.
+const PARSE_PROMPT = `You are a bank statement parser. Extract ALL financial transactions from the text below.
 
 Return ONLY a valid JSON array. No markdown fences, no commentary.
 
@@ -81,10 +81,13 @@ Required shape:
 
 Rules:
 - date: YYYY-MM-DD format only
-- amount: positive number
-- type: DEBIT = money leaving account, CREDIT = money entering account
-- Skip: header rows, running balance rows, opening/closing balance lines
-- If a line is not a transaction, omit it
+- amount: always a positive number (never negative)
+- type: DEBIT = money leaving the account, CREDIT = money entering the account
+- Include EVERY row that moved money: payments, deposits, transfers, direct debits, standing orders, ATM withdrawals, bank fees, service charges, interest charges, interest credits, foreign exchange fees — everything
+- Do NOT skip a row because it also shows a running balance; ignore the balance column, extract the transaction amount
+- Skip ONLY the opening/closing balance summary lines and column header rows — nothing else
+- If a row has a date and an amount that changed the account balance, include it
+- When in doubt, include the row rather than omit it
 
 Statement text:
 `;

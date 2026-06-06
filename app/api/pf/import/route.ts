@@ -211,10 +211,10 @@ async function runStreamingImport(
 ) {
   const rawTransactions = deduplicateIncoming(rawTxnsBeforeDedup);
 
-  emit("progress", { step: "categorizing", pct: 50, count: rawTransactions.length });
+  emit("progress", { step: "categorizing", pct: 50, count: rawTransactions.length, extracted: rawTxnsBeforeDedup.length });
   const categorized = await categorizeBatch(rawTransactions.map((t) => t.description));
 
-  emit("progress", { step: "deduplicating", pct: 75 });
+  emit("progress", { step: "deduplicating", pct: 75, count: rawTransactions.length });
   const existingRaw = await db.statementTransaction.findMany({
     where: { organisationId, importBatch: { status: "DONE" } },
     select: { id: true, date: true, description: true, amount: true },
@@ -299,6 +299,7 @@ async function handlePdfImport(buffer: Buffer, filename: string, organisationId:
         return;
       }
 
+      emit("progress", { step: "parsing", pct: 30, extracted: rawTransactions.length });
       await runStreamingImport(emit, rawTransactions, organisationId, batchId);
     } catch (err) {
       if (batchId) {
