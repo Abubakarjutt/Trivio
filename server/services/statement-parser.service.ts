@@ -182,8 +182,15 @@ function descriptionMatches(a: string, b: string): boolean {
 export function deduplicateIncoming(transactions: RawTransaction[]): RawTransaction[] {
   const seen: RawTransaction[] = [];
   for (const txn of transactions) {
+    // Within a single AI parse, only deduplicate on high Levenshtein similarity —
+    // the includes() check used in detectDuplicates is too broad here and can
+    // incorrectly drop real transactions with short descriptions (e.g. "PURCHASE"
+    // matching "PURCHASE REF 12345" on the same date and amount).
     const isDupe = seen.some(
-      (s) => s.date === txn.date && Math.abs(s.amount - txn.amount) <= 0.001 && descriptionMatches(s.description, txn.description)
+      (s) =>
+        s.date === txn.date &&
+        Math.abs(s.amount - txn.amount) <= 0.001 &&
+        levenshteinSimilarity(s.description.toLowerCase(), txn.description.toLowerCase()) > 0.8
     );
     if (!isDupe) seen.push(txn);
   }

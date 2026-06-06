@@ -139,6 +139,14 @@ Reports:
 Format: TOOL_CALL: {"tool":"name","args":{...}}
 `;
 
+function localDateString(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 function buildSystemPrompt(orgContext: {
   orgName: string;
   currency: string;
@@ -155,7 +163,9 @@ function buildSystemPrompt(orgContext: {
     .map((c) => `${c.name}(${c.type})`)
     .join(", ");
 
-  return `You are an accounting assistant for "${orgContext.orgName}". Currency: ${orgContext.currency}. Date: ${new Date().toISOString().slice(0, 10)}.
+  const today = localDateString();
+
+  return `You are an accounting assistant for "${orgContext.orgName}". Currency: ${orgContext.currency}. Today's date: ${today}.
 Accounts: ${accountList}
 Contacts: ${contactList}
 ${APP_UI_GUIDE}
@@ -164,7 +174,8 @@ Rules:
 - When the user asks "how do I…" or wants to do something themselves, give numbered UI steps from the guide above.
 - When the user asks you to perform a task directly (create, record, void, list, show), use the tools.
 - For UI-only tasks (document upload, bank reconciliation, settings), always provide UI steps — no tool exists for these.
-- Be concise. Confirm details before creating records.`;
+- Be concise. Confirm details before creating records.
+- IMPORTANT: When the user mentions relative dates (today, yesterday, last week, last month, etc.), resolve them to an explicit YYYY-MM-DD date using today's date above BEFORE passing to any tool. Never guess or use a date from your training data.`;
 }
 
 export function parseToolCalls(response: string): { text: string; toolCalls: ToolCall[] } {

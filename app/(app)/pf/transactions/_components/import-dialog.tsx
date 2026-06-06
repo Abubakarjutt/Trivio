@@ -71,6 +71,17 @@ export function ImportDialog({ open, onOpenChange, onComplete, emailImportToken 
     if (inputRef.current) inputRef.current.value = "";
   };
 
+  const retryWithSameFile = () => {
+    setProgress(null);
+    setCompletedSteps([]);
+    setDuplicates([]);
+    setBatchId(null);
+    setResultCount(0);
+    setSkipDuplicates(false);
+    setErrorMsg("");
+    setState("idle");
+  };
+
   const handleFile = (f: File) => {
     if (!getFileCategory(f)) {
       toast.error("Only PDF, CSV, and image files (JPEG, PNG, WEBP, HEIC) are supported");
@@ -383,7 +394,7 @@ export function ImportDialog({ open, onOpenChange, onComplete, emailImportToken 
             </div>
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
-              <Button onClick={reset}>Try again</Button>
+              <Button onClick={file ? retryWithSameFile : reset}>Try again</Button>
             </div>
           </div>
         )}
