@@ -53,7 +53,7 @@ export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
     // Point CMaps to the local bundled directory so pdfjs never makes HTTP requests.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     CMapReaderFactory: LocalCMapReaderFactory as any,
-    cMapUrl: cmapDir,
+    cMapUrl: cmapDir + "/",
     cMapPacked: true,
     verbosity: 0,
   });
