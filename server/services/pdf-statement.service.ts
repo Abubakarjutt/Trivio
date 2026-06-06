@@ -27,13 +27,11 @@ class LocalCMapReaderFactory {
   }
 }
 
-export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
-  // Dynamic import avoids SSR/webpack bundling issues with pdfjs-dist
+async function initPdfJs() {
   const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs" as string);
   const { join } = await import("path");
 
   // pdfjs v5 requires a truthy workerSrc even in Node.js.
-  // Resolve the bundled worker file as an absolute file:// URL so Node.js can load it.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   if (!(pdfjsLib as any).GlobalWorkerOptions.workerSrc ||
       (pdfjsLib as any).GlobalWorkerOptions.workerSrc === "./pdf.worker.mjs") {
@@ -43,14 +41,20 @@ export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
   }
 
   const cmapDir = join(process.cwd(), "node_modules/pdfjs-dist/cmaps");
+  return { pdfjsLib, cmapDir };
+}
+
+/**
+ * Extracts text from each page of a PDF, returning one string per page.
+ * Use this for per-page processing to keep SSE alive during long PDFs.
+ */
+export async function extractPdfPages(buffer: Buffer): Promise<string[]> {
+  const { pdfjsLib, cmapDir } = await initPdfJs();
 
   const loadingTask = pdfjsLib.getDocument({
     data: new Uint8Array(buffer),
-    // Prevent pdfjs from fetching font files over the network (the main source of
-    // "network error" in server-side usage). Text extraction doesn't need rendered fonts.
     disableFontFace: true,
     useSystemFonts: false,
-    // Point CMaps to the local bundled directory so pdfjs never makes HTTP requests.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     CMapReaderFactory: LocalCMapReaderFactory as any,
     cMapUrl: cmapDir + "/",
@@ -68,7 +72,11 @@ export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
       .join(" ");
     pages.push(text);
   }
+  return pages;
+}
 
+export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
+  const pages = await extractPdfPages(buffer);
   return pages.join("\n\n--- PAGE BREAK ---\n\n");
 }
 
@@ -135,6 +143,41 @@ async function callGemini(prompt: string): Promise<RawTransaction[]> {
       amount: Number(item.amount),
       type: String(item.type).toUpperCase() as "DEBIT" | "CREDIT",
     }));
+}
+
+/**
+ * Parses transactions from a single PDF page's text.
+ * Returns [] for blank pages without throwing.
+ */
+export async function parsePageTransactions(pageText: string): Promise<RawTransaction[]> {
+  if (!GEMINI_API_KEY) {
+    console.warn("[pdf-statement.service] GEMINI_API_KEY not set — returning empty transaction list.");
+    return [];
+  }
+  if (!pageText.trim()) return [];
+
+  const { redacted, stats } = redactPii(pageText);
+  if (Object.values(stats).some((n) => n > 0)) {
+    console.info("[pdf-statement.service] PII redacted before Gemini call:", stats);
+  }
+
+  const prompt = `${PARSE_PROMPT}${redacted}${PARSE_PROMPT_SUFFIX}`;
+  const MAX_ATTEMPTS = 2;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      return await callGemini(prompt);
+    } catch (err) {
+      if (attempt < MAX_ATTEMPTS) {
+        console.warn(`[pdf-statement.service] Page attempt ${attempt} failed, retrying…`, err);
+        await new Promise((r) => setTimeout(r, 1000));
+        continue;
+      }
+      console.warn("[pdf-statement.service] Page failed after all attempts, skipping:", err);
+      return [];
+    }
+  }
+  return [];
 }
 
 export async function parseTransactionsFromText(text: string): Promise<RawTransaction[]> {

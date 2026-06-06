@@ -4,11 +4,11 @@ import { db } from "@/lib/db";
 import { checkAiExtractionLimit, checkTransactionLimit } from "@/lib/plan";
 import { autoDetectColumns, parseCsvBuffer, detectDuplicates, deduplicateIncoming } from "@/server/services/statement-parser.service";
 import { categorizeBatch } from "@/server/services/statement-categorization.service";
-import { extractTextFromPdf, parseTransactionsFromText } from "@/server/services/pdf-statement.service";
+import { extractPdfPages, parsePageTransactions } from "@/server/services/pdf-statement.service";
 import { parseTransactionsFromImage } from "@/server/services/image-statement.service";
 
-// Allow up to 3 minutes for Gemini inference (PDF/image extraction can be slow)
-export const maxDuration = 180;
+// Allow up to 5 minutes — per-page Gemini calls on long PDFs can add up
+export const maxDuration = 300;
 
 const MAX_SIZE_BYTES = 20 * 1024 * 1024; // 20 MB
 
@@ -288,19 +288,26 @@ async function handlePdfImport(buffer: Buffer, filename: string, organisationId:
       batchId = batch.id;
 
       emit("progress", { step: "extracting", pct: 10 });
-      const text = await extractTextFromPdf(buffer);
+      const pages = await extractPdfPages(buffer);
 
-      emit("progress", { step: "parsing", pct: 30 });
-      const rawTransactions = await parseTransactionsFromText(text);
+      const allRawTransactions: import("@/server/services/statement-parser.service").RawTransaction[] = [];
+      for (let i = 0; i < pages.length; i++) {
+        // Emit before each page so the SSE stream stays alive while Gemini processes
+        const pct = 15 + Math.round(((i + 1) / pages.length) * 25);
+        emit("progress", { step: "parsing", pct, page: i + 1, totalPages: pages.length });
+        const pageTxns = await parsePageTransactions(pages[i]);
+        allRawTransactions.push(...pageTxns);
+        console.log(`[import] Page ${i + 1}/${pages.length}: extracted ${pageTxns.length} transactions`);
+      }
 
-      if (rawTransactions.length === 0) {
+      if (allRawTransactions.length === 0) {
         await db.statementImportBatch.update({ where: { id: batchId }, data: { status: "FAILED", errorMessage: "No transactions found" } });
         emit("error", { message: "No transactions found in PDF. The format may not be supported." });
         return;
       }
 
-      emit("progress", { step: "parsing", pct: 30, extracted: rawTransactions.length });
-      await runStreamingImport(emit, rawTransactions, organisationId, batchId);
+      console.log(`[import] Total extracted: ${allRawTransactions.length} transactions from ${pages.length} pages`);
+      await runStreamingImport(emit, allRawTransactions, organisationId, batchId);
     } catch (err) {
       if (batchId) {
         await db.statementImportBatch.update({ where: { id: batchId }, data: { status: "FAILED", errorMessage: String(err) } }).catch(() => {});

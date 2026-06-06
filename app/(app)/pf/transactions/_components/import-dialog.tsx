@@ -10,7 +10,7 @@ type ImportState = "idle" | "uploading" | "duplicates" | "done" | "already_impor
 type FileCategory = "csv" | "pdf" | "image";
 
 interface DuplicateItem { date: string | Date; amount: number; description: string; }
-interface ProgressStep { step: string; pct: number; count?: number; extracted?: number; }
+interface ProgressStep { step: string; pct: number; count?: number; extracted?: number; page?: number; totalPages?: number; }
 
 const PDF_STEP_LABELS: Record<string, string> = {
   extracting:    "Extracting text from PDF",
@@ -314,6 +314,11 @@ export function ImportDialog({ open, onOpenChange, onComplete, emailImportToken 
                         </div>
                         <div>
                           <p className={`text-sm ${isPending ? "text-muted-foreground" : "text-foreground"}`}>{activeStepLabels[key]}</p>
+                          {isActive && progress?.page != null && progress.totalPages != null && (
+                            <p className="text-xs text-primary">
+                              Page {progress.page} of {progress.totalPages}
+                            </p>
+                          )}
                           {isActive && progress?.count != null && (
                             <p className="text-xs text-primary">
                               {progress.extracted != null && progress.extracted !== progress.count
