@@ -84,6 +84,8 @@ enum AuditAction {
   VOID
   DELETE
   EXPORT
+  LOGIN
+  LOGOUT
 }
 
 enum OnboardingStep {
@@ -481,17 +483,17 @@ model Attachment {
 // ─── Audit Log ────────────────────────────────────────────────────────────────
 
 model AuditLog {
-  id             String       @id @default(cuid())
-  organisationId String
-  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  id             String        @id @default(cuid())
+  organisationId String?
+  organisation   Organisation? @relation(fields: [organisationId], references: [id], onDelete: SetNull)
   userId         String
-  user           User         @relation(fields: [userId], references: [id])
+  user           User          @relation(fields: [userId], references: [id])
   action         AuditAction
   entityType     String
   entityId       String
   before         Json?
   after          Json?
-  createdAt      DateTime     @default(now())
+  createdAt      DateTime      @default(now())
 
   @@index([organisationId, entityType, entityId])
 }

@@ -11,7 +11,7 @@ export async function writeAuditLog(params: {
   db: PrismaClient;
   organisationId: string;
   userId: string;
-  action: "CREATE" | "UPDATE" | "VOID" | "DELETE" | "EXPORT";
+  action: "CREATE" | "UPDATE" | "VOID" | "DELETE" | "EXPORT" | "LOGIN" | "LOGOUT";
   entityType: string;
   entityId?: string;
   after?: Record<string, unknown>;
