@@ -150,6 +150,13 @@ export const orgRouter = createTRPCRouter({
       });
     }),
 
+  setCurrency: orgProcedure
+    .input(z.object({ currency: z.string().min(3).max(3) }))
+    .mutation(async ({ ctx, input }) => {
+      await ctx.db.organisation.update({ where: { id: ctx.organisationId }, data: { currency: input.currency } });
+      return { success: true };
+    }),
+
   resetEmailImportToken: orgProcedure.mutation(async ({ ctx }) => {
     const { createId } = await import("@paralleldrive/cuid2");
     const newToken = createId();
