@@ -1,0 +1,80 @@
+<h2>How should the import workflow feel?</h2>
+<p class="subtitle">After uploading a statement, how does the user get from raw file to saved transactions?</p>
+
+<div class="cards">
+
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:16px;background:#0f172a;border-radius:6px;font-family:monospace;font-size:12px;">
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <div style="background:#1e293b;border-radius:4px;padding:8px;border-left:3px solid #6366f1;">
+          <div style="color:#94a3b8;font-size:10px;margin-bottom:4px;">STEP 1</div>
+          <div style="color:#e2e8f0;">📎 Upload PDF or CSV</div>
+        </div>
+        <div style="text-align:center;color:#475569;font-size:10px;">↓ AI extracts in background</div>
+        <div style="background:#1e293b;border-radius:4px;padding:8px;border-left:3px solid #6366f1;">
+          <div style="color:#94a3b8;font-size:10px;margin-bottom:4px;">STEP 2</div>
+          <div style="color:#e2e8f0;">📋 Review table — all transactions</div>
+          <div style="color:#64748b;font-size:10px;margin-top:4px;">Edit category, amount, date per row</div>
+        </div>
+        <div style="text-align:center;color:#475569;font-size:10px;">↓ user clicks "Save All"</div>
+        <div style="background:#1e293b;border-radius:4px;padding:8px;border-left:3px solid #22c55e;">
+          <div style="color:#94a3b8;font-size:10px;margin-bottom:4px;">STEP 3</div>
+          <div style="color:#e2e8f0;">✅ All saved to Transactions list</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A — Upload → Bulk Review → Save All</h3>
+      <p>User reviews every extracted transaction in a table before anything is saved. Edit categories inline. One "Save All" commits the batch.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:16px;background:#0f172a;border-radius:6px;font-family:monospace;font-size:12px;">
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <div style="background:#1e293b;border-radius:4px;padding:8px;border-left:3px solid #6366f1;">
+          <div style="color:#94a3b8;font-size:10px;margin-bottom:4px;">STEP 1</div>
+          <div style="color:#e2e8f0;">📎 Upload PDF or CSV</div>
+        </div>
+        <div style="text-align:center;color:#475569;font-size:10px;">↓ AI extracts + auto-saves immediately</div>
+        <div style="background:#1e293b;border-radius:4px;padding:8px;border-left:3px solid #22c55e;">
+          <div style="color:#94a3b8;font-size:10px;margin-bottom:4px;">STEP 2</div>
+          <div style="color:#e2e8f0;">✅ Transactions list — all imported</div>
+          <div style="color:#64748b;font-size:10px;margin-top:4px;">User edits categories after the fact</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B — Upload → Auto-save → Edit After</h3>
+      <p>Extraction runs and transactions are saved automatically with AI-assigned categories. User can go back and re-categorize any transaction from the list.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:16px;background:#0f172a;border-radius:6px;font-family:monospace;font-size:12px;">
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <div style="background:#1e293b;border-radius:4px;padding:8px;border-left:3px solid #6366f1;">
+          <div style="color:#94a3b8;font-size:10px;margin-bottom:4px;">STEP 1</div>
+          <div style="color:#e2e8f0;">📎 Upload PDF or CSV</div>
+        </div>
+        <div style="text-align:center;color:#475569;font-size:10px;">↓ AI extracts in background</div>
+        <div style="background:#1e293b;border-radius:4px;padding:8px;border-left:3px solid #f59e0b;">
+          <div style="color:#94a3b8;font-size:10px;margin-bottom:4px;">STEP 2</div>
+          <div style="color:#e2e8f0;">⚡ Quick confirm screen</div>
+          <div style="color:#64748b;font-size:10px;margin-top:4px;">Shows count + breakdown by category</div>
+          <div style="color:#64748b;font-size:10px;">"Looks good, import" or drill in to fix</div>
+        </div>
+        <div style="text-align:center;color:#475569;font-size:10px;">↓ one-click confirm or selective edit</div>
+        <div style="background:#1e293b;border-radius:4px;padding:8px;border-left:3px solid #22c55e;">
+          <div style="color:#94a3b8;font-size:10px;margin-bottom:4px;">STEP 3</div>
+          <div style="color:#e2e8f0;">✅ Saved — edit any time from list</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C — Upload → Quick Confirm → Save</h3>
+      <p>After extraction a summary screen shows the category breakdown. User can confirm with one click (common case) or drill into specific transactions to fix before saving.</p>
+    </div>
+  </div>
+
+</div>

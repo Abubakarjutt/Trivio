@@ -90,7 +90,8 @@ Rules:
 - Dates must be "YYYY-MM-DD" format.
 - confidence values represent how sure you are (1.0 = certain, 0.0 = guessing).
 - If a field is not present in the document use null.
-- lineItems must be an array (empty array if no line items found).`;
+- lineItems must be an array (empty array if no line items found).
+- Do NOT include tax, VAT, GST, HST, sales tax, subtotals, discounts, or total lines in lineItems. Those belong exclusively in taxAmount, subtotal, and totalAmount. lineItems must contain only product or service lines.`;
 
 const IMAGE_MIME_TYPES = new Set<string>(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 

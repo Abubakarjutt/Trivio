@@ -45,8 +45,14 @@ export async function POST(request: NextRequest) {
   if (!expected || !secret) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const secretsMatch = expected.length === secret.length &&
-    timingSafeEqual(Buffer.from(expected), Buffer.from(secret));
+  // Use timingSafeEqual directly; length pre-check leaks secret length as a timing side-channel.
+  // timingSafeEqual throws on buffer length mismatch, so we catch and treat as no-match.
+  let secretsMatch = false;
+  try {
+    secretsMatch = timingSafeEqual(Buffer.from(expected), Buffer.from(secret));
+  } catch {
+    secretsMatch = false;
+  }
   if (!secretsMatch) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

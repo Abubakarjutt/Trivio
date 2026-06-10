@@ -56,11 +56,13 @@ export async function POST(request: NextRequest) {
   }
 
   // ── Plan enforcement ─────────────────────────────────────────────────────
+  // `plan` is set by Lemon Squeezy; `subscriptionTier` by Stripe. Either being PRO = Pro access.
   const org = await db.organisation.findUnique({
     where: { id: organisationId },
-    select: { plan: true },
+    select: { plan: true, subscriptionTier: true },
   });
-  const plan = (org?.plan ?? "FREE") as "FREE" | "PRO";
+  const isPro = org?.plan === "PRO" || org?.subscriptionTier === "PRO";
+  const plan = (isPro ? "PRO" : "FREE") as "FREE" | "PRO";
 
   if (isCsv) {
     const { allowed, used, limit } = await checkTransactionLimit(organisationId, plan);

@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { saveFile } from "@/lib/storage";
 import { extractionQueue } from "@/lib/queue";
+import { assertCanExtract } from "@/server/middleware/usageGate";
 import { randomUUID } from "crypto";
 import path from "path";
 
@@ -59,6 +60,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { error: `File too large. Maximum size is 10 MB, got ${(file.size / 1048576).toFixed(1)} MB.` },
       { status: 422 },
+    );
+  }
+
+  // Enforce free-tier AI extraction limit before doing any work
+  try {
+    await assertCanExtract(db, organisationId);
+  } catch {
+    return NextResponse.json(
+      { error: "Free plan limit reached: 3 AI extractions per month. Upgrade to Pro for unlimited extractions." },
+      { status: 403 }
     );
   }
 

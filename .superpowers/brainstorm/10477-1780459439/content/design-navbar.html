@@ -1,0 +1,71 @@
+<h2>Section 1 of 4 — Mobile Navbar</h2>
+<p class="subtitle">The navbar becomes a client component with a toggleable menu. Here's what it looks like on mobile at ~375px.</p>
+
+<div class="split" style="gap:32px; align-items: flex-start;">
+
+  <!-- Closed state -->
+  <div class="mockup">
+    <div class="mockup-header">Closed (default)</div>
+    <div class="mockup-body" style="padding:0; background: hsl(222 35% 8%); border-radius:0 0 8px 8px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; padding: 10px 16px; border-bottom: 1px solid hsl(222 35% 15%);">
+        <!-- Logo -->
+        <div style="display:flex; align-items:center; gap:8px;">
+          <div style="width:28px; height:28px; background:hsl(221 78% 38% / 0.2); border-radius:8px; border:1px solid hsl(221 78% 38% / 0.3); display:flex; align-items:center; justify-content:center;">
+            <div style="width:12px; height:12px; background:hsl(221 78% 70%); border-radius:2px; opacity:0.7;"></div>
+          </div>
+          <span style="color:hsl(220 20% 92%); font-weight:600; font-size:13px;">AutoAccounts</span>
+        </div>
+        <!-- Right side: hamburger only -->
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span style="color:hsl(220 20% 55%); font-size:12px; font-weight:500;">Sign in</span>
+          <div style="width:32px; height:32px; border-radius:8px; background:hsl(222 35% 14%); display:flex; align-items:center; justify-content:center; cursor:pointer;">
+            <div style="width:14px; display:flex; flex-direction:column; gap:3px;">
+              <div style="height:1.5px; background:hsl(220 20% 60%); border-radius:2px;"></div>
+              <div style="height:1.5px; background:hsl(220 20% 60%); border-radius:2px;"></div>
+              <div style="height:1.5px; background:hsl(220 20% 60%); border-radius:2px;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="padding:16px; color:hsl(220 20% 40%); font-size:11px; text-align:center;">— page content below —</div>
+    </div>
+  </div>
+
+  <!-- Open state -->
+  <div class="mockup">
+    <div class="mockup-header">Open (menu expanded)</div>
+    <div class="mockup-body" style="padding:0; background: hsl(222 35% 8%); border-radius:0 0 8px 8px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; padding: 10px 16px; border-bottom: 1px solid hsl(222 35% 15%);">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <div style="width:28px; height:28px; background:hsl(221 78% 38% / 0.2); border-radius:8px; border:1px solid hsl(221 78% 38% / 0.3); display:flex; align-items:center; justify-content:center;">
+            <div style="width:12px; height:12px; background:hsl(221 78% 70%); border-radius:2px; opacity:0.7;"></div>
+          </div>
+          <span style="color:hsl(220 20% 92%); font-weight:600; font-size:13px;">AutoAccounts</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span style="color:hsl(220 20% 55%); font-size:12px; font-weight:500;">Sign in</span>
+          <!-- X icon -->
+          <div style="width:32px; height:32px; border-radius:8px; background:hsl(222 35% 16%); display:flex; align-items:center; justify-content:center; cursor:pointer;">
+            <span style="color:hsl(220 20% 65%); font-size:14px; line-height:1;">✕</span>
+          </div>
+        </div>
+      </div>
+      <!-- Dropdown links -->
+      <div style="padding: 8px 0; border-bottom: 1px solid hsl(222 35% 13%);">
+        <a style="display:block; padding:12px 20px; color:hsl(220 20% 65%); font-size:13px; text-decoration:none; border-bottom:1px solid hsl(222 35% 11%);">Features</a>
+        <a style="display:block; padding:12px 20px; color:hsl(220 20% 65%); font-size:13px; text-decoration:none; border-bottom:1px solid hsl(222 35% 11%);">How it works</a>
+        <a style="display:block; padding:12px 20px; color:hsl(220 20% 65%); font-size:13px; text-decoration:none; border-bottom:1px solid hsl(222 35% 11%);">Pricing</a>
+        <!-- CTA -->
+        <div style="padding:12px 20px;">
+          <div style="background:hsl(221 78% 38%); color:#fff; font-size:13px; font-weight:600; padding:10px 16px; border-radius:10px; text-align:center;">Get started free →</div>
+        </div>
+      </div>
+      <div style="padding:16px; color:hsl(220 20% 40%); font-size:11px; text-align:center;">— page content below —</div>
+    </div>
+  </div>
+
+</div>
+
+<div class="section" style="margin-top:24px;">
+  <p><strong>Implementation:</strong> Extract <code>&lt;nav&gt;</code> into a <code>"use client"</code> component (<code>navbar.tsx</code>). Single <code>useState(false)</code> for open/close. The "Get started free" button moves into the dropdown on mobile (replaces the current always-visible CTA in the nav row — too wide for mobile). On ≥md, everything stays exactly as-is.</p>
+</div>

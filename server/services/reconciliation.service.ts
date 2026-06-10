@@ -58,9 +58,11 @@ export async function autoMatchBankAccount(
           date: { gte: dateFrom, lte: dateTo },
         },
         bankStatementLines: { none: {} }, // not yet matched to any statement line
+        // Positive bank amount = money in = debit on the bank/cash account.
+        // Negative bank amount = money out = credit on the bank/cash account.
         ...(isPositive
-          ? { credit: absAmount }
-          : { debit: absAmount }),
+          ? { debit: absAmount }
+          : { credit: absAmount }),
       },
       select: { id: true },
     });

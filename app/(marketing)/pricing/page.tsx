@@ -12,7 +12,8 @@ const plans = [
     ctaVariant: "outline" as const,
     highlighted: false,
     features: [
-      "5 AI extractions / month",
+      "3 AI extractions / month",
+      "Unlimited transactions",
       "Unlimited invoices & bills",
       "Unlimited contacts",
       "Bank reconciliation",
@@ -22,7 +23,7 @@ const plans = [
   },
   {
     name: "Pro Monthly",
-    price: "$29",
+    price: "$15",
     period: "per month",
     description: "For growing businesses",
     cta: "Upgrade Now",
@@ -42,7 +43,7 @@ const plans = [
   },
   {
     name: "Pro Annual",
-    price: "$290",
+    price: "$150",
     period: "per year",
     description: "Save 2 months vs monthly",
     cta: "Upgrade Now",
@@ -62,7 +63,8 @@ const plans = [
 ];
 
 const comparisonFeatures = [
-  { feature: "AI document extractions", free: "5 / month", pro: "Unlimited" },
+  { feature: "AI document extractions", free: "3 / month", pro: "Unlimited" },
+  { feature: "Transactions", free: "Unlimited", pro: "Unlimited" },
   { feature: "Invoices & bills", free: "Unlimited", pro: "Unlimited" },
   { feature: "Contacts", free: "Unlimited", pro: "Unlimited" },
   { feature: "Bank reconciliation", free: "✓", pro: "✓" },

@@ -191,7 +191,7 @@ export async function recordInvoicePayment(
   return entry;
 }
 
-// Void invoice: reverse journal entries and mark as void
+// Void invoice: reverse the posting entry plus all payment entries, then mark as void
 export async function voidInvoice(
   db: PrismaClient,
   invoiceId: string,
@@ -205,8 +205,24 @@ export async function voidInvoice(
   if (!invoice) throw new TRPCError({ code: "NOT_FOUND" });
   if (invoice.status === "VOID") throw new TRPCError({ code: "BAD_REQUEST", message: "Already voided" });
 
+  // Reverse the original posting entry (Dr AR / Cr Income)
   if (invoice.journalEntryId) {
     await voidJournalEntry(db, invoice.journalEntryId, organisationId, userId, reason);
+  }
+
+  // Reverse all payment entries (Dr Cash / Cr AR) so AR and cash stay clean
+  const paymentEntries = await db.journalEntry.findMany({
+    where: {
+      source: "INVOICE",
+      sourceId: invoiceId,
+      organisationId,
+      isVoid: false,
+      id: { not: invoice.journalEntryId ?? "" },
+    },
+    select: { id: true },
+  });
+  for (const entry of paymentEntries) {
+    await voidJournalEntry(db, entry.id, organisationId, userId, `Payment reversal: ${reason}`);
   }
 
   await db.invoice.update({

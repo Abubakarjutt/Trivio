@@ -1,0 +1,40 @@
+<h2>Mobile Navigation</h2>
+<p class="subtitle">The navbar currently hides its links on mobile — only the logo, "Sign in", and "Get started" button show. How should users access Features / How it works / Pricing on mobile?</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Keep it simple — no menu</h3>
+      <p>Leave the nav as-is. The CTA section and footer already link to Pricing. Nav links aren't critical on a landing page — the page itself guides users down.</p>
+      <div class="pros-cons" style="margin-top:12px">
+        <div class="pros"><h4>Pros</h4><ul><li>Zero complexity</li><li>No JS needed</li><li>Faster</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>No way to jump sections from nav on mobile</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Hamburger menu (slide-down)</h3>
+      <p>Add a ☰ icon on mobile. Clicking it reveals a dropdown with Features, How it works, Pricing, and Sign in links.</p>
+      <div class="pros-cons" style="margin-top:12px">
+        <div class="pros"><h4>Pros</h4><ul><li>Standard pattern — users expect it</li><li>All links accessible</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Needs client component + state</li><li>Extra UI to maintain</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Compact bar — inline links, smaller</h3>
+      <p>Show nav links on mobile too, but make them smaller text and reduce padding so they fit. Drop "How it works" label to just "How it works" shortened.</p>
+      <div class="pros-cons" style="margin-top:12px">
+        <div class="pros"><h4>Pros</h4><ul><li>No extra state/JS</li><li>Links always visible</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Gets tight on small phones</li><li>Nav + Sign in + button may overflow</li></ul></div>
+      </div>
+    </div>
+  </div>
+</div>

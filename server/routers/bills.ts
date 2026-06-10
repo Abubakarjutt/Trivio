@@ -199,6 +199,9 @@ export const billsRouter = createTRPCRouter({
         where: { id: input.id, organisationId: ctx.organisationId },
       });
       if (!bill) throw new TRPCError({ code: "NOT_FOUND" });
+      if (bill.status === "DRAFT") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Cannot record payment against a draft bill — approve it first" });
+      }
 
       const outstanding = Number(bill.totalAmount) - Number(bill.amountPaid);
       if (input.amount > outstanding + 0.001) {

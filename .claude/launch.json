@@ -7,6 +7,12 @@
       "runtimeArgs": ["run", "dev"],
       "port": 3000,
       "autoPort": true
+    },
+    {
+      "name": "trivio-landing",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd /Users/Apple/projects/trivio-landing && npm run dev -- --port 3001"],
+      "port": 3001
     }
   ]
 }

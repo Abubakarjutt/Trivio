@@ -226,6 +226,9 @@ export const invoicesRouter = createTRPCRouter({
         where: { id: input.id, organisationId: ctx.organisationId },
       });
       if (!invoice) throw new TRPCError({ code: "NOT_FOUND" });
+      if (invoice.status === "DRAFT") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Cannot record payment against a draft invoice — post it first" });
+      }
 
       const outstanding = Number(invoice.totalAmount) - Number(invoice.amountPaid);
       if (input.amount > outstanding + 0.001) {

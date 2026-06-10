@@ -29,10 +29,34 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `Webhook signature verification failed: ${message}` }, { status: 400 });
   }
 
+  // Idempotency: skip if we've already successfully processed this event
+  const existing = await db.webhookEvent.findUnique({
+    where: { provider_eventId: { provider: "stripe", eventId: event.id } },
+  });
+  if (existing?.status === "OK") {
+    return NextResponse.json({ received: true });
+  }
+
+  // Upsert a processing record — prevents duplicate work on concurrent retries
+  const record = await db.webhookEvent.upsert({
+    where: { provider_eventId: { provider: "stripe", eventId: event.id } },
+    create: { provider: "stripe", eventId: event.id, status: "PROCESSING" },
+    update: { status: "PROCESSING" },
+  });
+
   try {
     await handleWebhookEvent(db, event);
+    await db.webhookEvent.update({
+      where: { id: record.id },
+      data: { status: "OK", processedAt: new Date() },
+    });
   } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
     console.error("[stripe webhook] Error handling event:", err);
+    await db.webhookEvent.update({
+      where: { id: record.id },
+      data: { status: "ERROR", error: message },
+    }).catch(() => {});
     // Still return 200 to prevent Stripe from retrying for non-recoverable errors
   }
 

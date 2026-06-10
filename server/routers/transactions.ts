@@ -170,7 +170,7 @@ export const transactionsRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      return createJournalEntry(ctx.db, {
+      const entry = await createJournalEntry(ctx.db, {
         organisationId: ctx.organisationId,
         userId: ctx.session.user.id,
         date: input.date,
@@ -179,6 +179,17 @@ export const transactionsRouter = createTRPCRouter({
         source: "MANUAL",
         lines: input.lines,
       });
+
+      await writeAuditLog(ctx.db, {
+        organisationId: ctx.organisationId,
+        userId: ctx.session.user.id,
+        action: "CREATE",
+        entityType: "JournalEntry",
+        entityId: entry.id,
+        after: { description: input.description, lines: input.lines.length },
+      });
+
+      return entry;
     }),
 
   void: orgProcedure
@@ -232,7 +243,7 @@ export const transactionsRouter = createTRPCRouter({
             accountId: z.string(),
             cashAccountId: z.string(),
           })
-        ),
+        ).max(500, "Cannot import more than 500 rows at once"),
       })
     )
     .mutation(async ({ ctx, input }) => {

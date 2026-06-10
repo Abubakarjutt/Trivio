@@ -100,13 +100,15 @@ export async function checkUsageLimits(
   prisma: PrismaClient,
   orgId: string,
 ): Promise<{ withinLimits: boolean; aiExtractionCount: number; aiExtractionLimit: number }> {
-  const org = await prisma.organisation.findUniqueOrThrow({ where: { id: orgId }, select: { subscriptionTier: true } });
-  const limit = org.subscriptionTier === "FREE" ? 5 : Infinity;
+  const org = await prisma.organisation.findUniqueOrThrow({ where: { id: orgId }, select: { subscriptionTier: true, plan: true } });
+  // `plan` is set by Lemon Squeezy; `subscriptionTier` by Stripe. Either being PRO = Pro access.
+  const isPro = org.plan !== "FREE" || org.subscriptionTier !== "FREE";
+  const limit = isPro ? Infinity : 3;
 
   const now = new Date();
   const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   const usage = await prisma.usageRecord.findUnique({ where: { organisationId_month: { organisationId: orgId, month } } });
   const count = usage?.aiExtractionCount ?? 0;
 
-  return { withinLimits: count < limit, aiExtractionCount: count, aiExtractionLimit: org.subscriptionTier === "FREE" ? 5 : -1 };
+  return { withinLimits: count < limit, aiExtractionCount: count, aiExtractionLimit: isPro ? -1 : 3 };
 }

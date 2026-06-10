@@ -21,6 +21,12 @@ export interface CreateJournalEntryInput {
 
 // Validates that debits == credits to 4 decimal places
 function assertBalanced(lines: JournalLineInput[]): void {
+  if (lines.length < 2) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Journal entry must have at least two lines",
+    });
+  }
   const totalDebits = lines.reduce((s, l) => s + (l.debit ?? 0), 0);
   const totalCredits = lines.reduce((s, l) => s + (l.credit ?? 0), 0);
   const diff = Math.abs(totalDebits - totalCredits);
@@ -28,12 +34,6 @@ function assertBalanced(lines: JournalLineInput[]): void {
     throw new TRPCError({
       code: "BAD_REQUEST",
       message: `Journal entry is unbalanced: debits ${totalDebits.toFixed(4)} ≠ credits ${totalCredits.toFixed(4)}`,
-    });
-  }
-  if (lines.length < 2) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: "Journal entry must have at least two lines",
     });
   }
 }
@@ -62,7 +62,9 @@ export async function createJournalEntry(db: PrismaClient, input: CreateJournalE
   });
 }
 
-// Creates a reversal (void) entry that exactly negates the original
+// Creates a reversal (void) entry that exactly negates the original.
+// Atomic: the mark-void and reversal creation happen inside a single DB transaction
+// to prevent double-void race conditions.
 export async function voidJournalEntry(
   db: PrismaClient,
   journalEntryId: string,
@@ -70,38 +72,44 @@ export async function voidJournalEntry(
   userId: string,
   reason: string
 ) {
-  const original = await db.journalEntry.findFirst({
-    where: { id: journalEntryId, organisationId, isVoid: false },
-    include: { lines: true },
-  });
+  return db.$transaction(async (tx) => {
+    // Atomic conditional update — if already voided, count === 0
+    const updated = await tx.journalEntry.updateMany({
+      where: { id: journalEntryId, organisationId, isVoid: false },
+      data: { isVoid: true, voidedAt: new Date(), voidReason: reason },
+    });
 
-  if (!original) {
-    throw new TRPCError({ code: "NOT_FOUND", message: "Journal entry not found or already voided" });
-  }
+    if (updated.count === 0) {
+      throw new TRPCError({ code: "NOT_FOUND", message: "Journal entry not found or already voided" });
+    }
 
-  // Mark original as void
-  await db.journalEntry.update({
-    where: { id: journalEntryId },
-    data: { isVoid: true, voidedAt: new Date(), voidReason: reason },
-  });
+    const original = await tx.journalEntry.findUnique({
+      where: { id: journalEntryId },
+      include: { lines: true },
+    });
 
-  // Create reversal entry
-  const reversalLines: JournalLineInput[] = original.lines.map((l) => ({
-    accountId: l.accountId,
-    debit: l.credit ? Number(l.credit) : undefined,
-    credit: l.debit ? Number(l.debit) : undefined,
-    description: `Reversal: ${l.description ?? original.description}`,
-  }));
+    if (!original) {
+      throw new TRPCError({ code: "NOT_FOUND", message: "Journal entry not found" });
+    }
 
-  return createJournalEntry(db, {
-    organisationId,
-    userId,
-    date: new Date(),
-    description: `VOID: ${original.description}`,
-    reference: original.reference ?? undefined,
-    source: original.source,
-    sourceId: original.sourceId ?? undefined,
-    lines: reversalLines,
+    // Create reversal entry (swap debits ↔ credits)
+    const reversalLines: JournalLineInput[] = original.lines.map((l) => ({
+      accountId: l.accountId,
+      debit: l.credit ? Number(l.credit) : undefined,
+      credit: l.debit ? Number(l.debit) : undefined,
+      description: `Reversal: ${l.description ?? original.description}`,
+    }));
+
+    return createJournalEntry(tx as unknown as PrismaClient, {
+      organisationId,
+      userId,
+      date: new Date(),
+      description: `VOID: ${original.description}`,
+      reference: original.reference ?? undefined,
+      source: original.source,
+      sourceId: original.sourceId ?? undefined,
+      lines: reversalLines,
+    });
   });
 }
 
@@ -143,6 +151,12 @@ export function buildIncomeEntry(params: {
   taxAccountId?: string;
 }) {
   const { date, description, amount, incomeAccountId, cashAccountId, taxAmount, taxAccountId } = params;
+  if (taxAmount && !taxAccountId) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "taxAccountId is required when taxAmount is provided",
+    });
+  }
   const lines: JournalLineInput[] = [
     // Debit cash/AR (money coming in)
     { accountId: cashAccountId, debit: amount + (taxAmount ?? 0) },
@@ -165,6 +179,12 @@ export function buildExpenseEntry(params: {
   taxAccountId?: string;
 }) {
   const { date, description, amount, expenseAccountId, cashAccountId, taxAmount, taxAccountId } = params;
+  if (taxAmount && !taxAccountId) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "taxAccountId is required when taxAmount is provided",
+    });
+  }
   const lines: JournalLineInput[] = [
     // Debit expense account
     { accountId: expenseAccountId, debit: amount },

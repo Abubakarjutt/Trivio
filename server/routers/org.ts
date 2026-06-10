@@ -124,16 +124,15 @@ export const orgRouter = createTRPCRouter({
       include: { taxRegime: { include: { rates: true } } },
     });
 
-    const [aiExtractionsUsed, transactionsUsed] = await Promise.all([
-      ctx.db.statementImportBatch.count({
-        where: { organisationId: ctx.organisationId, createdAt: { gte: monthStart } },
-      }),
-      ctx.db.statementTransaction.count({
-        where: { organisationId: ctx.organisationId, createdAt: { gte: monthStart } },
-      }),
-    ]);
+    // Use the canonical usageRecord counter — this is what the gate enforces
+    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    const usageRecord = await ctx.db.usageRecord.findUnique({
+      where: { organisationId_month: { organisationId: ctx.organisationId, month } },
+      select: { aiExtractionCount: true },
+    });
+    const aiExtractionsUsed = usageRecord?.aiExtractionCount ?? 0;
 
-    return { ...org, aiExtractionsUsed, transactionsUsed };
+    return { ...org, aiExtractionsUsed };
   }),
 
   update: orgProcedure

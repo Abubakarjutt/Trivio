@@ -19,60 +19,98 @@ export async function POST(req: NextRequest) {
   }
 
   const eventName: string = payload?.meta?.event_name ?? "";
+  const eventId: string = payload?.meta?.webhook_id ?? payload?.data?.id ?? "";
   const orgId: string = payload?.meta?.custom_data?.org_id ?? "";
   const userEmail: string = payload?.data?.attributes?.user_email ?? "";
   const subscriptionId: string = payload?.data?.id ?? "";
   const customerId: string = String(payload?.data?.attributes?.customer_id ?? "");
   const status: string = payload?.data?.attributes?.status ?? "";
 
-  let org: { id: string } | null = null;
-  if (orgId) {
-    org = await db.organisation.findFirst({ where: { id: orgId }, select: { id: true } });
-  } else if (userEmail) {
-    const user = await db.user.findUnique({
-      where: { email: userEmail },
-      select: { organisationId: true },
+  // Idempotency: skip if we've already successfully processed this event
+  if (eventId) {
+    const existing = await db.webhookEvent.findUnique({
+      where: { provider_eventId: { provider: "lemonsqueezy", eventId } },
     });
-    if (user?.organisationId) {
-      org = { id: user.organisationId };
+    if (existing?.status === "OK") {
+      return NextResponse.json({ ok: true });
     }
   }
 
-  if (!org) {
-    return NextResponse.json({ ok: true });
-  }
+  // Upsert a processing record
+  const record = eventId
+    ? await db.webhookEvent.upsert({
+        where: { provider_eventId: { provider: "lemonsqueezy", eventId } },
+        create: { provider: "lemonsqueezy", eventId, status: "PROCESSING" },
+        update: { status: "PROCESSING" },
+      })
+    : null;
 
-  switch (eventName) {
-    case "subscription_created":
-    case "subscription_updated":
-      await db.organisation.update({
-        where: { id: org.id },
-        data: {
-          plan: status === "expired" || status === "cancelled" ? "FREE" : "PRO",
-          lsCustomerId: customerId,
-          lsSubscriptionId: subscriptionId,
-          lsSubscriptionStatus: mapStatus(status),
-        },
+  try {
+    let org: { id: string } | null = null;
+    if (orgId) {
+      org = await db.organisation.findFirst({ where: { id: orgId }, select: { id: true } });
+    } else if (userEmail) {
+      const user = await db.user.findUnique({
+        where: { email: userEmail },
+        select: { organisationId: true },
       });
-      break;
+      if (user?.organisationId) {
+        org = { id: user.organisationId };
+      }
+    }
 
-    case "subscription_cancelled":
-      await db.organisation.update({
-        where: { id: org.id },
-        data: { lsSubscriptionStatus: "cancelled" },
-      });
-      break;
+    if (org) {
+      switch (eventName) {
+        case "subscription_created":
+        case "subscription_updated":
+          await db.organisation.update({
+            where: { id: org.id },
+            data: {
+              plan: status === "expired" || status === "cancelled" ? "FREE" : "PRO",
+              lsCustomerId: customerId,
+              lsSubscriptionId: subscriptionId,
+              lsSubscriptionStatus: mapStatus(status),
+            },
+          });
+          break;
 
-    case "subscription_expired":
-      await db.organisation.update({
-        where: { id: org.id },
-        data: {
-          plan: "FREE",
-          lsSubscriptionStatus: "expired",
-          lsSubscriptionId: null,
-        },
+        case "subscription_cancelled":
+          // Downgrade immediately — LS may not send subscription_updated after this
+          await db.organisation.update({
+            where: { id: org.id },
+            data: { plan: "FREE", lsSubscriptionStatus: "cancelled" },
+          });
+          break;
+
+        case "subscription_expired":
+          await db.organisation.update({
+            where: { id: org.id },
+            data: {
+              plan: "FREE",
+              lsSubscriptionStatus: "expired",
+              lsSubscriptionId: null,
+            },
+          });
+          break;
+      }
+    }
+
+    if (record) {
+      await db.webhookEvent.update({
+        where: { id: record.id },
+        data: { status: "OK", processedAt: new Date() },
       });
-      break;
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("[lemonsqueezy webhook] Error handling event:", err);
+    if (record) {
+      await db.webhookEvent.update({
+        where: { id: record.id },
+        data: { status: "ERROR", error: message },
+      }).catch(() => {});
+    }
+    return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }
 
   return NextResponse.json({ ok: true });

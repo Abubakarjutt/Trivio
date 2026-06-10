@@ -4,8 +4,7 @@ import { trpc } from "@/lib/trpc/client";
 import { buildCheckoutUrl } from "@/lib/lemonsqueezy";
 import { useSession } from "next-auth/react";
 
-const FREE_AI_LIMIT = 2;
-const FREE_TX_LIMIT = 50;
+const FREE_AI_LIMIT = 3;
 
 const FEATURES = [
   "Unlimited AI statement extractions",
@@ -41,7 +40,6 @@ export default function BillingPage() {
       : "#";
 
   const aiUsed = org.aiExtractionsUsed ?? 0;
-  const txUsed = org.transactionsUsed ?? 0;
 
   return (
     <div className="flex flex-col min-h-full">
@@ -101,21 +99,6 @@ export default function BillingPage() {
               </div>
             </div>
 
-            <div>
-              <div className="flex justify-between text-sm mb-1.5">
-                <span className="text-muted-foreground">Transactions imported</span>
-                <span className="font-semibold">{txUsed} / {FREE_TX_LIMIT}</span>
-              </div>
-              <div className="h-2 rounded-full bg-muted overflow-hidden">
-                <div
-                  className="h-full rounded-full transition-all"
-                  style={{
-                    width: `${Math.min((txUsed / FREE_TX_LIMIT) * 100, 100)}%`,
-                    background: txUsed >= FREE_TX_LIMIT ? "#EF4444" : "#1A6644",
-                  }}
-                />
-              </div>
-            </div>
           </div>
         )}
 
@@ -136,7 +119,7 @@ export default function BillingPage() {
               className="inline-flex items-center justify-center w-full h-11 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
               style={{ background: "#1A6644" }}
             >
-              Upgrade to Pro — $9/month
+              Upgrade to Pro — $15/month
             </a>
             <ul className="space-y-1.5">
               {FEATURES.map((f) => (

@@ -30,24 +30,44 @@ type MappedRow = {
   error?: string;
 };
 
-function parseCsv(text: string): CsvRow[] {
+function splitCsvLine(line: string): string[] {
+  const fields: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]!;
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') { current += '"'; i++; }
+      else { inQuotes = !inQuotes; }
+    } else if (ch === ',' && !inQuotes) {
+      fields.push(current.trim());
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  fields.push(current.trim());
+  return fields;
+}
+
+export function parseCsv(text: string): CsvRow[] {
   const lines = text.trim().split("\n");
   if (lines.length < 2) return [];
-  const headers = lines[0]!.split(",").map((h) => h.trim().toLowerCase().replace(/"/g, ""));
+  const headers = splitCsvLine(lines[0]!).map((h) => h.toLowerCase().replace(/"/g, ""));
   return lines.slice(1).map((line) => {
-    const cols = line.split(",").map((c) => c.trim().replace(/"/g, ""));
+    const cols = splitCsvLine(line).map((c) => c.replace(/"/g, ""));
     const row: Record<string, string> = {};
     headers.forEach((h, i) => { row[h] = cols[i] ?? ""; });
     return {
-      date: row.date ?? row.Date ?? "",
-      description: row.description ?? row.Description ?? row.memo ?? row.Memo ?? "",
-      amount: row.amount ?? row.Amount ?? row.debit ?? row.credit ?? "",
-      rawType: row.type ?? row.Type ?? (parseFloat(row.amount ?? "0") > 0 ? "income" : "expense"),
+      date: row.date ?? "",
+      description: row.description ?? row.memo ?? "",
+      amount: row.amount ?? row.debit ?? row.credit ?? "",
+      rawType: row.type ?? (parseFloat(row.amount ?? "0") > 0 ? "income" : "expense"),
     };
   }).filter((r) => r.date && r.description);
 }
 
-function mapRow(row: CsvRow, defaultCashId: string, defaultIncomeId: string, defaultExpenseId: string): MappedRow {
+export function mapRow(row: CsvRow, defaultCashId: string, defaultIncomeId: string, defaultExpenseId: string): MappedRow {
   const amount = Math.abs(parseFloat(row.amount));
   const type = row.rawType?.toLowerCase().includes("income") || parseFloat(row.amount) > 0
     ? "income" as const
@@ -57,7 +77,7 @@ function mapRow(row: CsvRow, defaultCashId: string, defaultIncomeId: string, def
     return { date: new Date(), description: row.description, amount: 0, type, accountId: "", cashAccountId: "", valid: false, error: "Invalid amount" };
   }
 
-  const date = new Date(row.date);
+  const date = new Date(row.date + "T00:00:00");
   if (isNaN(date.getTime())) {
     return { date: new Date(), description: row.description, amount, type, accountId: "", cashAccountId: "", valid: false, error: "Invalid date" };
   }
@@ -117,6 +137,7 @@ export function CSVImportDialog({
     setStep("upload");
     setRows([]);
     setResult(null);
+    if (fileRef.current) fileRef.current.value = "";
     onClose();
   };
 

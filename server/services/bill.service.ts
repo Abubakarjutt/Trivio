@@ -118,7 +118,7 @@ export async function postBillToLedger(
     date: bill.date,
     description: `Bill ${bill.number}`,
     reference: bill.number ?? bill.id,
-    source: "MANUAL",
+    source: "BILL",
     sourceId: bill.id,
     lines,
   });
@@ -157,7 +157,7 @@ export async function recordBillPayment(
     date: params.date,
     description: `Payment: ${bill.number}`,
     reference: params.reference ?? bill.number ?? bill.id,
-    source: "MANUAL",
+    source: "BILL",
     sourceId: bill.id,
     lines: [
       { accountId: apAccount.id, debit: params.amount, description: `AP cleared: ${bill.number}` },
@@ -191,9 +191,26 @@ export async function voidBill(
   if (!bill) throw new TRPCError({ code: "NOT_FOUND" });
   if (bill.status === "VOID") throw new TRPCError({ code: "BAD_REQUEST", message: "Already voided" });
 
+  // Reverse the original posting entry (Dr Expense / Cr AP)
   if (bill.journalEntryId) {
     await voidJournalEntry(db, bill.journalEntryId, organisationId, userId, reason);
   }
+
+  // Reverse all payment entries (Dr AP / Cr Cash) so AP and cash stay clean
+  const paymentEntries = await db.journalEntry.findMany({
+    where: {
+      source: "BILL",
+      sourceId: billId,
+      organisationId,
+      isVoid: false,
+      id: { not: bill.journalEntryId ?? "" },
+    },
+    select: { id: true },
+  });
+  for (const entry of paymentEntries) {
+    await voidJournalEntry(db, entry.id, organisationId, userId, `Payment reversal: ${reason}`);
+  }
+
   await db.bill.update({ where: { id: billId }, data: { status: "VOID" } });
 }
 

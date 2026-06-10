@@ -1,0 +1,139 @@
+<h2>Transactions page layout</h2>
+<p class="subtitle">New page under Personal Finance — /transactions. Does this layout feel right?</p>
+
+<div class="mockup" style="max-width:900px;margin:0 auto;">
+  <div class="mockup-header">Personal Finance → Transactions</div>
+  <div class="mockup-body" style="padding:0;background:#0f172a;font-family:sans-serif;font-size:13px;">
+
+    <!-- Page Header -->
+    <div style="padding:20px 24px 0;display:flex;justify-content:space-between;align-items:flex-start;">
+      <div>
+        <div style="font-size:18px;font-weight:600;color:#f1f5f9;">Transactions</div>
+        <div style="color:#64748b;font-size:12px;margin-top:2px;">Import bank &amp; credit card statements, track &amp; categorize spending</div>
+      </div>
+      <button style="background:#6366f1;color:#fff;border:none;border-radius:6px;padding:7px 14px;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
+        ↑ Import Statement
+      </button>
+    </div>
+
+    <!-- Summary Strip -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;padding:16px 24px;">
+      <div style="background:#1e293b;border-radius:8px;padding:12px;">
+        <div style="color:#64748b;font-size:10px;text-transform:uppercase;letter-spacing:.05em;">Total Transactions</div>
+        <div style="color:#f1f5f9;font-size:18px;font-weight:600;margin-top:4px;">247</div>
+      </div>
+      <div style="background:#1e293b;border-radius:8px;padding:12px;">
+        <div style="color:#64748b;font-size:10px;text-transform:uppercase;letter-spacing:.05em;">Total Debits</div>
+        <div style="color:#f87171;font-size:18px;font-weight:600;margin-top:4px;">$4,821.50</div>
+      </div>
+      <div style="background:#1e293b;border-radius:8px;padding:12px;">
+        <div style="color:#64748b;font-size:10px;text-transform:uppercase;letter-spacing:.05em;">Total Credits</div>
+        <div style="color:#4ade80;font-size:18px;font-weight:600;margin-top:4px;">$6,200.00</div>
+      </div>
+      <div style="background:#1e293b;border-radius:8px;padding:12px;">
+        <div style="color:#64748b;font-size:10px;text-transform:uppercase;letter-spacing:.05em;">Latest Import</div>
+        <div style="color:#f1f5f9;font-size:13px;font-weight:600;margin-top:4px;">May 2026 — 47 txns</div>
+      </div>
+    </div>
+
+    <!-- Filters Row -->
+    <div style="display:flex;gap:8px;padding:0 24px 12px;flex-wrap:wrap;">
+      <div style="background:#1e293b;border:1px solid #334155;border-radius:6px;padding:5px 10px;color:#94a3b8;font-size:11px;">📅 May 1 – May 31</div>
+      <div style="background:#1e293b;border:1px solid #334155;border-radius:6px;padding:5px 10px;color:#94a3b8;font-size:11px;">Category: All ▾</div>
+      <div style="background:#1e293b;border:1px solid #334155;border-radius:6px;padding:5px 10px;color:#94a3b8;font-size:11px;">Type: All ▾</div>
+      <div style="background:#1e293b;border:1px solid #334155;border-radius:6px;padding:5px 10px;color:#94a3b8;font-size:11px;margin-left:auto;">🔍 Search merchants...</div>
+    </div>
+
+    <!-- Transaction Table -->
+    <div style="padding:0 24px 20px;">
+      <table style="width:100%;border-collapse:collapse;">
+        <thead>
+          <tr style="border-bottom:1px solid #1e293b;">
+            <th style="text-align:left;padding:8px 10px;color:#64748b;font-size:10px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;">Date</th>
+            <th style="text-align:left;padding:8px 10px;color:#64748b;font-size:10px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;">Merchant</th>
+            <th style="text-align:left;padding:8px 10px;color:#64748b;font-size:10px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;">Category</th>
+            <th style="text-align:right;padding:8px 10px;color:#64748b;font-size:10px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;">Amount</th>
+            <th style="text-align:center;padding:8px 10px;color:#64748b;font-size:10px;text-transform:uppercase;letter-spacing:.05em;font-weight:500;"></th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- Row 1 -->
+          <tr style="border-bottom:1px solid #1e293b;">
+            <td style="padding:10px;color:#94a3b8;font-size:12px;">May 23</td>
+            <td style="padding:10px;">
+              <div style="color:#f1f5f9;font-size:13px;">Starbucks</div>
+              <div style="color:#475569;font-size:10px;">SQ *STARBUCKS #12849</div>
+            </td>
+            <td style="padding:10px;">
+              <span style="background:#7c3aed22;color:#a78bfa;border-radius:4px;padding:3px 8px;font-size:11px;cursor:pointer;">☕ Food &amp; Dining ▾</span>
+            </td>
+            <td style="padding:10px;text-align:right;color:#f87171;font-size:13px;font-weight:500;">−$6.40</td>
+            <td style="padding:10px;text-align:center;color:#475569;font-size:11px;cursor:pointer;">···</td>
+          </tr>
+          <!-- Row 2 -->
+          <tr style="border-bottom:1px solid #1e293b;">
+            <td style="padding:10px;color:#94a3b8;font-size:12px;">May 22</td>
+            <td style="padding:10px;">
+              <div style="color:#f1f5f9;font-size:13px;">Uber</div>
+              <div style="color:#475569;font-size:10px;">UBER* TRIP HELP.UBER.COM</div>
+            </td>
+            <td style="padding:10px;">
+              <span style="background:#0ea5e922;color:#38bdf8;border-radius:4px;padding:3px 8px;font-size:11px;cursor:pointer;">🚗 Transport ▾</span>
+            </td>
+            <td style="padding:10px;text-align:right;color:#f87171;font-size:13px;font-weight:500;">−$18.90</td>
+            <td style="padding:10px;text-align:center;color:#475569;font-size:11px;cursor:pointer;">···</td>
+          </tr>
+          <!-- Row 3 — income -->
+          <tr style="border-bottom:1px solid #1e293b;">
+            <td style="padding:10px;color:#94a3b8;font-size:12px;">May 20</td>
+            <td style="padding:10px;">
+              <div style="color:#f1f5f9;font-size:13px;">Direct Deposit</div>
+              <div style="color:#475569;font-size:10px;">PAYROLL ACH DEPOSIT</div>
+            </td>
+            <td style="padding:10px;">
+              <span style="background:#16a34a22;color:#4ade80;border-radius:4px;padding:3px 8px;font-size:11px;cursor:pointer;">💰 Income ▾</span>
+            </td>
+            <td style="padding:10px;text-align:right;color:#4ade80;font-size:13px;font-weight:500;">+$3,200.00</td>
+            <td style="padding:10px;text-align:center;color:#475569;font-size:11px;cursor:pointer;">···</td>
+          </tr>
+          <!-- Row 4 — wrong category hint -->
+          <tr style="border-bottom:1px solid #1e293b;background:#451a0308;">
+            <td style="padding:10px;color:#94a3b8;font-size:12px;">May 19</td>
+            <td style="padding:10px;">
+              <div style="color:#f1f5f9;font-size:13px;">Amazon</div>
+              <div style="color:#475569;font-size:10px;">AMZN MKTP US*2K4LM9</div>
+            </td>
+            <td style="padding:10px;">
+              <span style="background:#f59e0b22;color:#fbbf24;border-radius:4px;padding:3px 8px;font-size:11px;cursor:pointer;">🛍 Shopping ▾</span>
+            </td>
+            <td style="padding:10px;text-align:right;color:#f87171;font-size:13px;font-weight:500;">−$43.99</td>
+            <td style="padding:10px;text-align:center;color:#475569;font-size:11px;cursor:pointer;">···</td>
+          </tr>
+          <!-- Row 5 -->
+          <tr style="border-bottom:1px solid #1e293b;">
+            <td style="padding:10px;color:#94a3b8;font-size:12px;">May 18</td>
+            <td style="padding:10px;">
+              <div style="color:#f1f5f9;font-size:13px;">Netflix</div>
+              <div style="color:#475569;font-size:10px;">NETFLIX.COM</div>
+            </td>
+            <td style="padding:10px;">
+              <span style="background:#ec489922;color:#f472b6;border-radius:4px;padding:3px 8px;font-size:11px;cursor:pointer;">🎬 Entertainment ▾</span>
+            </td>
+            <td style="padding:10px;text-align:right;color:#f87171;font-size:13px;font-weight:500;">−$15.99</td>
+            <td style="padding:10px;text-align:center;color:#475569;font-size:11px;cursor:pointer;">···</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- Load more -->
+      <div style="text-align:center;margin-top:12px;">
+        <span style="color:#64748b;font-size:12px;cursor:pointer;">Show more transactions ↓</span>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div style="margin-top:20px;padding:0 8px;">
+  <p class="subtitle" style="text-align:center;">Category badges are clickable dropdowns — user picks a new category inline. Raw merchant description shown below cleaned name. Does this layout work for you?</p>
+</div>

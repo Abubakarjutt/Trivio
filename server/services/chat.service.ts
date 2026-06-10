@@ -1,4 +1,7 @@
 import { type PrismaClient, Prisma, InvoiceStatus } from "@prisma/client";
+import { createJournalEntry, voidJournalEntry } from "./accounting.service";
+import { createInvoice, postInvoiceToLedger, recordInvoicePayment, voidInvoice } from "./invoice.service";
+import { createBill, postBillToLedger, recordBillPayment, voidBill } from "./bill.service";
 
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "gemma4:e4b";
@@ -135,6 +138,11 @@ Reports:
 - get_trial_balance: {"startDate?","endDate?"}
 - get_ar_aging: {}
 - get_ap_aging: {}
+Personal Finance Budgets:
+- set_budget: {"category","limitAmount","name?","period?":"WEEKLY|MONTHLY|QUARTERLY|YEARLY"} — create or update a single category budget (period defaults to MONTHLY)
+- set_budgets: {"budgets":[{"category","limitAmount","name?","period?"},...]} — create or update multiple category budgets at once; use this when the user asks to set several budgets, wants a full budget plan, or asks to readjust existing budgets (e.g. "cut all by 10%", "move 1000 from Transport to Food", "keep total under 30000")
+- list_budgets: {} — show current budgets with spending progress
+Budget readjustment: always call list_budgets first to get current limits, compute the new values, then call set_budgets. Show before→after numbers in your reply.
 
 Format: TOOL_CALL: {"tool":"name","args":{...}}
 `;
@@ -213,14 +221,14 @@ export async function executeToolCall(
     switch (toolCall.tool) {
       // Journal entries
       case "create_journal_entry":
-        return await toolCreateJournalEntry(db, organisationId, toolCall.args);
+        return await toolCreateJournalEntry(db, organisationId, userId, toolCall.args);
       case "search_transactions":
         return await toolSearchTransactions(db, organisationId, toolCall.args);
       case "void_transaction":
         return await toolVoidTransaction(db, organisationId, userId, toolCall.args);
       // Invoices
       case "create_invoice":
-        return await toolCreateInvoice(db, organisationId, toolCall.args);
+        return await toolCreateInvoice(db, organisationId, userId, toolCall.args);
       case "list_invoices":
         return await toolListInvoices(db, organisationId, toolCall.args);
       case "get_invoice":
@@ -233,7 +241,7 @@ export async function executeToolCall(
         return await toolVoidInvoice(db, organisationId, userId, toolCall.args);
       // Bills
       case "create_bill":
-        return await toolCreateBill(db, organisationId, toolCall.args);
+        return await toolCreateBill(db, organisationId, userId, toolCall.args);
       case "list_bills":
         return await toolListBills(db, organisationId, toolCall.args);
       case "get_bill":
@@ -271,6 +279,13 @@ export async function executeToolCall(
         return await toolGetApAging(db, organisationId);
       case "extract_document":
         return { tool: toolCall.tool, success: true, data: { message: "Document extraction queued. Results will appear shortly." } };
+      // Personal Finance Budgets
+      case "set_budget":
+        return await toolSetBudget(db, organisationId, toolCall.args);
+      case "set_budgets":
+        return await toolSetBudgets(db, organisationId, toolCall.args);
+      case "list_budgets":
+        return await toolListBudgets(db, organisationId);
       default:
         return { tool: toolCall.tool, success: false, error: `Unknown tool: ${toolCall.tool}` };
     }
@@ -282,6 +297,7 @@ export async function executeToolCall(
 async function toolCreateJournalEntry(
   db: PrismaClient,
   organisationId: string,
+  userId: string,
   args: Record<string, unknown>,
 ): Promise<ToolResult> {
   const date = (args.date as string) || new Date().toISOString().slice(0, 10);
@@ -310,21 +326,24 @@ async function toolCreateJournalEntry(
     }
   }
 
-  const entry = await db.journalEntry.create({
-    data: {
-      organisationId,
-      date: new Date(date),
+  // Use the canonical createJournalEntry — enforces balance check at 0.0001 tolerance
+  const entry = await createJournalEntry(db, {
+    organisationId,
+    userId,
+    date: new Date(date),
+    description,
+    source: "MANUAL",
+    lines: lines.map((l) => ({
+      accountId: codeToId.get(l.accountCode)!,
+      debit: l.debit ?? undefined,
+      credit: l.credit ?? undefined,
       description,
-      source: "MANUAL",
-      lines: {
-        create: lines.map((l) => ({
-          accountId: codeToId.get(l.accountCode)!,
-          debit: l.debit ? new Prisma.Decimal(l.debit) : null,
-          credit: l.credit ? new Prisma.Decimal(l.credit) : null,
-          description,
-        })),
-      },
-    },
+    })),
+  });
+
+  // Re-fetch with account details for the response
+  const entryWithAccounts = await db.journalEntry.findUnique({
+    where: { id: entry.id },
     include: { lines: { include: { account: true } } },
   });
 
@@ -335,7 +354,7 @@ async function toolCreateJournalEntry(
       id: entry.id,
       date: entry.date,
       description: entry.description,
-      lines: entry.lines.map((l) => ({
+      lines: (entryWithAccounts?.lines ?? []).map((l) => ({
         account: `${l.account.code} - ${l.account.name}`,
         debit: l.debit?.toNumber() ?? null,
         credit: l.credit?.toNumber() ?? null,
@@ -347,6 +366,7 @@ async function toolCreateJournalEntry(
 async function toolCreateInvoice(
   db: PrismaClient,
   organisationId: string,
+  userId: string,
   args: Record<string, unknown>,
 ): Promise<ToolResult> {
   const contactName = args.contactName as string;
@@ -363,70 +383,22 @@ async function toolCreateInvoice(
   const date = (args.date as string) || new Date().toISOString().slice(0, 10);
   const dueDate = (args.dueDate as string) || (() => { const d = new Date(); d.setDate(d.getDate() + 30); return d.toISOString().slice(0, 10); })();
 
-  const lastInvoice = await db.invoice.findFirst({
-    where: { organisationId },
-    orderBy: { number: "desc" },
+  // Use createInvoice + postInvoiceToLedger so all validation and balance checks are enforced
+  const invoice = await createInvoice(db, {
+    organisationId,
+    contactId: contact.id,
+    date: new Date(date),
+    dueDate: new Date(dueDate),
+    notes: (args.notes as string) || undefined,
+    lines: lines.map((l) => ({ description: l.description, quantity: l.quantity, unitPrice: l.unitPrice })),
   });
-  const nextNum = lastInvoice ? `INV-${String(parseInt(lastInvoice.number.replace(/\D/g, "") || "0") + 1).padStart(4, "0")}` : "INV-0001";
+
+  await postInvoiceToLedger(db, invoice.id, organisationId, userId);
+
+  // Mark as SENT (createInvoice creates as DRAFT)
+  await db.invoice.update({ where: { id: invoice.id }, data: { status: "SENT" } });
 
   const subtotal = lines.reduce((s, l) => s + l.quantity * l.unitPrice, 0);
-
-  const arAccount = await db.chartAccount.findFirst({
-    where: { organisationId, code: "1200" },
-  }) ?? await db.chartAccount.findFirst({
-    where: { organisationId, type: "ASSET", name: { contains: "receivable", mode: "insensitive" } },
-  });
-  const salesAccount = await db.chartAccount.findFirst({
-    where: { organisationId, code: "4000" },
-  }) ?? await db.chartAccount.findFirst({
-    where: { organisationId, type: "INCOME" },
-  });
-
-  if (!arAccount || !salesAccount) {
-    return { tool: "create_invoice", success: false, error: "Missing Accounts Receivable or Sales account. Set up your chart of accounts first." };
-  }
-
-  const journalEntry = await db.journalEntry.create({
-    data: {
-      organisationId,
-      date: new Date(date),
-      description: `Invoice ${nextNum} - ${contactName}`,
-      source: "INVOICE",
-      lines: {
-        create: [
-          { accountId: arAccount.id, debit: new Prisma.Decimal(subtotal), credit: null, description: `Invoice ${nextNum}` },
-          { accountId: salesAccount.id, debit: null, credit: new Prisma.Decimal(subtotal), description: `Invoice ${nextNum}` },
-        ],
-      },
-    },
-  });
-
-  const invoice = await db.invoice.create({
-    data: {
-      organisationId,
-      contactId: contact.id,
-      number: nextNum,
-      date: new Date(date),
-      dueDate: new Date(dueDate),
-      status: "SENT",
-      subtotal: new Prisma.Decimal(subtotal),
-      taxAmount: new Prisma.Decimal(0),
-      totalAmount: new Prisma.Decimal(subtotal),
-      notes: (args.notes as string) || null,
-      journalEntryId: journalEntry.id,
-      lines: {
-        create: lines.map((l, i) => ({
-          description: l.description,
-          quantity: new Prisma.Decimal(l.quantity),
-          unitPrice: new Prisma.Decimal(l.unitPrice),
-          amount: new Prisma.Decimal(l.quantity * l.unitPrice),
-          taxAmount: new Prisma.Decimal(0),
-          sortOrder: i,
-        })),
-      },
-    },
-    include: { contact: true, lines: true },
-  });
 
   return {
     tool: "create_invoice",
@@ -434,7 +406,7 @@ async function toolCreateInvoice(
     data: {
       id: invoice.id,
       number: invoice.number,
-      customer: invoice.contact.name,
+      customer: contact.name,
       date,
       dueDate,
       total: subtotal,
@@ -447,6 +419,7 @@ async function toolCreateInvoice(
 async function toolCreateBill(
   db: PrismaClient,
   organisationId: string,
+  userId: string,
   args: Record<string, unknown>,
 ): Promise<ToolResult> {
   const contactName = args.contactName as string;
@@ -463,70 +436,22 @@ async function toolCreateBill(
   const date = (args.date as string) || new Date().toISOString().slice(0, 10);
   const dueDate = (args.dueDate as string) || (() => { const d = new Date(); d.setDate(d.getDate() + 30); return d.toISOString().slice(0, 10); })();
 
-  const lastBill = await db.bill.findFirst({
-    where: { organisationId },
-    orderBy: { createdAt: "desc" },
+  // Use createBill + postBillToLedger so all validation and balance checks are enforced
+  const bill = await createBill(db, {
+    organisationId,
+    contactId: contact.id,
+    date: new Date(date),
+    dueDate: new Date(dueDate),
+    notes: (args.notes as string) || undefined,
+    lines: lines.map((l) => ({ description: l.description, quantity: l.quantity, unitPrice: l.unitPrice })),
   });
-  const nextNum = lastBill?.number ? `BILL-${String(parseInt(lastBill.number.replace(/\D/g, "") || "0") + 1).padStart(4, "0")}` : "BILL-0001";
+
+  await postBillToLedger(db, bill.id, organisationId, userId);
+
+  // Mark as SENT (createBill creates as DRAFT)
+  await db.bill.update({ where: { id: bill.id }, data: { status: "SENT" } });
 
   const subtotal = lines.reduce((s, l) => s + l.quantity * l.unitPrice, 0);
-
-  const apAccount = await db.chartAccount.findFirst({
-    where: { organisationId, code: "2100" },
-  }) ?? await db.chartAccount.findFirst({
-    where: { organisationId, type: "LIABILITY", name: { contains: "payable", mode: "insensitive" } },
-  });
-  const expenseAccount = await db.chartAccount.findFirst({
-    where: { organisationId, code: "5000" },
-  }) ?? await db.chartAccount.findFirst({
-    where: { organisationId, type: "EXPENSE" },
-  });
-
-  if (!apAccount || !expenseAccount) {
-    return { tool: "create_bill", success: false, error: "Missing Accounts Payable or Expense account. Set up your chart of accounts first." };
-  }
-
-  const journalEntry = await db.journalEntry.create({
-    data: {
-      organisationId,
-      date: new Date(date),
-      description: `Bill ${nextNum} - ${contactName}`,
-      source: "BILL",
-      lines: {
-        create: [
-          { accountId: expenseAccount.id, debit: new Prisma.Decimal(subtotal), credit: null, description: `Bill ${nextNum}` },
-          { accountId: apAccount.id, debit: null, credit: new Prisma.Decimal(subtotal), description: `Bill ${nextNum}` },
-        ],
-      },
-    },
-  });
-
-  const bill = await db.bill.create({
-    data: {
-      organisationId,
-      contactId: contact.id,
-      number: nextNum,
-      date: new Date(date),
-      dueDate: new Date(dueDate),
-      status: "SENT",
-      subtotal: new Prisma.Decimal(subtotal),
-      taxAmount: new Prisma.Decimal(0),
-      totalAmount: new Prisma.Decimal(subtotal),
-      notes: (args.notes as string) || null,
-      journalEntryId: journalEntry.id,
-      lines: {
-        create: lines.map((l, i) => ({
-          description: l.description,
-          quantity: new Prisma.Decimal(l.quantity),
-          unitPrice: new Prisma.Decimal(l.unitPrice),
-          amount: new Prisma.Decimal(l.quantity * l.unitPrice),
-          taxAmount: new Prisma.Decimal(0),
-          sortOrder: i,
-        })),
-      },
-    },
-    include: { contact: true, lines: true },
-  });
 
   return {
     tool: "create_bill",
@@ -534,7 +459,7 @@ async function toolCreateBill(
     data: {
       id: bill.id,
       number: bill.number,
-      supplier: bill.contact.name,
+      supplier: contact.name,
       date,
       dueDate,
       total: subtotal,
@@ -783,7 +708,7 @@ async function toolGetAccountBalance(
   if (!account) return { tool: "get_account_balance", success: false, error: `Account "${accountCode}" not found` };
 
   const lines = await db.journalLine.findMany({
-    where: { accountId: account.id, journalEntry: { isVoid: false } },
+    where: { accountId: account.id, journalEntry: { organisationId, isVoid: false } },
   });
 
   const totalDebit = lines.reduce((s, l) => s + (l.debit?.toNumber() ?? 0), 0);
@@ -937,36 +862,24 @@ async function toolRecordInvoicePayment(
   const cashAccount = await resolveCashAccount(db, organisationId, args.cashAccountCode as string | undefined);
   if (!cashAccount) return { tool: "record_invoice_payment", success: false, error: "No cash/bank account found. Create one first." };
 
-  const arAccount = await db.chartAccount.findFirst({ where: { organisationId, code: "1200" } })
-    ?? await db.chartAccount.findFirst({ where: { organisationId, type: "ASSET", name: { contains: "receivable", mode: "insensitive" } } });
-  if (!arAccount) return { tool: "record_invoice_payment", success: false, error: "Accounts Receivable account not found" };
-
   const outstanding = Number(invoice.totalAmount) - Number(invoice.amountPaid);
   if (amount > outstanding + 0.001) return { tool: "record_invoice_payment", success: false, error: `Payment ($${amount}) exceeds outstanding balance ($${outstanding.toFixed(2)})` };
 
   const date = args.date ? new Date(args.date as string) : new Date();
-  const reference = args.reference as string | undefined;
 
-  await db.journalEntry.create({
-    data: {
-      organisationId,
-      date,
-      description: `Payment: ${invoice.number}`,
-      reference: reference ?? invoice.number,
-      source: "INVOICE",
-      sourceId: invoice.id,
-      lines: {
-        create: [
-          { accountId: cashAccount.id, debit: new Prisma.Decimal(amount), description: `Payment received: ${invoice.number}` },
-          { accountId: arAccount.id, credit: new Prisma.Decimal(amount), description: `AR cleared: ${invoice.number}` },
-        ],
-      },
-    },
+  // Use the canonical service function — enforces balance check and correct source/sourceId
+  await recordInvoicePayment(db, {
+    invoiceId: invoice.id,
+    organisationId,
+    userId,
+    amount,
+    cashAccountId: cashAccount.id,
+    date,
+    reference: args.reference as string | undefined,
   });
 
   const newPaid = Number(invoice.amountPaid) + amount;
   const newStatus = newPaid >= Number(invoice.totalAmount) - 0.001 ? "PAID" : "PARTIAL";
-  await db.invoice.update({ where: { id: invoice.id }, data: { amountPaid: new Prisma.Decimal(newPaid), status: newStatus } });
 
   return {
     tool: "record_invoice_payment",
@@ -990,34 +903,9 @@ async function toolVoidInvoice(
 
   const reason = (args.reason as string) || "Voided via chat";
 
-  // Reverse the journal entry if one exists
-  if (invoice.journalEntryId) {
-    const original = await db.journalEntry.findUnique({
-      where: { id: invoice.journalEntryId },
-      include: { lines: true },
-    });
-    if (original && !original.isVoid) {
-      await db.journalEntry.create({
-        data: {
-          organisationId,
-          date: new Date(),
-          description: `REVERSAL: ${original.description} — ${reason}`,
-          source: "MANUAL",
-          lines: {
-            create: original.lines.map((l) => ({
-              accountId: l.accountId,
-              debit: l.credit,
-              credit: l.debit,
-              description: `Reversal: ${l.description ?? ""}`,
-            })),
-          },
-        },
-      });
-      await db.journalEntry.update({ where: { id: original.id }, data: { isVoid: true } });
-    }
-  }
+  // Use canonical voidInvoice — also reverses payment entries, sets voidedAt/voidReason, uses atomic transaction
+  await voidInvoice(db, invoice.id, organisationId, userId, reason);
 
-  await db.invoice.update({ where: { id: invoice.id }, data: { status: "VOID" } });
   return { tool: "void_invoice", success: true, data: { number: invoice.number, status: "VOID" } };
 }
 
@@ -1143,35 +1031,24 @@ async function toolRecordBillPayment(
   const cashAccount = await resolveCashAccount(db, organisationId, args.cashAccountCode as string | undefined);
   if (!cashAccount) return { tool: "record_bill_payment", success: false, error: "No cash/bank account found. Create one first." };
 
-  const apAccount = await db.chartAccount.findFirst({ where: { organisationId, code: "2100" } })
-    ?? await db.chartAccount.findFirst({ where: { organisationId, type: "LIABILITY", name: { contains: "payable", mode: "insensitive" } } });
-  if (!apAccount) return { tool: "record_bill_payment", success: false, error: "Accounts Payable account not found" };
-
   const outstanding = Number(bill.totalAmount) - Number(bill.amountPaid);
   if (amount > outstanding + 0.001) return { tool: "record_bill_payment", success: false, error: `Payment ($${amount}) exceeds outstanding balance ($${outstanding.toFixed(2)})` };
 
   const date = args.date ? new Date(args.date as string) : new Date();
 
-  await db.journalEntry.create({
-    data: {
-      organisationId,
-      date,
-      description: `Payment: ${bill.number}`,
-      reference: (args.reference as string) ?? bill.number,
-      source: "BILL",
-      sourceId: bill.id,
-      lines: {
-        create: [
-          { accountId: apAccount.id, debit: new Prisma.Decimal(amount), description: `AP cleared: ${bill.number}` },
-          { accountId: cashAccount.id, credit: new Prisma.Decimal(amount), description: `Payment made: ${bill.number}` },
-        ],
-      },
-    },
+  // Use the canonical service function — enforces balance check, correct source/sourceId
+  await recordBillPayment(db, {
+    billId: bill.id,
+    organisationId,
+    userId,
+    amount,
+    cashAccountId: cashAccount.id,
+    date,
+    reference: args.reference as string | undefined,
   });
 
   const newPaid = Number(bill.amountPaid) + amount;
   const newStatus = newPaid >= Number(bill.totalAmount) - 0.001 ? "PAID" : "PARTIAL";
-  await db.bill.update({ where: { id: bill.id }, data: { amountPaid: new Prisma.Decimal(newPaid), status: newStatus } });
 
   return {
     tool: "record_bill_payment",
@@ -1195,30 +1072,9 @@ async function toolVoidBill(
 
   const reason = (args.reason as string) || "Voided via chat";
 
-  if (bill.journalEntryId) {
-    const original = await db.journalEntry.findUnique({ where: { id: bill.journalEntryId }, include: { lines: true } });
-    if (original && !original.isVoid) {
-      await db.journalEntry.create({
-        data: {
-          organisationId,
-          date: new Date(),
-          description: `REVERSAL: ${original.description} — ${reason}`,
-          source: "MANUAL",
-          lines: {
-            create: original.lines.map((l) => ({
-              accountId: l.accountId,
-              debit: l.credit,
-              credit: l.debit,
-              description: `Reversal: ${l.description ?? ""}`,
-            })),
-          },
-        },
-      });
-      await db.journalEntry.update({ where: { id: original.id }, data: { isVoid: true } });
-    }
-  }
+  // Use canonical voidBill — also reverses payment entries, sets voidedAt/voidReason, uses atomic transaction
+  await voidBill(db, bill.id, organisationId, userId, reason);
 
-  await db.bill.update({ where: { id: bill.id }, data: { status: "VOID" } });
   return { tool: "void_bill", success: true, data: { number: bill.number, status: "VOID" } };
 }
 
@@ -1331,25 +1187,86 @@ async function toolVoidTransaction(
 
   const reason = (args.reason as string) || "Voided via chat";
 
-  await db.journalEntry.create({
-    data: {
-      organisationId,
-      date: new Date(),
-      description: `REVERSAL: ${entry.description} — ${reason}`,
-      source: "MANUAL",
-      lines: {
-        create: entry.lines.map((l) => ({
-          accountId: l.accountId,
-          debit: l.credit,
-          credit: l.debit,
-          description: `Reversal: ${l.description ?? ""}`,
-        })),
-      },
-    },
+  // Use canonical voidJournalEntry — atomic transaction, sets voidedAt/voidReason
+  await voidJournalEntry(db, entry.id, organisationId, userId, reason);
+
+  return { tool: "void_transaction", success: true, data: { id: entry.id, description: entry.description } };
+}
+
+async function toolSetBudget(
+  db: PrismaClient,
+  organisationId: string,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  const category = args.category as string;
+  const limitAmount = Number(args.limitAmount);
+  if (!category || !limitAmount || limitAmount <= 0) {
+    return { tool: "set_budget", success: false, error: "category and a positive limitAmount are required" };
+  }
+  const name = (args.name as string | undefined) ?? category;
+  const period = (["WEEKLY","MONTHLY","QUARTERLY","YEARLY"].includes(args.period as string) ? args.period as string : "MONTHLY") as "WEEKLY" | "MONTHLY" | "QUARTERLY" | "YEARLY";
+
+  const existing = await db.budget.findFirst({ where: { organisationId, category } });
+  let budget;
+  if (existing) {
+    budget = await db.budget.update({ where: { id: existing.id }, data: { name, limitAmount: new Prisma.Decimal(limitAmount), period, isArchived: false } });
+  } else {
+    budget = await db.budget.create({ data: { organisationId, name, category, limitAmount: new Prisma.Decimal(limitAmount), period } });
+  }
+  return { tool: "set_budget", success: true, data: { category: budget.category, limitAmount: Number(budget.limitAmount), period: budget.period, action: existing ? "updated" : "created" } };
+}
+
+async function toolSetBudgets(
+  db: PrismaClient,
+  organisationId: string,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  const list = args.budgets as Array<{ category: string; limitAmount: number; name?: string; period?: string }> | undefined;
+  if (!Array.isArray(list) || list.length === 0) {
+    return { tool: "set_budgets", success: false, error: "budgets array is required" };
+  }
+
+  const results: Array<{ category: string; limitAmount: number; action: string }> = [];
+  for (const item of list) {
+    const r = await toolSetBudget(db, organisationId, item as Record<string, unknown>);
+    if (r.success && r.data) {
+      const d = r.data as { category: string; limitAmount: number; action: string };
+      results.push({ category: d.category, limitAmount: d.limitAmount, action: d.action });
+    }
+  }
+  return { tool: "set_budgets", success: true, data: { saved: results.length, budgets: results } };
+}
+
+async function toolListBudgets(
+  db: PrismaClient,
+  organisationId: string,
+): Promise<ToolResult> {
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  const budgets = await db.budget.findMany({
+    where: { organisationId, isArchived: false },
+    orderBy: { createdAt: "asc" },
   });
 
-  await db.journalEntry.update({ where: { id: entry.id }, data: { isVoid: true } });
-  return { tool: "void_transaction", success: true, data: { id: entry.id, description: entry.description } };
+  const thisMonthTxns = await db.statementTransaction.findMany({
+    where: { organisationId, isExcluded: false, type: "DEBIT", date: { gte: monthStart } },
+    select: { category: true, amount: true },
+  });
+
+  const spendByCategory: Record<string, number> = {};
+  for (const t of thisMonthTxns) {
+    const c = t.category ?? "Other";
+    spendByCategory[c] = (spendByCategory[c] ?? 0) + Number(t.amount);
+  }
+
+  const result = budgets.map((b) => {
+    const spent = spendByCategory[b.category] ?? 0;
+    const limit = Number(b.limitAmount);
+    return { category: b.category, limit, spent, remaining: Math.max(0, limit - spent), period: b.period };
+  });
+
+  return { tool: "list_budgets", success: true, data: { budgets: result } };
 }
 
 export async function buildChatMessages(
@@ -1378,7 +1295,11 @@ export async function buildChatMessages(
   });
 
   const history = await db.chatMessage.findMany({
-    where: { conversationId: params.conversationId },
+    where: {
+      conversationId: params.conversationId,
+      // Scoped to org to prevent cross-tenant history leaks if conversationId is manipulated
+      conversation: { organisationId: params.organisationId },
+    },
     orderBy: { createdAt: "desc" },
     take: 6,
   });

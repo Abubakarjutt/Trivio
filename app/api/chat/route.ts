@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { buildChatMessages, executeToolCall, parseToolCalls, type ToolResult } from "@/server/services/chat.service";
+import { extractionRateLimiter } from "@/server/middleware/rateLimit";
 
 function buildToolSummary(toolResults: ToolResult[]): string {
   return toolResults
@@ -68,6 +69,13 @@ export async function POST(req: NextRequest) {
     return new Response("Message required", { status: 400 });
   }
 
+  // Rate-limit chat requests to protect AI compute costs
+  try {
+    extractionRateLimiter(`chat:${user.id}`);
+  } catch {
+    return new Response("Too many requests. Try again shortly.", { status: 429 });
+  }
+
   let conversationId = inputConvId;
   if (!conversationId) {
     const conv = await db.chatConversation.create({
@@ -78,6 +86,15 @@ export async function POST(req: NextRequest) {
       },
     });
     conversationId = conv.id;
+  } else {
+    // Verify the conversation belongs to this organisation — prevent IDOR
+    const ownedConv = await db.chatConversation.findFirst({
+      where: { id: conversationId, organisationId: user.organisationId },
+      select: { id: true },
+    });
+    if (!ownedConv) {
+      return new Response("Forbidden", { status: 403 });
+    }
   }
 
   await db.chatMessage.create({

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { sendPasswordResetEmail } from "@/lib/resend";
+import { authRateLimiter } from "@/server/middleware/rateLimit";
 
 export async function POST(req: NextRequest) {
   try {
@@ -9,6 +10,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Email is required" }, { status: 400 });
     }
     const normalised = email.toLowerCase().trim();
+
+    // Rate-limit by IP to prevent email flooding and user enumeration via timing
+    const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+    try {
+      authRateLimiter(`forgot-password:${ip}`);
+    } catch {
+      return NextResponse.json({ error: "Too many requests. Try again later." }, { status: 429 });
+    }
+
     const appUrl = process.env.NEXTAUTH_URL;
     if (!appUrl) {
       console.error("[forgot-password] NEXTAUTH_URL is not set");
@@ -16,6 +26,7 @@ export async function POST(req: NextRequest) {
     }
     const user = await db.user.findFirst({ where: { email: { equals: normalised, mode: "insensitive" } } });
     if (!user) {
+      // Always return success to prevent user enumeration — do NOT short-circuit early
       return NextResponse.json({ success: true });
     }
     await db.passwordResetToken.deleteMany({ where: { email: normalised } });

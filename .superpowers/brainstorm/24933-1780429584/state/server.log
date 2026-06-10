@@ -1,0 +1,6 @@
+{"type":"server-started","port":54427,"host":"127.0.0.1","url_host":"localhost","url":"http://localhost:54427","screen_dir":"/Users/Apple/projects/AutoAccounts/.superpowers/brainstorm/24933-1780429584/content","state_dir":"/Users/Apple/projects/AutoAccounts/.superpowers/brainstorm/24933-1780429584/state"}
+{"type":"screen-added","file":"/Users/Apple/projects/AutoAccounts/.superpowers/brainstorm/24933-1780429584/content/mobile-nav-pattern.html"}
+{"type":"screen-added","file":"/Users/Apple/projects/AutoAccounts/.superpowers/brainstorm/24933-1780429584/content/waiting-1.html"}
+{"type":"screen-added","file":"/Users/Apple/projects/AutoAccounts/.superpowers/brainstorm/24933-1780429584/content/transactions-mobile.html"}
+{"type":"screen-added","file":"/Users/Apple/projects/AutoAccounts/.superpowers/brainstorm/24933-1780429584/content/waiting-2.html"}
+{"type":"server-stopped","reason":"idle timeout"}

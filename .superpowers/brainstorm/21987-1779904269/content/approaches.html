@@ -1,0 +1,127 @@
+<h2>Three implementation approaches</h2>
+<p class="subtitle">Pick the architecture that fits best — trade-offs shown for each</p>
+
+<div class="cards">
+
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:14px;background:#0f172a;border-radius:6px;font-size:11px;font-family:monospace;">
+      <div style="color:#7c3aed;font-weight:bold;margin-bottom:8px;">APPROACH A — Sync Pipeline</div>
+      <div style="display:flex;flex-direction:column;gap:5px;">
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span style="color:#6366f1;">Upload</span>
+          <span style="color:#475569;">──►</span>
+          <span style="color:#f59e0b;">Server parses</span>
+          <span style="color:#475569;">──►</span>
+          <span style="color:#22c55e;">Save + return</span>
+        </div>
+        <div style="color:#475569;font-size:10px;margin-top:4px;">CSV: parse rows in tRPC mutation</div>
+        <div style="color:#475569;font-size:10px;">PDF: extract text with pdfjs, send to Ollama</div>
+        <div style="color:#475569;font-size:10px;">All happens in one HTTP request</div>
+        <div style="margin-top:8px;border-top:1px solid #1e293b;padding-top:8px;">
+          <div style="color:#94a3b8;font-size:10px;margin-bottom:4px;">Pages added:</div>
+          <div style="color:#e2e8f0;font-size:10px;">• /statements (upload + results table)</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A — Sync: simple &amp; fast to build</h3>
+      <div class="pros-cons" style="margin-top:8px;">
+        <div class="pros"><h4>Pros</h4><ul>
+          <li>No queue/Redis dependency</li>
+          <li>Fewest new files</li>
+          <li>Instant feedback</li>
+        </ul></div>
+        <div class="cons"><h4>Cons</h4><ul>
+          <li>Large PDFs may timeout (30s limit)</li>
+          <li>Blocks HTTP thread during Ollama call</li>
+          <li>Hard to add progress indicator</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:14px;background:#0f172a;border-radius:6px;font-size:11px;font-family:monospace;">
+      <div style="color:#7c3aed;font-weight:bold;margin-bottom:8px;">APPROACH B — Async Queue (mirrors existing)</div>
+      <div style="display:flex;flex-direction:column;gap:5px;">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <span style="color:#6366f1;">Upload</span>
+          <span style="color:#475569;">──►</span>
+          <span style="color:#f59e0b;">BullMQ job</span>
+          <span style="color:#475569;">──►</span>
+          <span style="color:#f59e0b;">Worker</span>
+          <span style="color:#475569;">──►</span>
+          <span style="color:#22c55e;">Auto-save</span>
+        </div>
+        <div style="color:#475569;font-size:10px;margin-top:4px;">Frontend polls /api/imports/[id]/status</div>
+        <div style="color:#475569;font-size:10px;">Same pattern as existing Attachment extraction</div>
+        <div style="color:#475569;font-size:10px;">StatementImport model tracks job state</div>
+        <div style="margin-top:8px;border-top:1px solid #1e293b;padding-top:8px;">
+          <div style="color:#94a3b8;font-size:10px;margin-bottom:4px;">Pages added:</div>
+          <div style="color:#e2e8f0;font-size:10px;">• /statements (import history + status)</div>
+          <div style="color:#e2e8f0;font-size:10px;">• /transactions (filterable list + edit)</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B — Async Queue: consistent with codebase</h3>
+      <div class="pros-cons" style="margin-top:8px;">
+        <div class="pros"><h4>Pros</h4><ul>
+          <li>Handles large files reliably</li>
+          <li>Non-blocking; retry on failure</li>
+          <li>Matches existing extraction pattern</li>
+        </ul></div>
+        <div class="cons"><h4>Cons</h4><ul>
+          <li>Requires BullMQ + Redis running</li>
+          <li>More moving parts to build</li>
+          <li>Polling adds latency</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:14px;background:#0f172a;border-radius:6px;font-size:11px;font-family:monospace;">
+      <div style="color:#7c3aed;font-weight:bold;margin-bottom:8px;">APPROACH C — Hybrid (recommended ⭐)</div>
+      <div style="display:flex;flex-direction:column;gap:5px;">
+        <div style="color:#64748b;font-size:10px;">CSV path:</div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span style="color:#6366f1;">CSV upload</span>
+          <span style="color:#475569;">──►</span>
+          <span style="color:#22c55e;">Sync parse + save (instant)</span>
+        </div>
+        <div style="color:#64748b;font-size:10px;margin-top:4px;">PDF path:</div>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <span style="color:#6366f1;">PDF upload</span>
+          <span style="color:#475569;">──►</span>
+          <span style="color:#f59e0b;">pdfjs text extract</span>
+          <span style="color:#475569;">──►</span>
+          <span style="color:#f59e0b;">Ollama async</span>
+          <span style="color:#475569;">──►</span>
+          <span style="color:#22c55e;">Save</span>
+        </div>
+        <div style="color:#475569;font-size:10px;margin-top:4px;">SSE stream for PDF progress; instant for CSV</div>
+        <div style="margin-top:8px;border-top:1px solid #1e293b;padding-top:8px;">
+          <div style="color:#94a3b8;font-size:10px;margin-bottom:4px;">Pages added:</div>
+          <div style="color:#e2e8f0;font-size:10px;">• /transactions (unified: import button + list)</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C — Hybrid: best UX, no queue needed</h3>
+      <div class="pros-cons" style="margin-top:8px;">
+        <div class="pros"><h4>Pros</h4><ul>
+          <li>CSV is instant, no spinner</li>
+          <li>PDF has real-time progress via SSE</li>
+          <li>No BullMQ/Redis dependency</li>
+          <li>One clean page, not two</li>
+        </ul></div>
+        <div class="cons"><h4>Cons</h4><ul>
+          <li>Two code paths to maintain</li>
+          <li>SSE adds some complexity</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+
+</div>
