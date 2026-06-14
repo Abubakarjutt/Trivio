@@ -393,7 +393,7 @@ export default async function HomePage() {
                 accent: "hsl(142 60% 40%)",
                 bg: "hsl(142 60% 40% / 0.08)",
               },
-            ].map(({ step, icon: Icon, title, desc, accent, bg }, i) => (
+            ].map(({ step, icon: Icon, title, desc, accent, bg }) => (
               <div
                 key={step}
                 className="relative flex flex-col items-center text-center p-8"

@@ -107,7 +107,7 @@ function SetupSteps() {
               Most banks let you add a second notification email. No forwarding rules needed — works forever.
             </p>
             <ol className="text-xs text-muted-foreground space-y-0.5 list-decimal list-inside">
-              <li>Log into your bank's app or portal</li>
+              <li>Log into your bank&apos;s app or portal</li>
               <li>Go to <span className="font-medium text-foreground">Notifications / Alerts settings</span></li>
               <li>Add your import address as a notification email</li>
               <li>Enable transaction / spending alerts</li>
@@ -125,14 +125,14 @@ function SetupSteps() {
               <p className="text-xs font-semibold text-foreground">Gmail:</p>
               <ol className="text-xs text-muted-foreground space-y-0.5 list-decimal list-inside">
                 <li>Settings → <span className="font-medium text-foreground">Filters → Create filter</span></li>
-                <li><span className="font-medium text-foreground">From:</span> enter your bank's email address</li>
+                <li><span className="font-medium text-foreground">From:</span> enter your bank&apos;s email address</li>
                 <li>Click <span className="font-medium text-foreground">Create filter</span> → check <span className="font-medium text-foreground">Forward it to</span></li>
                 <li>Add your import address and save</li>
               </ol>
               <p className="text-xs font-semibold text-foreground pt-1">Outlook:</p>
               <ol className="text-xs text-muted-foreground space-y-0.5 list-decimal list-inside">
                 <li>Settings → Mail → <span className="font-medium text-foreground">Rules → Add new rule</span></li>
-                <li>Condition: <span className="font-medium text-foreground">From</span> → your bank's email</li>
+                <li>Condition: <span className="font-medium text-foreground">From</span> → your bank&apos;s email</li>
                 <li>Action: <span className="font-medium text-foreground">Forward to</span> → your import address</li>
               </ol>
             </div>

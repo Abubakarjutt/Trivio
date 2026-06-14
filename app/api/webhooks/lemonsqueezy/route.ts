@@ -11,9 +11,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 
-  let payload: any;
+  type LsPayload = {
+    meta?: { event_name?: string; webhook_id?: string; custom_data?: { org_id?: string } };
+    data?: { id?: string; attributes?: { user_email?: string; customer_id?: number | string; status?: string } };
+  };
+  let payload: LsPayload;
   try {
-    payload = JSON.parse(rawBody);
+    payload = JSON.parse(rawBody) as LsPayload;
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }

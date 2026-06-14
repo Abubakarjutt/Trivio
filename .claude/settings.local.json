@@ -196,7 +196,10 @@
       "Skill(document-generate:*)",
       "Skill(office-hours)",
       "Skill(office-hours:*)",
-      "Bash(npx jest *)"
+      "Bash(npx jest *)",
+      "Bash(/Users/Apple/.claude/plugins/cache/claude-plugins-official/superpowers/5.1.0/skills/brainstorming/scripts/start-server.sh --project-dir /Users/Apple/projects/EasyFinance)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); deps={**d.get\\('dependencies',{}\\), **d.get\\('devDependencies',{}\\)}; [print\\(k,v\\) for k,v in deps.items\\(\\)]\")",
+      "Bash(mkdir -p /Users/Apple/projects/EasyFinance/docs/superpowers/specs)"
     ]
   }
 }

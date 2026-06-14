@@ -152,7 +152,7 @@ async function handleCsvImport(buffer: Buffer, filename: string, organisationId:
 
   if (safe.length > 0) {
     await db.statementTransaction.createMany({
-      data: safe.map((txn, i) => ({
+      data: safe.map((txn) => ({
         organisationId,
         importBatchId: batch.id,
         ...categorizedByIdx(txn, rawTransactions.indexOf(txn)),

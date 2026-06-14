@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
 import { toast } from "sonner";
-import { Download, Trash2, Shield, Clock, AlertTriangle } from "lucide-react";
+import { Download, Shield, Clock, AlertTriangle } from "lucide-react";
 
 function DataExportCard() {
   const exportData = trpc.gdpr.exportData.useMutation({
@@ -206,7 +207,7 @@ export function PrivacyTab() {
           privacy@autoaccounts.app
         </a>
         {" "}or read our{" "}
-        <a href="/privacy" className="underline hover:text-foreground">Privacy Policy</a>.
+        <Link href="/privacy" className="underline hover:text-foreground">Privacy Policy</Link>.
       </p>
     </div>
   );

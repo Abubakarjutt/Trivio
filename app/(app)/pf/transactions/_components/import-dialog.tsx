@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useId, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Loader2, Upload, CheckCircle2, XCircle, Image as ImageIcon, BookmarkCheck, ShieldCheck } from "lucide-react";
@@ -55,7 +55,7 @@ export function ImportDialog({ open, onOpenChange, onComplete, emailImportToken,
   const [duplicates, setDuplicates]     = useState<DuplicateItem[]>([]);
   const [batchId, setBatchId]           = useState<string | null>(null);
   const [resultCount, setResultCount]   = useState(0);
-  const [skipDuplicates, setSkipDuplicates] = useState(false);
+  const [_skipDuplicates, setSkipDuplicates] = useState(false);
   const [errorMsg, setErrorMsg]         = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -474,7 +474,7 @@ function EmailImportBanner({ emailImportToken }: { emailImportToken: string }) {
               Most banks let you add a second notification email. No forwarding rules needed.
             </p>
             <ol className="text-[11px] text-gray-600 space-y-0.5 list-decimal list-inside">
-              <li>Log into your bank's app or portal</li>
+              <li>Log into your bank&apos;s app or portal</li>
               <li>Go to <span className="font-medium">Notifications / Alerts settings</span></li>
               <li>Add your import address as a notification email</li>
               <li>Enable transaction / spending alerts</li>
@@ -493,14 +493,14 @@ function EmailImportBanner({ emailImportToken }: { emailImportToken: string }) {
               <p className="text-[11px] font-semibold text-gray-700">Gmail:</p>
               <ol className="text-[11px] text-gray-600 space-y-0.5 list-decimal list-inside">
                 <li>Settings → <span className="font-medium">Filters and Blocked Addresses → Create filter</span></li>
-                <li>In the <span className="font-medium">From</span> field, enter your bank's email address</li>
+                <li>In the <span className="font-medium">From</span> field, enter your bank&apos;s email address</li>
                 <li>Click <span className="font-medium">Create filter</span>, then check <span className="font-medium">Forward it to</span></li>
                 <li>Add your import address and save</li>
               </ol>
               <p className="text-[11px] font-semibold text-gray-700 pt-1">Outlook:</p>
               <ol className="text-[11px] text-gray-600 space-y-0.5 list-decimal list-inside">
                 <li>Settings → Mail → <span className="font-medium">Rules → Add new rule</span></li>
-                <li>Condition: <span className="font-medium">From</span> → your bank's email</li>
+                <li>Condition: <span className="font-medium">From</span> → your bank&apos;s email</li>
                 <li>Action: <span className="font-medium">Forward to</span> → your import address</li>
               </ol>
             </div>
