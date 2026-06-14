@@ -195,7 +195,18 @@ export const orgRouter = createTRPCRouter({
     });
 
     const count = await ctx.db.$transaction(async (tx) => {
-      const { count } = await tx.statementTransaction.createMany({ data: rows });
+      const batch = await tx.statementImportBatch.create({
+        data: {
+          organisationId: ctx.organisationId,
+          filename: "sample-data.csv",
+          fileType: "CSV",
+          status: "COMPLETED",
+          transactionCount: rows.length,
+        },
+        select: { id: true },
+      });
+      const rowsWithBatch = rows.map((r) => ({ ...r, importBatchId: batch.id }));
+      const { count } = await tx.statementTransaction.createMany({ data: rowsWithBatch });
       await tx.organisation.update({
         where: { id: ctx.organisationId },
         data: { hasSampleData: true },
