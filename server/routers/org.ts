@@ -2,6 +2,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, protectedProcedure, orgProcedure, publicProcedure } from "@/server/trpc";
 import { seedDefaultChartOfAccounts } from "@/server/services/chart-of-accounts.service";
+import { SAMPLE_TRANSACTIONS } from "@/lib/sample-data";
 
 const SUPPORTED_CURRENCIES = [
   { code: "USD", name: "US Dollar" },
@@ -117,7 +118,6 @@ export const orgRouter = createTRPCRouter({
 
   get: orgProcedure.query(async ({ ctx }) => {
     const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
 
     const org = await ctx.db.organisation.findUnique({
       where: { id: ctx.organisationId },
@@ -132,7 +132,7 @@ export const orgRouter = createTRPCRouter({
     });
     const aiExtractionsUsed = usageRecord?.aiExtractionCount ?? 0;
 
-    return { ...org, aiExtractionsUsed };
+    return { ...org, aiExtractionsUsed, hasSampleData: org?.hasSampleData ?? false };
   }),
 
   update: orgProcedure
@@ -165,6 +165,45 @@ export const orgRouter = createTRPCRouter({
       select: { emailImportToken: true },
     });
     return { emailImportToken: updated.emailImportToken };
+  }),
+
+  loadSampleData: orgProcedure.mutation(async ({ ctx }) => {
+    // Idempotency guard — do nothing if sample data already loaded
+    const org = await ctx.db.organisation.findUnique({
+      where: { id: ctx.organisationId },
+      select: { hasSampleData: true },
+    });
+    if (!org) throw new TRPCError({ code: "NOT_FOUND", message: "Organisation not found" });
+    if (org.hasSampleData) return { success: true, count: 0 };
+
+    const now = new Date();
+    const rows = SAMPLE_TRANSACTIONS.map((t) => {
+      const date = new Date(now);
+      date.setDate(date.getDate() - t.daysAgo);
+      return {
+        organisationId: ctx.organisationId,
+        date,
+        description: t.description,
+        merchantName: t.merchantName,
+        amount: t.amount,
+        type: t.type,
+        category: t.category,
+        mccCode: "0000",
+        mccLabel: "Sample",
+        isSampleData: true,
+      };
+    });
+
+    const count = await ctx.db.$transaction(async (tx) => {
+      const { count } = await tx.statementTransaction.createMany({ data: rows });
+      await tx.organisation.update({
+        where: { id: ctx.organisationId },
+        data: { hasSampleData: true },
+      });
+      return count;
+    });
+
+    return { success: true, count };
   }),
 });
 
