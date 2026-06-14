@@ -117,6 +117,24 @@ export const statementTransactionsRouter = createTRPCRouter({
       return { success: true };
     }),
 
+  pendingBatch: orgProcedure
+    .input(z.object({ batchId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const batch = await ctx.db.statementImportBatch.findFirst({
+        where: { id: input.batchId, organisationId: ctx.organisationId },
+        select: { id: true, pendingDuplicatesJson: true },
+      });
+      if (!batch) return null;
+      const raw = batch.pendingDuplicatesJson as {
+        date: string; description: string; amount: number;
+      }[] | null;
+      if (!raw || raw.length === 0) return null;
+      return {
+        batchId: batch.id,
+        items: raw.map((d) => ({ date: d.date, description: d.description, amount: d.amount })),
+      };
+    }),
+
   listBatches: orgProcedure
     .query(async ({ ctx }) =>
       ctx.db.statementImportBatch.findMany({
