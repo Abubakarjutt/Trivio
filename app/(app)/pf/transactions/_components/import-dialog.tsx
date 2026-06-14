@@ -55,7 +55,7 @@ export function ImportDialog({ open, onOpenChange, onComplete, emailImportToken,
   const [duplicates, setDuplicates]     = useState<DuplicateItem[]>([]);
   const [batchId, setBatchId]           = useState<string | null>(null);
   const [resultCount, setResultCount]   = useState(0);
-  const [_skipDuplicates, setSkipDuplicates] = useState(false);
+  const [, setSkipDuplicates] = useState(false);
   const [errorMsg, setErrorMsg]         = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
