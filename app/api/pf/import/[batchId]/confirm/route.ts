@@ -23,6 +23,23 @@ export async function POST(
   });
   if (!batch) return NextResponse.json({ error: "Batch not found" }, { status: 404 });
 
+  // Auto-clear sample data before saving real transactions
+  const org = await db.organisation.findFirst({
+    where: { id: organisationId },
+    select: { id: true, hasSampleData: true },
+  });
+  if (org?.hasSampleData) {
+    await db.$transaction([
+      db.statementTransaction.deleteMany({
+        where: { organisationId, isSampleData: true },
+      }),
+      db.organisation.update({
+        where: { id: organisationId },
+        data: { hasSampleData: false },
+      }),
+    ]);
+  }
+
   let skipped = 0;
   if (skip) {
     // User chose to skip duplicates — they were never inserted, just count them from the JSON column
