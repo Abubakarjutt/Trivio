@@ -2,6 +2,7 @@ import { z } from "zod";
 import { createTRPCRouter, orgProcedure, protectedProcedure } from "@/server/trpc";
 import { TRPCError } from "@trpc/server";
 import type { PrismaClient } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { headers } from "next/headers";
 import { exportRateLimiter, deletionRateLimiter } from "@/server/middleware/rateLimit";
 
@@ -14,7 +15,7 @@ export async function writeAuditLog(params: {
   action: "CREATE" | "UPDATE" | "VOID" | "DELETE" | "EXPORT" | "LOGIN" | "LOGOUT";
   entityType: string;
   entityId?: string;
-  after?: Record<string, unknown>;
+  after?: Prisma.InputJsonValue;
 }) {
   try {
     await params.db.auditLog.create({
@@ -24,7 +25,7 @@ export async function writeAuditLog(params: {
         action: params.action,
         entityType: params.entityType,
         entityId: params.entityId ?? "",
-        after: params.after ?? undefined,
+        after: params.after,
       },
     });
   } catch {
