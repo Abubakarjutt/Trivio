@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef, useId } from "react";
+import { useState, useCallback, useRef, useId, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Loader2, Upload, CheckCircle2, XCircle, Image as ImageIcon, BookmarkCheck, ShieldCheck } from "lucide-react";
@@ -43,9 +43,10 @@ interface ImportDialogProps {
   onOpenChange: (open: boolean) => void;
   onComplete: () => void;
   emailImportToken?: string | null;
+  pendingBatch?: { batchId: string; items: { date: string | Date; description: string; amount: number }[] } | null;
 }
 
-export function ImportDialog({ open, onOpenChange, onComplete, emailImportToken }: ImportDialogProps) {
+export function ImportDialog({ open, onOpenChange, onComplete, emailImportToken, pendingBatch }: ImportDialogProps) {
   const [state, setState]               = useState<ImportState>("idle");
   const [file, setFile]                 = useState<File | null>(null);
   const [dragging, setDragging]         = useState(false);
@@ -57,6 +58,14 @@ export function ImportDialog({ open, onOpenChange, onComplete, emailImportToken 
   const [skipDuplicates, setSkipDuplicates] = useState(false);
   const [errorMsg, setErrorMsg]         = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (pendingBatch && open) {
+      setBatchId(pendingBatch.batchId);
+      setDuplicates(pendingBatch.items);
+      setState("duplicates");
+    }
+  }, [pendingBatch, open]);
 
   const reset = () => {
     setState("idle");
