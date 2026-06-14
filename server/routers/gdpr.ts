@@ -24,7 +24,7 @@ export async function writeAuditLog(params: {
         action: params.action,
         entityType: params.entityType,
         entityId: params.entityId ?? "",
-        after: params.after ?? null,
+        after: params.after ?? undefined,
       },
     });
   } catch {
