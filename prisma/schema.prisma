@@ -122,6 +122,7 @@ model Organisation {
   stripeSubscriptionId String?          @unique
   onboardingStep       OnboardingStep   @default(BUSINESS_INFO)
   onboardingComplete   Boolean          @default(false)
+  hasSampleData        Boolean          @default(false)
   emailImportToken     String           @unique @default(cuid())
   plan                 Plan                  @default(FREE)
   lsCustomerId         String?
@@ -681,6 +682,7 @@ model StatementTransaction {
   mccLabel       String
 
   isExcluded     Boolean                  @default(false)
+  isSampleData   Boolean                  @default(false)
   createdAt      DateTime                 @default(now())
   updatedAt      DateTime                 @updatedAt
 
