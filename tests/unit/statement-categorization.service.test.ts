@@ -1,8 +1,8 @@
 /**
  * Unit tests for statement-categorization.service.ts
  *
- * Migrated from Ollama to Gemini API. All tests mock global `fetch` so no
- * real HTTP calls are made.
+ * Migrated from MCC-based to category-name-based AI prompt (Gemini).
+ * All tests mock global `fetch` so no real HTTP calls are made.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
@@ -31,44 +31,44 @@ function geminiResponse(text: string, opts: { thought?: boolean; httpStatus?: nu
 // mapMccToCategory
 // ─────────────────────────────────────────────────────────────────────────────
 describe("mapMccToCategory", () => {
-  it("maps grocery store MCC to Food & Dining", () => {
-expect(mapMccToCategory("5411")).toBe("Food & Dining");
+  it("maps grocery store MCC to Groceries", () => {
+    expect(mapMccToCategory("5411")).toBe("Groceries");
   });
 
-  it("maps restaurant MCC to Food & Dining", () => {
-expect(mapMccToCategory("5812")).toBe("Food & Dining");
+  it("maps restaurant MCC to Restaurants & Cafes", () => {
+    expect(mapMccToCategory("5812")).toBe("Restaurants & Cafes");
   });
 
-  it("maps transport MCC to Transport", () => {
-expect(mapMccToCategory("4121")).toBe("Transport");
+  it("maps taxi MCC to Ride-sharing & Taxis", () => {
+    expect(mapMccToCategory("4121")).toBe("Ride-sharing & Taxis");
   });
 
-  it("maps airline MCC to Travel", () => {
-expect(mapMccToCategory("3001")).toBe("Travel");
+  it("maps airline MCC to Flights", () => {
+    expect(mapMccToCategory("3001")).toBe("Flights");
   });
 
-  it("maps utility MCC to Utilities", () => {
-expect(mapMccToCategory("4911")).toBe("Utilities");
+  it("maps utility MCC to Electricity & Gas", () => {
+    expect(mapMccToCategory("4911")).toBe("Electricity & Gas");
   });
 
-  it("maps software MCC to Business Services", () => {
-expect(mapMccToCategory("7372")).toBe("Business Services");
+  it("maps software MCC to Software & Subscriptions", () => {
+    expect(mapMccToCategory("7372")).toBe("Software & Subscriptions");
   });
 
-  it("maps financial MCC to Financial", () => {
-expect(mapMccToCategory("6010")).toBe("Financial");
+  it("maps financial MCC to Bank Fees & Charges", () => {
+    expect(mapMccToCategory("6010")).toBe("Bank Fees & Charges");
   });
 
-  it("returns Other for unknown MCC", () => {
-expect(mapMccToCategory("9999")).toBe("Other");
+  it("returns empty string for unknown MCC", () => {
+    expect(mapMccToCategory("9999")).toBe("");
   });
 
-  it("returns Other for 0000 fallback code", () => {
-expect(mapMccToCategory("0000")).toBe("Other");
+  it("returns empty string for 0000 fallback code", () => {
+    expect(mapMccToCategory("0000")).toBe("");
   });
 
-  it("returns Other for non-numeric string", () => {
-expect(mapMccToCategory("ABCD")).toBe("Other");
+  it("returns empty string for non-numeric string", () => {
+    expect(mapMccToCategory("ABCD")).toBe("");
   });
 });
 
@@ -77,19 +77,19 @@ expect(mapMccToCategory("ABCD")).toBe("Other");
 // ─────────────────────────────────────────────────────────────────────────────
 describe("buildCategorizationPrompt", () => {
   it("includes all descriptions in the prompt", () => {
-const prompt = buildCategorizationPrompt(["Starbucks", "Netflix", "Amazon"]);
+    const prompt = buildCategorizationPrompt(["Starbucks", "Netflix", "Amazon"]);
     expect(prompt).toContain("Starbucks");
     expect(prompt).toContain("Netflix");
     expect(prompt).toContain("Amazon");
   });
 
   it("states the correct count of descriptions", () => {
-const prompt = buildCategorizationPrompt(["A", "B", "C"]);
+    const prompt = buildCategorizationPrompt(["A", "B", "C"]);
     expect(prompt).toContain("3 objects");
   });
 
   it("instructs to return a JSON array", () => {
-const prompt = buildCategorizationPrompt(["test"]);
+    const prompt = buildCategorizationPrompt(["test"]);
     expect(prompt).toContain("JSON array");
   });
 });
@@ -129,10 +129,10 @@ describe("categorizeBatch", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("parses a successful Gemini response and maps MCC to category", async () => {
+  it("parses a successful Gemini response (category-name shape)", async () => {
     process.env.GEMINI_API_KEY = "test-key";
     const apiPayload = JSON.stringify([
-      { description: "STARBUCKS", merchantName: "Starbucks", mccCode: "5812", mccLabel: "Eating Places/Restaurants" },
+      { description: "STARBUCKS", merchantName: "Starbucks", category: "Restaurants & Cafes" },
     ]);
     vi.mocked(fetch).mockResolvedValue(geminiResponse(apiPayload) as unknown as Response);
 
@@ -140,14 +140,14 @@ describe("categorizeBatch", () => {
     const result = await categorizeBatch(["STARBUCKS"]);
     expect(result).toHaveLength(1);
     expect(result[0].merchantName).toBe("Starbucks");
-    expect(result[0].mccCode).toBe("5812");
-    expect(result[0].category).toBe("Food & Dining");
+    expect(result[0].category).toBe("Restaurants & Cafes");
+    expect(result[0].mccCode).toBe("0000");
   });
 
   it("filters thought parts from thinking-model responses", async () => {
     process.env.GEMINI_API_KEY = "test-key";
     const apiPayload = JSON.stringify([
-      { description: "NETFLIX.COM", merchantName: "Netflix", mccCode: "5735", mccLabel: "Record Stores" },
+      { description: "NETFLIX.COM", merchantName: "Netflix", category: "Movies & Streaming" },
     ]);
     vi.mocked(fetch).mockResolvedValue(
       geminiResponse(apiPayload, { thought: true }) as unknown as Response
@@ -156,18 +156,19 @@ describe("categorizeBatch", () => {
     const { categorizeBatch } = await import("@/server/services/statement-categorization.service");
     const result = await categorizeBatch(["NETFLIX.COM"]);
     expect(result[0].merchantName).toBe("Netflix");
+    expect(result[0].category).toBe("Movies & Streaming");
   });
 
   it("handles JSON wrapped in markdown fences", async () => {
     process.env.GEMINI_API_KEY = "test-key";
     const wrapped = "```json\n" + JSON.stringify([
-      { description: "UBER", merchantName: "Uber", mccCode: "4111", mccLabel: "Local/Suburban Commuter" },
+      { description: "UBER", merchantName: "Uber", category: "Ride-sharing & Taxis" },
     ]) + "\n```";
     vi.mocked(fetch).mockResolvedValue(geminiResponse(wrapped) as unknown as Response);
 
     const { categorizeBatch } = await import("@/server/services/statement-categorization.service");
     const result = await categorizeBatch(["UBER"]);
-    expect(result[0].category).toBe("Transport");
+    expect(result[0].category).toBe("Ride-sharing & Taxis");
   });
 
   it("falls back to Other when Gemini returns malformed JSON", async () => {
@@ -189,10 +190,10 @@ describe("categorizeBatch", () => {
     expect(result[0].category).toBe("Other");
   });
 
-  it("falls back for items missing mccCode in Gemini response", async () => {
+  it("falls back for items with invalid category in Gemini response", async () => {
     process.env.GEMINI_API_KEY = "test-key";
     const apiPayload = JSON.stringify([
-      { description: "Mystery Store", merchantName: "Mystery", mccLabel: "Unknown" }, // no mccCode
+      { description: "Mystery Store", merchantName: "Mystery", category: "Not A Real Category" },
     ]);
     vi.mocked(fetch).mockResolvedValue(geminiResponse(apiPayload) as unknown as Response);
 
@@ -225,14 +226,14 @@ describe("categorizeBatch", () => {
   it("categorizes multiple items correctly in one batch", async () => {
     process.env.GEMINI_API_KEY = "test-key";
     const apiPayload = JSON.stringify([
-      { description: "STARBUCKS", merchantName: "Starbucks", mccCode: "5812", mccLabel: "Restaurants" },
-      { description: "DELTA AIR", merchantName: "Delta Air",  mccCode: "3058", mccLabel: "Airlines"    },
+      { description: "STARBUCKS", merchantName: "Starbucks", category: "Restaurants & Cafes" },
+      { description: "DELTA AIR", merchantName: "Delta Air",  category: "Flights" },
     ]);
     vi.mocked(fetch).mockResolvedValue(geminiResponse(apiPayload) as unknown as Response);
 
     const { categorizeBatch } = await import("@/server/services/statement-categorization.service");
     const result = await categorizeBatch(["STARBUCKS", "DELTA AIR"]);
-    expect(result[0].category).toBe("Food & Dining");
-    expect(result[1].category).toBe("Travel");
+    expect(result[0].category).toBe("Restaurants & Cafes");
+    expect(result[1].category).toBe("Flights");
   });
 });

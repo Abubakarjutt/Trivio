@@ -20,8 +20,10 @@ vi.mock("@/lib/auth", () => ({
 vi.mock("@/lib/db", () => ({
   db: {
     user: { findUnique: vi.fn() },
+    organisation: { findFirst: vi.fn(), update: vi.fn() },
     statementImportBatch: { findFirst: vi.fn(), update: vi.fn() },
-    statementTransaction: { createMany: vi.fn(), count: vi.fn() },
+    statementTransaction: { createMany: vi.fn(), count: vi.fn(), deleteMany: vi.fn() },
+    $transaction: vi.fn(),
   },
 }));
 
@@ -55,6 +57,8 @@ describe("POST /api/pf/import/[batchId]/confirm", () => {
     vi.clearAllMocks();
     vi.mocked(auth).mockResolvedValue({ user: { id: "user-1" } } as never);
     vi.mocked(db.user.findUnique).mockResolvedValue({ organisationId: ORG } as never);
+    // No sample data by default — auto-clear block is skipped
+    vi.mocked(db.organisation.findFirst).mockResolvedValue({ id: ORG, hasSampleData: false } as never);
     vi.mocked(db.statementImportBatch.findFirst).mockResolvedValue({
       id: "batch-1",
       pendingDuplicatesJson: PENDING_DUPES,
