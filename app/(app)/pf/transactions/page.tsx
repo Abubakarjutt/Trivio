@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, Suspense } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
 import { PageHeader } from "@/app/(app)/_components/page-header";
 import { Button } from "@/components/ui/button";
@@ -12,6 +13,25 @@ import { ImportDialog } from "./_components/import-dialog";
 import { TransactionCard } from "./_components/transaction-card";
 import { CATEGORY_DEFINITIONS } from "@/server/services/statement-categorization.service";
 import { MonthPicker, currentMonth } from "@/app/(app)/pf/_components/month-picker";
+
+type PendingBatch = { batchId: string; items: { date: string | Date; description: string; amount: number }[] };
+
+function BatchAutoOpen({ onBatchReady }: { onBatchReady: (b: PendingBatch) => void }) {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const batchParam = searchParams.get("batch");
+  const { data } = trpc.statementTransactions.pendingBatch.useQuery(
+    { batchId: batchParam! },
+    { enabled: !!batchParam, staleTime: Infinity }
+  );
+  useEffect(() => {
+    if (data) {
+      onBatchReady(data);
+      router.replace(window.location.pathname);
+    }
+  }, [data, onBatchReady, router]);
+  return null;
+}
 
 const CATEGORY_COLORS: Record<string, string> = {
   "Food & Dining":     "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300",
@@ -38,6 +58,7 @@ function fmt(n: number) {
 export default function PfTransactionsPage() {
   const utils = trpc.useUtils();
   const [importOpen, setImportOpen] = useState(false);
+  const [pendingBatch, setPendingBatch] = useState<PendingBatch | null>(null);
   const [month, setMonth]           = useState<string | undefined>(() => currentMonth());
   const [category, setCategory]     = useState<string>("__all__");
   const [type, setType]             = useState<string>("__all__");
@@ -85,6 +106,9 @@ export default function PfTransactionsPage() {
 
   return (
     <div className="flex flex-col gap-6 p-6">
+      <Suspense fallback={null}>
+        <BatchAutoOpen onBatchReady={(b) => { setPendingBatch(b); setImportOpen(true); }} />
+      </Suspense>
       <PageHeader
         title="Transactions"
         description="Import bank and credit card statements, then track and categorize your spending."
@@ -269,9 +293,11 @@ export default function PfTransactionsPage() {
 
       <ImportDialog
         open={importOpen}
-        onOpenChange={setImportOpen}
+        onOpenChange={(open) => { setImportOpen(open); if (!open) setPendingBatch(null); }}
         emailImportToken={org?.emailImportToken}
+        pendingBatch={pendingBatch}
         onComplete={() => {
+          setPendingBatch(null);
           setMonth(undefined); // show All time so imported transactions are visible
           setCursor(undefined);
           utils.statementTransactions.list.invalidate();
