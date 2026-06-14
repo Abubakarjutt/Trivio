@@ -1,10 +1,17 @@
+import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { writeAuditLog } from "@/server/routers/gdpr";
 
 export async function POST(req: NextRequest) {
   const secret = req.headers.get("x-cron-secret");
-  if (!secret || secret !== process.env.CRON_SECRET) {
+  const cronSecret = process.env.CRON_SECRET;
+  if (
+    !secret ||
+    !cronSecret ||
+    secret.length !== cronSecret.length ||
+    !timingSafeEqual(Buffer.from(secret), Buffer.from(cronSecret))
+  ) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

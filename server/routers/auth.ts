@@ -2,6 +2,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import bcrypt from "bcryptjs";
 import { createTRPCRouter, publicProcedure, protectedProcedure } from "@/server/trpc";
+import { registerRateLimiter } from "@/server/middleware/rateLimit";
 
 export const authRouter = createTRPCRouter({
   register: publicProcedure
@@ -13,6 +14,13 @@ export const authRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      const { allowed, retryAfterSec } = registerRateLimiter(ctx.ip);
+      if (!allowed) {
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message: `Too many registration attempts. Try again in ${retryAfterSec}s.`,
+        });
+      }
       const existing = await ctx.db.user.findUnique({ where: { email: input.email } });
       if (existing) {
         throw new TRPCError({ code: "CONFLICT", message: "Email already registered" });

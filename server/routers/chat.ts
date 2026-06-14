@@ -2,6 +2,12 @@ import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { createTRPCRouter, orgProcedure } from "../trpc";
 import { processMessage } from "../services/chat.service";
+import { chatRateLimiter } from "@/server/middleware/rateLimit";
+
+/** Strip control characters and HTML-significant chars, truncate to 120 chars */
+function sanitizeForPrompt(input: string): string {
+  return input.replace(/[\r\n\t<>]/g, " ").trim().slice(0, 120);
+}
 
 export const chatRouter = createTRPCRouter({
   sendMessage: orgProcedure
@@ -13,6 +19,9 @@ export const chatRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
+      chatRateLimiter(ctx.organisationId);
+
+      const sanitizedMessage = sanitizeForPrompt(input.message);
       let conversationId = input.conversationId;
 
       if (!conversationId) {
@@ -39,7 +48,7 @@ export const chatRouter = createTRPCRouter({
         organisationId: ctx.organisationId,
         userId: ctx.user.id,
         conversationId,
-        userMessage: input.message,
+        userMessage: sanitizedMessage,
         attachmentId: input.attachmentId,
       });
 

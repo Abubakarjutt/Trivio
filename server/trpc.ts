@@ -1,5 +1,6 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import { type Session } from "next-auth";
+import { type NextRequest } from "next/server";
 import superjson from "superjson";
 import { ZodError } from "zod";
 import { db } from "@/lib/db";
@@ -7,12 +8,18 @@ import { db } from "@/lib/db";
 export interface Context {
   session: Session | null;
   db: typeof db;
+  ip: string;
 }
 
-export async function createTRPCContext(opts: { session: Session | null }): Promise<Context> {
+export async function createTRPCContext(opts: { session: Session | null; req?: NextRequest }): Promise<Context> {
+  const ip =
+    opts.req?.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+    opts.req?.headers.get("x-real-ip") ??
+    "unknown";
   return {
     session: opts.session,
     db,
+    ip,
   };
 }
 
