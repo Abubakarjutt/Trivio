@@ -212,15 +212,16 @@ export const gdprRouter = createTRPCRouter({
       ?? "unknown";
 
     const consentAt = new Date();
-    await ctx.db.user.update({
+    const updatedUser = await ctx.db.user.update({
       where: { id: userId },
       data: { gdprConsentAt: consentAt },
+      select: { organisationId: true },
     });
 
-    if (ctx.organisationId) {
+    if (updatedUser.organisationId) {
       await writeAuditLog({
         db: ctx.db,
-        organisationId: ctx.organisationId,
+        organisationId: updatedUser.organisationId,
         userId,
         action: "CREATE",
         entityType: "GdprConsent",
