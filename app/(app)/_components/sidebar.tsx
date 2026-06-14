@@ -114,7 +114,7 @@ function NavItemComponent({ icon: Icon, href, label, matchPrefix, onNavigate }: 
   );
 }
 
-export function Sidebar({ orgName, onNavigate }: { orgName: string; onNavigate?: () => void }) {
+export function Sidebar({ orgName, hasSampleData, onNavigate }: { orgName: string; hasSampleData?: boolean; onNavigate?: () => void }) {
   return (
     <div
       className="flex flex-col h-full bg-[hsl(var(--sidebar-background))]"
@@ -168,6 +168,19 @@ export function Sidebar({ orgName, onNavigate }: { orgName: string; onNavigate?:
           <LogOut className="h-[15px] w-[15px] shrink-0 text-sidebar-foreground/30" />
           <span>Sign out</span>
         </button>
+        {hasSampleData && (
+          <div className="pt-3">
+            <div className="mx-3 rounded-lg px-3 py-2 text-center"
+              style={{ background: "rgba(201,168,106,0.12)", border: "1px solid rgba(201,168,106,0.3)" }}>
+              <p className="text-xs font-semibold" style={{ color: "#C9A86A", letterSpacing: "0.04em" }}>
+                Demo data active
+              </p>
+              <p className="text-[10px] mt-0.5" style={{ color: "rgba(201,168,106,0.65)" }}>
+                Import a statement to switch to real data
+              </p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

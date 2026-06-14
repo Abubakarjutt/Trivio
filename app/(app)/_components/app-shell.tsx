@@ -5,6 +5,7 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Sidebar } from "./sidebar";
 import { MobileHeader } from "./mobile-header";
 import { ChatPanel } from "./chat-panel";
+import { trpc } from "@/lib/trpc/client";
 
 interface Props {
   orgName: string;
@@ -13,19 +14,21 @@ interface Props {
 
 export function AppShell({ orgName, children }: Props) {
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const { data: org } = trpc.org.get.useQuery(undefined, { staleTime: 60_000 });
+  const hasSampleData = org?.hasSampleData ?? false;
 
   return (
     <div className="flex h-screen overflow-hidden bg-canvas">
       {/* Desktop sidebar */}
       <aside className="hidden md:flex md:shrink-0 shadow-[1px_0_0_0_hsl(220_16%_88%)]">
-        <Sidebar orgName={orgName} />
+        <Sidebar orgName={orgName} hasSampleData={hasSampleData} />
       </aside>
 
       {/* Mobile drawer */}
       <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
         <SheetContent side="left" className="p-0 w-56">
           <SheetTitle className="sr-only">Navigation</SheetTitle>
-          <Sidebar orgName={orgName} onNavigate={() => setDrawerOpen(false)} />
+          <Sidebar orgName={orgName} hasSampleData={hasSampleData} onNavigate={() => setDrawerOpen(false)} />
         </SheetContent>
       </Sheet>
 
