@@ -200,7 +200,7 @@ export const orgRouter = createTRPCRouter({
           organisationId: ctx.organisationId,
           filename: "sample-data.csv",
           fileType: "CSV",
-          status: "COMPLETED",
+          status: "DONE",
           transactionCount: rows.length,
         },
         select: { id: true },
