@@ -93,7 +93,7 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-function ToolResultCard({ result }: { result: ToolResult }) {
+function ToolResultCard({ result, fmt }: { result: ToolResult; fmt: (v: unknown) => string }) {
   if (!result.success) {
     return (
       <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-xs text-red-700">
@@ -760,7 +760,7 @@ function ToolResultCard({ result }: { result: ToolResult }) {
   return null;
 }
 
-function MessageBubble({ message }: { message: Message }) {
+function MessageBubble({ message, fmt }: { message: Message; fmt: (v: unknown) => string }) {
   const isUser = message.role === "user";
   const CARD_TOOLS = new Set([
     "create_invoice", "create_bill", "create_journal_entry",
@@ -789,7 +789,7 @@ function MessageBubble({ message }: { message: Message }) {
           </div>
         )}
         {toolResults.map((r, i) => (
-          <ToolResultCard key={i} result={r} />
+          <ToolResultCard key={i} result={r} fmt={fmt} />
         ))}
       </div>
     </div>
@@ -1112,7 +1112,7 @@ export function ChatPanel() {
               </div>
             )}
             {messages.map((msg) => (
-              <MessageBubble key={msg.id} message={msg} />
+              <MessageBubble key={msg.id} message={msg} fmt={fmt} />
             ))}
             {isStreaming && (
               <div className="flex gap-2.5">
