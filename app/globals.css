@@ -127,15 +127,39 @@
     @apply bg-background text-foreground;
     font-family: var(--font-family-sans);
     font-feature-settings: 'cv11', 'ss01';
+    text-rendering: optimizeLegibility;
+    line-height: 1.6;
   }
 
-  h1, h2, h3 {
+  h1 {
+    font-family: var(--font-family-serif);
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+  }
+
+  h2, h3 {
     font-family: var(--font-family-serif);
     @apply tracking-tight;
   }
 
   h4, h5, h6 {
     @apply tracking-tight;
+  }
+
+  ::selection {
+    background: rgba(201, 168, 106, 0.18);
+    color: hsl(var(--foreground));
+  }
+
+  /* Thin, refined scrollbar */
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(26, 102, 68, 0.12);
+    border-radius: 100px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(26, 102, 68, 0.22);
   }
 }
 

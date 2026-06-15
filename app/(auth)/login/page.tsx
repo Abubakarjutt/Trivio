@@ -6,15 +6,14 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useToast } from "@/lib/hooks/use-toast";
-import { Loader2, ArrowLeft } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
 const FEATURES = [
-  { icon: "↑", label: "Import bank statements & receipts" },
-  { icon: "◈", label: "AI auto-categorisation" },
-  { icon: "▦", label: "Live dashboard & cash flow" },
-  { icon: "◉", label: "Ask your finances anything" },
+  "Import bank statements & receipts",
+  "AI-powered auto-categorisation",
+  "Live dashboard & cash flow",
+  "Ask your finances anything",
 ];
 
 export default function LoginPage() {
@@ -48,167 +47,175 @@ export default function LoginPage() {
 
       {/* ── Left brand panel ── */}
       <div
-        className="hidden lg:flex lg:w-[42%] xl:w-[45%] flex-col relative overflow-hidden"
-        style={{ background: "linear-gradient(160deg, #0a1f14 0%, #0f2e1c 40%, #1A6644 100%)" }}
+        className="hidden lg:flex lg:w-[44%] xl:w-[46%] flex-col relative overflow-hidden"
+        style={{ background: "linear-gradient(170deg, #081B12 0%, #0C2A1B 55%, #0e2d1d 100%)" }}
       >
-        {/* Grid texture */}
-        <div
-          className="absolute inset-0 opacity-[0.06]"
-          style={{
-            backgroundImage: `linear-gradient(rgba(147,196,174,1) 1px, transparent 1px), linear-gradient(90deg, rgba(147,196,174,1) 1px, transparent 1px)`,
-            backgroundSize: "56px 56px",
-          }}
-        />
-
-        {/* Glow orbs */}
-        <div className="absolute -top-24 -left-24 h-96 w-96 rounded-full opacity-20" style={{ background: "radial-gradient(circle, #1A6644, transparent 70%)" }} />
-        <div className="absolute bottom-0 right-0 h-72 w-72 rounded-full opacity-15" style={{ background: "radial-gradient(circle, #2A8A5A, transparent 70%)" }} />
-
-        {/* Decorative floating amounts */}
+        {/* Ledger-line horizontal rule texture */}
         <div className="absolute inset-0 overflow-hidden pointer-events-none select-none">
-          {[
-            { text: "+$3,240", top: "12%", left: "68%", size: "2.5rem" },
-            { text: "-$89.50", top: "31%", left: "5%", size: "1.75rem" },
-            { text: "+$1,800", top: "55%", left: "72%", size: "2rem" },
-            { text: "-$420", top: "72%", left: "8%", size: "1.5rem" },
-            { text: "+$560", top: "85%", left: "55%", size: "1.25rem" },
-          ].map((item, i) => (
-            <span
+          {Array.from({ length: 30 }).map((_, i) => (
+            <div
               key={i}
-              className="absolute font-mono font-bold"
+              className="absolute left-0 right-0"
               style={{
-                top: item.top,
-                left: item.left,
-                fontSize: item.size,
-                color: item.text.startsWith("+") ? "rgba(134,239,172,0.07)" : "rgba(252,165,165,0.07)",
-                animationName: "floatAmount",
-                animationDuration: `${8 + i * 1.5}s`,
-                animationTimingFunction: "ease-in-out",
-                animationIterationCount: "infinite",
-                animationDelay: `${i * 0.8}s`,
+                top: `${i * 3.45}%`,
+                height: "1px",
+                background: "rgba(147,196,174,0.04)",
               }}
-            >
-              {item.text}
-            </span>
+            />
           ))}
         </div>
 
-        <style>{`
-          @keyframes floatAmount {
-            0%, 100% { transform: translateY(0px); }
-            50% { transform: translateY(-12px); }
-          }
-          @keyframes slideUp {
-            from { opacity: 0; transform: translateY(16px); }
-            to { opacity: 1; transform: translateY(0); }
-          }
-        `}</style>
+        {/* Ambient glow */}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background: "radial-gradient(ellipse at 25% 65%, rgba(26,102,68,0.22) 0%, transparent 60%)",
+          }}
+        />
 
         <div className="relative flex flex-col justify-between h-full p-12 xl:p-16">
           {/* Logo */}
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: "rgba(26,102,68,0.25)", boxShadow: "inset 0 0 0 1px rgba(26,102,68,0.4)" }}>
-              <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
-                <path d="M2 2h12v3H2zM2 7h8v2H2zM2 11h5v2H2z" stroke="rgba(147,196,174,0.9)" strokeWidth="1.25" strokeLinejoin="round" fill="none"/>
-                <circle cx="11" cy="12" r="2.5" stroke="rgba(147,196,174,0.9)" strokeWidth="1.25"/>
-                <path d="M11 10.75v1.25l.75.5" stroke="rgba(147,196,174,0.9)" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"/>
+          <div className="flex items-center gap-2.5">
+            <div
+              className="flex h-8 w-8 items-center justify-center rounded-[9px]"
+              style={{ background: "rgba(147,196,174,0.07)", boxShadow: "inset 0 0 0 1px rgba(147,196,174,0.14)" }}
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M2 2h12v3H2zM2 7h8v2H2zM2 11h5v2H2z" stroke="rgba(147,196,174,0.65)" strokeWidth="1.25" strokeLinejoin="round" fill="none"/>
+                <circle cx="11" cy="12" r="2.5" stroke="rgba(147,196,174,0.65)" strokeWidth="1.25"/>
+                <path d="M11 10.75v1.25l.75.5" stroke="rgba(147,196,174,0.65)" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
             </div>
-            <span className="text-white/80 font-semibold tracking-wide text-sm">Trivio</span>
+            <span
+              className="text-xs font-medium"
+              style={{ color: "rgba(244,243,239,0.5)", letterSpacing: "0.12em", textTransform: "uppercase" }}
+            >
+              Trivio
+            </span>
           </div>
 
-          {/* Headline */}
-          <div className="space-y-10">
-            <div>
-              <h1
-                className="text-5xl xl:text-6xl font-bold leading-[1.1] text-white"
-                style={{ fontFamily: "var(--font-display)" }}
-              >
-                Welcome
-                <br />
-                <em className="not-italic" style={{ color: "rgba(42,138,90,0.95)" }}>back.</em>
-              </h1>
-              <p className="mt-5 text-white/45 text-base leading-relaxed max-w-xs">
-                Your financial data is waiting. Pick up right where you left off.
-              </p>
+          {/* Display content */}
+          <div>
+            <h1
+              style={{
+                fontFamily: "var(--font-serif)",
+                fontWeight: 400,
+                fontStyle: "italic",
+                fontSize: "clamp(2.5rem, 4vw, 3.75rem)",
+                lineHeight: 1.05,
+                letterSpacing: "-0.025em",
+                color: "rgba(244,243,239,0.88)",
+                marginBottom: "1.5rem",
+              }}
+            >
+              Books balanced.
+              <br />
+              <span style={{ color: "rgba(147,196,174,0.6)", fontStyle: "normal", fontWeight: 300 }}>
+                Mind cleared.
+              </span>
+            </h1>
+
+            {/* Gold rule divider */}
+            <div className="flex items-center gap-3 mb-9">
+              <div
+                className="h-px w-10"
+                style={{ background: "linear-gradient(90deg, #C9A86A, rgba(201,168,106,0.2))" }}
+              />
+              <div className="w-1 h-1 rounded-full" style={{ background: "rgba(201,168,106,0.45)" }} />
             </div>
 
             {/* Feature list */}
-            <div className="space-y-3">
+            <div className="space-y-4">
               {FEATURES.map((f, i) => (
-                <div
-                  key={i}
-                  className="flex items-center gap-3"
-                  style={{
-                    animationName: "slideUp",
-                    animationDuration: "0.6s",
-                    animationTimingFunction: "cubic-bezier(0.16,1,0.3,1)",
-                    animationFillMode: "both",
-                    animationDelay: `${i * 80}ms`,
-                  }}
-                >
-                  <span
-                    className="flex h-7 w-7 items-center justify-center rounded-lg text-xs font-bold shrink-0"
-                    style={{ background: "rgba(26,102,68,0.2)", color: "rgba(147,196,174,0.9)", boxShadow: "inset 0 0 0 1px rgba(26,102,68,0.3)" }}
-                  >
-                    {f.icon}
-                  </span>
-                  <span className="text-white/55 text-sm">{f.label}</span>
+                <div key={i} className="flex items-center gap-3.5">
+                  <div
+                    className="h-px w-4 shrink-0"
+                    style={{ background: `rgba(201,168,106,${0.3 + i * 0.08})` }}
+                  />
+                  <span className="text-sm" style={{ color: "rgba(244,243,239,0.4)", lineHeight: 1.5 }}>{f}</span>
                 </div>
               ))}
             </div>
           </div>
 
-          <p className="text-white/15 text-xs">© 2026 Trivio · Personal finance made easy</p>
+          <p
+            className="text-xs"
+            style={{ color: "rgba(244,243,239,0.12)", letterSpacing: "0.05em" }}
+          >
+            © 2026 Trivio
+          </p>
         </div>
       </div>
 
       {/* ── Right form panel ── */}
-      <div className="flex flex-1 flex-col bg-white">
+      <div className="flex flex-1 flex-col" style={{ background: "#FDFCF9" }}>
 
         {/* Top bar */}
-        <div className="flex items-center justify-between px-5 py-4 sm:px-8 sm:py-5 border-b border-slate-100">
+        <div className="flex items-center justify-between px-6 py-4 sm:px-10 sm:py-5">
           {/* Mobile logo */}
-          <div className="lg:hidden flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-xl" style={{ background: "rgba(26,102,68,0.1)", boxShadow: "inset 0 0 0 1px rgba(26,102,68,0.2)" }}>
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <div className="lg:hidden flex items-center gap-2">
+            <div
+              className="flex h-7 w-7 items-center justify-center rounded-lg"
+              style={{ background: "rgba(26,102,68,0.07)", boxShadow: "inset 0 0 0 1px rgba(26,102,68,0.13)" }}
+            >
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
                 <path d="M2 2h12v3H2zM2 7h8v2H2zM2 11h5v2H2z" stroke="#1A6644" strokeWidth="1.25" strokeLinejoin="round" fill="none"/>
               </svg>
             </div>
-            <span className="font-semibold text-slate-800 text-sm">Trivio</span>
+            <span className="text-sm font-medium" style={{ color: "#1A6644" }}>Trivio</span>
           </div>
           <div className="hidden lg:block" />
           <Link
             href="https://trivio-ai.com"
-            className="flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-slate-700 transition-colors group"
+            className="text-xs text-muted-foreground/40 hover:text-muted-foreground/70 transition-colors"
+            style={{ letterSpacing: "0.02em" }}
           >
-            <ArrowLeft className="h-3.5 w-3.5 transition-transform group-hover:-translate-x-0.5" />
-            Back to trivio-ai.com
+            trivio-ai.com ↗
           </Link>
         </div>
 
         {/* Form area */}
-        <div className="flex flex-1 items-center justify-center px-5 py-8 sm:px-8 sm:py-12">
-          <div className="w-full max-w-[480px]">
+        <div className="flex flex-1 items-center justify-center px-6 py-10 sm:px-10">
+          <div className="w-full max-w-[400px]">
 
-            {/* Heading */}
-            <div className="mb-6 sm:mb-10">
+            {/* Eyebrow + heading */}
+            <div className="mb-9">
+              <div className="flex items-center gap-2.5 mb-4">
+                <div className="h-px w-5" style={{ background: "#C9A86A" }} />
+                <span
+                  className="text-xs font-medium"
+                  style={{ color: "#C9A86A", letterSpacing: "0.14em", textTransform: "uppercase" }}
+                >
+                  Secure access
+                </span>
+              </div>
               <h2
-                className="text-3xl sm:text-4xl font-bold text-slate-900 leading-tight"
-                style={{ fontFamily: "var(--font-display)" }}
+                style={{
+                  fontFamily: "var(--font-serif)",
+                  fontWeight: 400,
+                  fontSize: "2rem",
+                  letterSpacing: "-0.025em",
+                  lineHeight: 1.2,
+                  color: "#0F1117",
+                  margin: 0,
+                }}
               >
-                Sign in to Trivio
+                Welcome back
               </h2>
-              <p className="mt-2 text-slate-500 text-sm sm:text-base">
-                Enter your credentials to access your dashboard.
+              <p className="mt-2.5 text-sm" style={{ color: "#9CA3AF", lineHeight: 1.5 }}>
+                Sign in to your Trivio account.
               </p>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-5">
-              <div className="space-y-2">
-                <Label htmlFor="email" className="text-xs font-semibold uppercase tracking-widest text-slate-400">
-                  Email address
-                </Label>
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="email"
+                  className="block text-xs font-medium"
+                  style={{ color: "#6B7180", letterSpacing: "0.07em", textTransform: "uppercase" }}
+                >
+                  Email
+                </label>
                 <Input
                   id="email"
                   type="email"
@@ -217,18 +224,24 @@ export default function LoginPage() {
                   onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
                   required
                   autoComplete="email"
-                  className="h-12 text-base border-slate-200 focus:border-green-700 focus:ring-green-700/20"
+                  className="h-11 text-sm bg-white"
+                  style={{ borderColor: "#E4E1D8" }}
                 />
               </div>
 
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <Label htmlFor="password" className="text-xs font-semibold uppercase tracking-widest text-slate-400">
+                  <label
+                    htmlFor="password"
+                    className="block text-xs font-medium"
+                    style={{ color: "#6B7180", letterSpacing: "0.07em", textTransform: "uppercase" }}
+                  >
                     Password
-                  </Label>
+                  </label>
                   <Link
                     href="/forgot-password"
-                    className="text-xs text-green-700 hover:text-green-900 transition-colors font-medium"
+                    className="text-xs font-medium transition-colors"
+                    style={{ color: "#1A6644" }}
                   >
                     Forgot password?
                   </Link>
@@ -241,39 +254,36 @@ export default function LoginPage() {
                   onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
                   required
                   autoComplete="current-password"
-                  className="h-12 text-base border-slate-200 focus:border-green-700 focus:ring-green-700/20"
+                  className="h-11 text-sm bg-white"
+                  style={{ borderColor: "#E4E1D8" }}
                 />
               </div>
 
-              <div className="pt-1">
+              <div className="pt-1.5">
                 <Button
                   type="submit"
                   disabled={loading}
-                  className="w-full h-12 text-base font-semibold rounded-xl"
-                  style={{ background: "#1A6644" }}
+                  className="w-full h-11 text-sm font-medium rounded-xl"
+                  style={{ background: "#1A6644", letterSpacing: "0.01em" }}
                 >
                   {loading && <Loader2 className="animate-spin mr-2 h-4 w-4" />}
-                  {loading ? "Signing in…" : "Sign in →"}
+                  {loading ? "Signing in…" : "Sign in"}
                 </Button>
               </div>
             </form>
 
-            {/* Divider */}
-            <div className="relative my-8">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-slate-100" />
-              </div>
-              <div className="relative flex justify-center">
-                <span className="bg-white px-4 text-xs text-slate-400">Don&apos;t have an account?</span>
-              </div>
+            <div className="mt-8 pt-8" style={{ borderTop: "1px solid #E4E1D8" }}>
+              <p className="text-xs text-center mb-4" style={{ color: "#C4C4C4" }}>
+                New to Trivio?
+              </p>
+              <Link
+                href="/register"
+                className="flex items-center justify-center w-full h-11 rounded-xl text-sm font-medium transition-all hover:border-primary/50 hover:text-foreground"
+                style={{ border: "1.5px solid #E4E1D8", color: "#374151" }}
+              >
+                Create a free account
+              </Link>
             </div>
-
-            <Link
-              href="/register"
-              className="flex items-center justify-center w-full h-12 rounded-xl border-2 border-slate-200 text-slate-700 text-sm font-semibold hover:border-green-600 hover:text-green-700 transition-all"
-            >
-              Create a free account
-            </Link>
 
           </div>
         </div>
