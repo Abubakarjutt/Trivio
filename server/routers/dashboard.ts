@@ -1,11 +1,27 @@
 import { createTRPCRouter, orgProcedure } from "@/server/trpc";
 import { Prisma } from "@prisma/client";
+import { z } from "zod";
+
+const monthInput = z.object({ month: z.string().regex(/^\d{4}-\d{2}$/).optional() });
+
+function monthBounds(month: string | undefined): { startOfMonth: Date; endOfMonth: Date } {
+  if (month) {
+    const [y, m] = month.split("-").map(Number);
+    return {
+      startOfMonth: new Date(y, m - 1, 1),
+      endOfMonth: new Date(y, m, 0, 23, 59, 59, 999),
+    };
+  }
+  const now = new Date();
+  return {
+    startOfMonth: new Date(now.getFullYear(), now.getMonth(), 1),
+    endOfMonth: new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999),
+  };
+}
 
 export const dashboardRouter = createTRPCRouter({
-  getKPIs: orgProcedure.query(async ({ ctx }) => {
-    const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+  getKPIs: orgProcedure.input(monthInput).query(async ({ ctx, input }) => {
+    const { startOfMonth, endOfMonth } = monthBounds(input.month);
 
     const [
       incomeLines,
@@ -186,10 +202,8 @@ export const dashboardRouter = createTRPCRouter({
     }));
   }),
 
-  getExpenseBreakdown: orgProcedure.query(async ({ ctx }) => {
-    const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+  getExpenseBreakdown: orgProcedure.input(monthInput).query(async ({ ctx, input }) => {
+    const { startOfMonth, endOfMonth } = monthBounds(input.month);
 
     const lines = await ctx.db.journalLine.findMany({
       where: {

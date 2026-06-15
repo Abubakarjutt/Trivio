@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Plus, Search, MoreHorizontal, XCircle, Upload, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { CSVImportDialog } from "./_components/csv-import-dialog";
+import { MonthPicker, currentMonth } from "@/app/(app)/_components/month-picker";
 
 function VoidDialog({ entryId, description, onVoided }: { entryId: string; description: string; onVoided: () => void }) {
   const { toast } = useToast();
@@ -61,12 +62,18 @@ export default function TransactionsPage() {
   const [accountId, setAccountId] = useState("");
   const [showVoided, setShowVoided] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [month, setMonth] = useState<string | undefined>(() => currentMonth());
+
+  const dateFrom = month ? new Date(Number(month.split("-")[0]), Number(month.split("-")[1]) - 1, 1) : undefined;
+  const dateTo = month ? new Date(Number(month.split("-")[0]), Number(month.split("-")[1]), 0, 23, 59, 59, 999) : undefined;
 
   const { data, refetch, isFetching } = trpc.transactions.list.useQuery({
     page,
     search: search || undefined,
     accountId: accountId || undefined,
     showVoided,
+    dateFrom,
+    dateTo,
   });
 
   const currency = org?.currency ?? "USD";
@@ -93,6 +100,7 @@ export default function TransactionsPage() {
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">
+        <MonthPicker month={month} onChange={(m) => { setMonth(m); setPage(1); }} />
         <div className="relative flex-1 min-w-48">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input

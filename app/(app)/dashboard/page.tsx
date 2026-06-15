@@ -1,7 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { trpc } from "@/lib/trpc/client";
+import { MonthPicker, currentMonth, fmtMonth } from "@/app/(app)/_components/month-picker";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
@@ -80,10 +82,12 @@ const TOOLTIP_STYLE = {
 };
 
 export default function DashboardPage() {
+  const [month, setMonth] = useState<string | undefined>(() => currentMonth());
+
   const org = trpc.org.get.useQuery();
-  const kpis = trpc.dashboard.getKPIs.useQuery();
+  const kpis = trpc.dashboard.getKPIs.useQuery({ month });
   const trend = trpc.dashboard.getIncomeExpenseTrend.useQuery();
-  const breakdown = trpc.dashboard.getExpenseBreakdown.useQuery();
+  const breakdown = trpc.dashboard.getExpenseBreakdown.useQuery({ month });
   const recent = trpc.dashboard.getRecentTransactions.useQuery();
   const outstanding = trpc.dashboard.getOutstandingInvoices.useQuery();
 
@@ -91,6 +95,7 @@ export default function DashboardPage() {
   const fmt = (v: string | number | undefined) => formatCurrency(Number(v ?? 0), currency);
 
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+  const periodLabel = month ? fmtMonth(month) : "All time";
 
   return (
     <div className="min-h-full">
@@ -104,14 +109,17 @@ export default function DashboardPage() {
           <h1 className="font-serif text-2xl font-medium text-foreground leading-tight">Dashboard</h1>
           <p className="text-xs text-muted-foreground mt-0.5" style={{ color: "rgba(201,168,106,0.8)" }}>{today}</p>
         </div>
-        <Link
-          href="/invoices/new"
-          className="inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all hover:brightness-110 active:scale-95"
-          style={{ background: "#1A6644" }}
-        >
-          <Plus className="h-3.5 w-3.5" />
-          New Invoice
-        </Link>
+        <div className="flex items-center gap-3">
+          <MonthPicker month={month} onChange={setMonth} />
+          <Link
+            href="/invoices/new"
+            className="inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all hover:brightness-110 active:scale-95"
+            style={{ background: "#1A6644" }}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            New Invoice
+          </Link>
+        </div>
       </div>
 
       <div className="p-8 space-y-7 max-w-7xl">
@@ -122,15 +130,15 @@ export default function DashboardPage() {
             Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-[108px]" />)
           ) : (
             <>
-              <KpiCard label="Income"     value={fmt(kpis.data?.monthlyIncome)}   icon={TrendingUp}   iconBg="rgba(26,102,68,0.08)"  iconColor="#1A6644" sub="This month"  delay={0}   />
-              <KpiCard label="Expenses"   value={fmt(kpis.data?.monthlyExpenses)} icon={TrendingDown} iconBg="rgba(192,81,81,0.08)"   iconColor="#C05151" sub="This month"  delay={55}  />
+              <KpiCard label="Income"     value={fmt(kpis.data?.monthlyIncome)}   icon={TrendingUp}   iconBg="rgba(26,102,68,0.08)"  iconColor="#1A6644" sub={periodLabel}  delay={0}   />
+              <KpiCard label="Expenses"   value={fmt(kpis.data?.monthlyExpenses)} icon={TrendingDown} iconBg="rgba(192,81,81,0.08)"   iconColor="#C05151" sub={periodLabel}  delay={55}  />
               <KpiCard
                 label="Net Profit"
                 value={fmt(kpis.data?.netProfit)}
                 icon={DollarSign}
                 iconBg={Number(kpis.data?.netProfit ?? 0) >= 0 ? "rgba(26,102,68,0.08)" : "rgba(192,81,81,0.08)"}
                 iconColor={Number(kpis.data?.netProfit ?? 0) >= 0 ? "#1A6644" : "#C05151"}
-                sub="This month"
+                sub={periodLabel}
                 delay={110}
               />
               <KpiCard label="AR"         value={fmt(kpis.data?.outstandingAR)}  icon={FileText}     iconBg="rgba(201,168,106,0.10)" iconColor="#B8860B" sub="Outstanding" href="/invoices" delay={165} />
@@ -182,7 +190,7 @@ export default function DashboardPage() {
             ) : !breakdown.data?.length ? (
               <div className="flex flex-col items-center justify-center h-52 text-center">
                 <BarChart3 className="h-8 w-8 mb-2" style={{ color: "rgba(147,196,174,0.4)" }} />
-                <p className="text-sm text-muted-foreground">No expenses this month</p>
+                <p className="text-sm text-muted-foreground">No expenses for {periodLabel.toLowerCase()}</p>
               </div>
             ) : (
               <ResponsiveContainer width="100%" height={210}>
