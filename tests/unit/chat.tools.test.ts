@@ -1,4 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// Mock postInvoiceToLedger / postBillToLedger so createInvoice/createBill
+// don't trigger a second db.invoice.findFirst inside the ledger posting step.
+vi.mock("@/server/services/invoice.service", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("@/server/services/invoice.service")>();
+  return { ...mod, postInvoiceToLedger: vi.fn().mockResolvedValue(undefined) };
+});
+vi.mock("@/server/services/bill.service", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("@/server/services/bill.service")>();
+  return { ...mod, postBillToLedger: vi.fn().mockResolvedValue(undefined) };
+});
+
 import { executeToolCall } from "@/server/services/chat.service";
 
 /** Mimics Prisma Decimal so both .toNumber() and Number() work in tests */
@@ -23,7 +35,9 @@ const mockDb = {
     findFirst: vi.fn(),
     findUnique: vi.fn(),
     update: vi.fn(),
+    updateMany: vi.fn(),
   },
+  $transaction: vi.fn(),
   journalLine: {
     findMany: vi.fn(),
   },
@@ -473,23 +487,30 @@ describe("Chat Tool Execution", () => {
     });
 
     it("voids invoice and creates reversal journal entry", async () => {
+      (mockDb.$transaction as ReturnType<typeof vi.fn>).mockImplementation(
+        (fn: (tx: unknown) => Promise<unknown>) => fn(mockDb),
+      );
       (mockDb.invoice.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({
         id: "inv-1",
         number: "INV-0001",
         status: "SENT",
         journalEntryId: "je-orig",
       });
+      (mockDb.journalEntry.updateMany as ReturnType<typeof vi.fn>).mockResolvedValue({ count: 1 });
       (mockDb.journalEntry.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
         id: "je-orig",
         description: "Invoice INV-0001",
+        source: "INVOICE",
+        reference: null,
+        sourceId: "inv-1",
         isVoid: false,
         lines: [
           { accountId: "acc-ar", debit: dec(1000), credit: null, description: "AR" },
           { accountId: "acc-sales", debit: null, credit: dec(1000), description: "Sales" },
         ],
       });
+      (mockDb.journalEntry.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
       (mockDb.journalEntry.create as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "je-rev" });
-      (mockDb.journalEntry.update as ReturnType<typeof vi.fn>).mockResolvedValue({});
       (mockDb.invoice.update as ReturnType<typeof vi.fn>).mockResolvedValue({});
       const r = await call("void_invoice", { invoiceNumber: "INV-0001" });
       expect(r.success).toBe(true);
@@ -507,6 +528,7 @@ describe("Chat Tool Execution", () => {
         status: "DRAFT",
         journalEntryId: null,
       });
+      (mockDb.journalEntry.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
       (mockDb.invoice.update as ReturnType<typeof vi.fn>).mockResolvedValue({});
       const r = await call("void_invoice", { invoiceNumber: "INV-0001" });
       expect(r.success).toBe(true);
@@ -718,23 +740,30 @@ describe("Chat Tool Execution", () => {
     });
 
     it("voids bill and creates reversal entry", async () => {
+      (mockDb.$transaction as ReturnType<typeof vi.fn>).mockImplementation(
+        (fn: (tx: unknown) => Promise<unknown>) => fn(mockDb),
+      );
       (mockDb.bill.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({
         id: "bill-1",
         number: "BILL-0001",
         status: "SENT",
         journalEntryId: "je-orig",
       });
+      (mockDb.journalEntry.updateMany as ReturnType<typeof vi.fn>).mockResolvedValue({ count: 1 });
       (mockDb.journalEntry.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
         id: "je-orig",
         description: "Bill BILL-0001",
+        source: "BILL",
+        reference: null,
+        sourceId: "bill-1",
         isVoid: false,
         lines: [
           { accountId: "acc-exp", debit: dec(500), credit: null, description: "Expense" },
           { accountId: "acc-ap", debit: null, credit: dec(500), description: "AP" },
         ],
       });
+      (mockDb.journalEntry.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
       (mockDb.journalEntry.create as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "je-rev" });
-      (mockDb.journalEntry.update as ReturnType<typeof vi.fn>).mockResolvedValue({});
       (mockDb.bill.update as ReturnType<typeof vi.fn>).mockResolvedValue({});
       const r = await call("void_bill", { billNumber: "BILL-0001" });
       expect(r.success).toBe(true);
@@ -765,17 +794,25 @@ describe("Chat Tool Execution", () => {
     });
 
     it("creates reversal entry and marks original as void", async () => {
-      (mockDb.journalEntry.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({
+      (mockDb.$transaction as ReturnType<typeof vi.fn>).mockImplementation(
+        (fn: (tx: unknown) => Promise<unknown>) => fn(mockDb),
+      );
+      const originalEntry = {
         id: "je-1",
         description: "Salary payment",
+        source: "MANUAL" as const,
+        reference: null,
+        sourceId: null,
         isVoid: false,
         lines: [
           { accountId: "acc-salary", debit: dec(3000), credit: null, description: "Salary" },
           { accountId: "acc-cash", debit: null, credit: dec(3000), description: "Cash" },
         ],
-      });
+      };
+      (mockDb.journalEntry.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(originalEntry);
+      (mockDb.journalEntry.updateMany as ReturnType<typeof vi.fn>).mockResolvedValue({ count: 1 });
+      (mockDb.journalEntry.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(originalEntry);
       (mockDb.journalEntry.create as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "je-rev" });
-      (mockDb.journalEntry.update as ReturnType<typeof vi.fn>).mockResolvedValue({});
       const r = await call("void_transaction", { transactionId: "je-1" });
       expect(r.success).toBe(true);
       expect(r.data).toMatchObject({ id: "je-1", description: "Salary payment" });
@@ -784,8 +821,8 @@ describe("Chat Tool Execution", () => {
       const reversalLines = createCall.data.lines.create as { debit: unknown; credit: unknown }[];
       expect(reversalLines[0].debit).toBeNull();
       expect(reversalLines[0].credit).not.toBeNull();
-      expect(mockDb.journalEntry.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: { isVoid: true } }),
+      expect(mockDb.journalEntry.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ isVoid: true }) }),
       );
     });
   });

@@ -8,7 +8,7 @@ function makePrisma(tier: string, extractionCount: number) {
   const month = new Date().toISOString().slice(0, 7);
   return {
     organisation: {
-      findUniqueOrThrow: vi.fn().mockResolvedValue({ subscriptionTier: tier }),
+      findUniqueOrThrow: vi.fn().mockResolvedValue({ subscriptionTier: tier, plan: tier }),
     },
     usageRecord: {
       findUnique: vi.fn().mockResolvedValue(
@@ -20,12 +20,12 @@ function makePrisma(tier: string, extractionCount: number) {
 }
 
 describe("checkUsageLimits", () => {
-  it("FREE tier: within limits when extractions < 5", async () => {
-    const prisma = makePrisma("FREE", 3);
+  it("FREE tier: within limits when extractions < 3", async () => {
+    const prisma = makePrisma("FREE", 2);
     const result = await checkUsageLimits(prisma, ORG_ID);
     expect(result.withinLimits).toBe(true);
-    expect(result.aiExtractionCount).toBe(3);
-    expect(result.aiExtractionLimit).toBe(5);
+    expect(result.aiExtractionCount).toBe(2);
+    expect(result.aiExtractionLimit).toBe(3);
   });
 
   it("FREE tier: at limit when extractions = 5", async () => {

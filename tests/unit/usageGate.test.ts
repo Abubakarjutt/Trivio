@@ -5,7 +5,7 @@ import { TRPCError } from "@trpc/server";
 function makePrisma(tier: string, count: number) {
   return {
     organisation: {
-      findUniqueOrThrow: vi.fn().mockResolvedValue({ subscriptionTier: tier }),
+      findUniqueOrThrow: vi.fn().mockResolvedValue({ subscriptionTier: tier, plan: tier }),
     },
     usageRecord: {
       findUnique: vi.fn().mockResolvedValue(count > 0 ? { aiExtractionCount: count } : null),
@@ -16,17 +16,17 @@ function makePrisma(tier: string, count: number) {
 
 describe("assertCanExtract", () => {
   it("passes for FREE tier under limit", async () => {
-    const prisma = makePrisma("FREE", 4);
+    const prisma = makePrisma("FREE", 2);
     await expect(assertCanExtract(prisma, "org-1")).resolves.toBeUndefined();
   });
 
-  it("throws FORBIDDEN for FREE tier at limit (5)", async () => {
-    const prisma = makePrisma("FREE", 5);
+  it("throws FORBIDDEN for FREE tier at limit (3)", async () => {
+    const prisma = makePrisma("FREE", 3);
     await expect(assertCanExtract(prisma, "org-1")).rejects.toThrow(TRPCError);
   });
 
   it("throws FORBIDDEN with correct message", async () => {
-    const prisma = makePrisma("FREE", 5);
+    const prisma = makePrisma("FREE", 3);
     try {
       await assertCanExtract(prisma, "org-1");
     } catch (e) {
