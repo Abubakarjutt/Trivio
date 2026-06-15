@@ -73,11 +73,11 @@ export default function TransactionsPage() {
 
   return (
     <div className="min-h-full">
-      <div className="border-b border-border/60 bg-white/60 backdrop-blur-sm px-8 py-5">
+      <div className="sticky top-0 z-10 border-b border-border/40 backdrop-blur-sm px-8 py-4" style={{ background: "rgba(244,243,239,0.95)" }}>
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-serif text-foreground">Transactions</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">All journal entries</p>
+            <h1 className="font-serif text-2xl font-medium text-foreground leading-tight">Transactions</h1>
+            <p className="text-xs text-muted-foreground mt-0.5">All journal entries</p>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={() => setShowImport(true)}>

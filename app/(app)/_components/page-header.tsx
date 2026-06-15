@@ -9,11 +9,15 @@ interface PageHeaderProps {
 
 export function PageHeader({ title, description, action, className }: PageHeaderProps) {
   return (
-    <div className={cn("flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between", className)}>
+    <div className={cn(
+      "sticky top-0 z-10 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between",
+      "border-b border-border/40 px-8 py-4 backdrop-blur-sm",
+      className
+    )} style={{ background: "rgba(244,243,239,0.95)" }}>
       <div>
-        <h1 className="text-xl font-semibold tracking-tight text-foreground">{title}</h1>
+        <h1 className="font-serif text-2xl font-medium text-foreground leading-tight">{title}</h1>
         {description && (
-          <p className="text-sm text-muted-foreground mt-0.5">{description}</p>
+          <p className="text-xs text-muted-foreground mt-0.5 tracking-wide">{description}</p>
         )}
       </div>
       {action && <div className="shrink-0">{action}</div>}

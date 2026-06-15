@@ -28,10 +28,10 @@ export default async function SettingsPage() {
   return (
     <div className="flex flex-col min-h-full">
       {/* Header */}
-      <header className="sticky top-0 z-10 flex items-center justify-between gap-4 border-b border-border/40 bg-background/95 backdrop-blur px-8 py-4">
+      <header className="sticky top-0 z-10 flex items-center justify-between gap-4 border-b border-border/40 backdrop-blur px-8 py-4" style={{ background: "rgba(244,243,239,0.95)" }}>
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
-          <p className="text-sm text-muted-foreground">Manage your account and organisation</p>
+          <h1 className="font-serif text-2xl font-medium text-foreground leading-tight">Settings</h1>
+          <p className="text-xs text-muted-foreground">Manage your account and organisation</p>
         </div>
       </header>
 

@@ -139,7 +139,11 @@
   }
 }
 
-/* ── Hero stagger animations ── */
+/* ── Page / hero stagger animations ── */
+@keyframes ledger-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
 @keyframes fadeSlideUp {
   from { opacity: 0; transform: translateY(18px); }
   to   { opacity: 1; transform: translateY(0); }
@@ -148,6 +152,16 @@
   from { opacity: 0; }
   to   { opacity: 1; }
 }
+
+.rise   { animation: ledger-rise 0.45s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.rise-0 { animation-delay: 0ms; }
+.rise-1 { animation-delay: 55ms; }
+.rise-2 { animation-delay: 110ms; }
+.rise-3 { animation-delay: 165ms; }
+.rise-4 { animation-delay: 220ms; }
+.rise-5 { animation-delay: 275ms; }
+.rise-6 { animation-delay: 330ms; }
+
 .hero-animate {
   animation: fadeSlideUp 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
@@ -157,6 +171,12 @@
 .hero-animate-4  { animation-delay: 280ms; }
 .hero-animate-5  { animation-delay: 360ms; }
 .hero-animate-6  { animation-delay: 480ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  .rise, .rise-0, .rise-1, .rise-2, .rise-3, .rise-4, .rise-5, .rise-6 {
+    animation: none;
+  }
+}
 
 .toast-in {
   animation: fadeSlideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;

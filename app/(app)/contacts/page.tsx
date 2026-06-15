@@ -116,11 +116,11 @@ export default function ContactsPage() {
 
   return (
     <div className="min-h-full">
-      <div className="border-b border-border/60 bg-white/60 backdrop-blur-sm px-8 py-5">
+      <div className="sticky top-0 z-10 border-b border-border/40 backdrop-blur-sm px-8 py-4" style={{ background: "rgba(244,243,239,0.95)" }}>
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-serif text-foreground">Contacts</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">Customers and suppliers</p>
+            <h1 className="font-serif text-2xl font-medium text-foreground leading-tight">Contacts</h1>
+            <p className="text-xs text-muted-foreground mt-0.5">Customers and suppliers</p>
           </div>
         <Dialog open={createOpen} onOpenChange={setCreateOpen}>
           <DialogTrigger asChild>

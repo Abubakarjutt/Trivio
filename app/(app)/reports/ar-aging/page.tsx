@@ -15,9 +15,9 @@ export default function ARAgingPage() {
 
   return (
     <div className="min-h-full">
-      <div className="border-b border-border/60 bg-white/60 backdrop-blur-sm px-8 py-5">
-        <h1 className="text-2xl font-serif text-foreground">AR Aging</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Outstanding customer balances grouped by days past due</p>
+      <div className="sticky top-0 z-10 border-b border-border/40 backdrop-blur-sm px-8 py-4" style={{ background: "rgba(244,243,239,0.95)" }}>
+        <h1 className="font-serif text-2xl font-medium text-foreground leading-tight">AR Aging</h1>
+        <p className="text-xs text-muted-foreground mt-0.5">Outstanding customer balances grouped by days past due</p>
       </div>
       <div className="p-8 space-y-6">
 
