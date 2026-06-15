@@ -67,11 +67,11 @@ export default function ProfitLossPage() {
 
   return (
     <div className="min-h-full">
-      <div className="sticky top-0 z-10 border-b border-border/60 bg-background/95 backdrop-blur px-8 py-5">
+      <div className="sticky top-0 z-10 border-b border-border/40 backdrop-blur-sm px-8 py-4" style={{ background: "rgba(244,243,239,0.95)" }}>
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-serif text-foreground">Profit &amp; Loss</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">Income and expenses for a period</p>
+            <h1 className="font-serif text-2xl font-medium text-foreground leading-tight">Profit &amp; Loss</h1>
+            <p className="text-xs text-muted-foreground mt-0.5">Income and expenses for a period</p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="w-36 text-sm" />
@@ -96,26 +96,20 @@ export default function ProfitLossPage() {
           <>
             {/* Summary KPI cards */}
             <div className="grid grid-cols-3 gap-4">
-              <Card className="rounded-2xl border border-border/40 shadow-sm">
-                <CardContent className="pt-4">
-                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-[0.08em]">Total Income</p>
-                  <p className="text-2xl font-mono font-semibold text-emerald-600 mt-1">{fmt(data.totalIncome)}</p>
-                </CardContent>
-              </Card>
-              <Card className="rounded-2xl border border-border/40 shadow-sm">
-                <CardContent className="pt-4">
-                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-[0.08em]">Total Expenses</p>
-                  <p className="text-2xl font-mono font-semibold text-red-600 mt-1">{fmt(data.totalExpenses)}</p>
-                </CardContent>
-              </Card>
-              <Card className="rounded-2xl border border-border/40 shadow-sm">
-                <CardContent className="pt-4">
-                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-[0.08em]">Net Profit</p>
-                  <p className={`text-2xl font-mono font-semibold mt-1 ${netProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
-                    {fmt(data.netProfit)}
-                  </p>
-                </CardContent>
-              </Card>
+              {[
+                { label: "Total Income",   value: fmt(data.totalIncome),   color: "#1A6644" },
+                { label: "Total Expenses", value: fmt(data.totalExpenses), color: "#C05151" },
+                { label: "Net Profit",     value: fmt(data.netProfit),     color: netProfit >= 0 ? "#1A6644" : "#C05151" },
+              ].map((k) => (
+                <div
+                  key={k.label}
+                  className="rounded-2xl bg-white p-5"
+                  style={{ boxShadow: "0 0 0 1px rgba(15,17,23,0.04), 0 1px 2px rgba(15,17,23,0.04), 0 8px 24px -8px rgba(15,17,23,0.08)" }}
+                >
+                  <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground/70">{k.label}</p>
+                  <p className="font-serif text-2xl font-medium num mt-2" style={{ color: k.color }}>{k.value}</p>
+                </div>
+              ))}
             </div>
 
             {/* Income section */}
@@ -195,14 +189,18 @@ export default function ProfitLossPage() {
             </Card>
 
             {/* Net Profit row */}
-            <Card className={`rounded-2xl border shadow-sm ${netProfit >= 0 ? "border-emerald-200 bg-emerald-50/50" : "border-red-200 bg-red-50/50"}`}>
-              <CardContent className="py-4 flex items-center justify-between">
-                <span className="font-semibold text-base">Net Profit / (Loss)</span>
-                <span className={`font-mono text-2xl font-bold tabular-nums ${netProfit >= 0 ? "text-emerald-600" : "text-red-600"}`}>
-                  {fmt(data.netProfit)}
-                </span>
-              </CardContent>
-            </Card>
+            <div
+              className="rounded-2xl p-5 flex items-center justify-between"
+              style={{
+                background: netProfit >= 0 ? "rgba(26,102,68,0.05)" : "rgba(192,81,81,0.05)",
+                border: `1px solid ${netProfit >= 0 ? "rgba(26,102,68,0.15)" : "rgba(192,81,81,0.15)"}`,
+              }}
+            >
+              <span className="font-serif text-base font-medium text-foreground">Net Profit / (Loss)</span>
+              <span className="num text-2xl font-semibold tabular-nums" style={{ color: netProfit >= 0 ? "#1A6644" : "#C05151" }}>
+                {fmt(data.netProfit)}
+              </span>
+            </div>
           </>
         )}
       </div>

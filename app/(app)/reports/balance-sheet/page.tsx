@@ -83,11 +83,11 @@ export default function BalanceSheetPage() {
 
   return (
     <div className="min-h-full">
-      <div className="sticky top-0 z-10 border-b border-border/60 bg-background/95 backdrop-blur px-8 py-5">
+      <div className="sticky top-0 z-10 border-b border-border/40 backdrop-blur-sm px-8 py-4" style={{ background: "rgba(244,243,239,0.95)" }}>
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-serif text-foreground">Balance Sheet</h1>
-            <p className="text-sm text-muted-foreground mt-0.5">Financial position as of a date</p>
+            <h1 className="font-serif text-2xl font-medium text-foreground leading-tight">Balance Sheet</h1>
+            <p className="text-xs text-muted-foreground mt-0.5">Financial position as of a date</p>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-sm text-muted-foreground">As of</span>

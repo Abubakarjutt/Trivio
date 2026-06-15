@@ -14,10 +14,10 @@ function fmt(n: number) {
   return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  ACTIVE: "text-blue-600 bg-blue-50 border-blue-200",
-  COMPLETED: "text-emerald-600 bg-emerald-50 border-emerald-200",
-  CANCELLED: "text-slate-500 bg-slate-50 border-slate-200",
+const STATUS_STYLE: Record<string, React.CSSProperties> = {
+  ACTIVE:    { color: "#1A6644",  background: "rgba(26,102,68,0.08)",   border: "1px solid rgba(26,102,68,0.2)" },
+  COMPLETED: { color: "#2E7D52",  background: "rgba(147,196,174,0.15)", border: "1px solid rgba(147,196,174,0.35)" },
+  CANCELLED: { color: "#9CA3AF",  background: "rgba(156,163,175,0.08)", border: "1px solid rgba(156,163,175,0.2)" },
 };
 
 export default function GoalsPage() {
@@ -70,12 +70,16 @@ export default function GoalsPage() {
         <div className="grid grid-cols-3 gap-4">
           {[
             { label: "Total target", value: fmt(totalTarget) },
-            { label: "Total saved", value: fmt(totalSaved) },
+            { label: "Total saved",  value: fmt(totalSaved) },
             { label: "Still needed", value: fmt(Math.max(0, totalTarget - totalSaved)) },
           ].map((c) => (
-            <div key={c.label} className="rounded-xl border bg-card p-4">
-              <p className="text-xs text-muted-foreground">{c.label}</p>
-              <p className="text-2xl font-semibold tabular-nums mt-1">{c.value}</p>
+            <div
+              key={c.label}
+              className="rounded-2xl bg-white p-5"
+              style={{ boxShadow: "0 0 0 1px rgba(15,17,23,0.04), 0 1px 2px rgba(15,17,23,0.04), 0 8px 24px -8px rgba(15,17,23,0.08)" }}
+            >
+              <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground/70">{c.label}</p>
+              <p className="font-serif text-2xl font-medium tabular-nums mt-2 text-foreground">{c.value}</p>
             </div>
           ))}
         </div>
@@ -103,26 +107,33 @@ export default function GoalsPage() {
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {goals.map((g) => (
-            <div key={g.id} className="rounded-xl border bg-card p-5 flex flex-col gap-3">
+            <div
+              key={g.id}
+              className="rounded-2xl bg-white p-5 flex flex-col gap-3"
+              style={{ boxShadow: "0 0 0 1px rgba(15,17,23,0.04), 0 1px 2px rgba(15,17,23,0.04), 0 8px 24px -8px rgba(15,17,23,0.08)" }}
+            >
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <p className="font-semibold">{g.name}</p>
+                  <p className="font-medium text-foreground">{g.name}</p>
                   {g.description && <p className="text-xs text-muted-foreground mt-0.5">{g.description}</p>}
                   {g.targetDate && (
                     <p className="text-xs text-muted-foreground mt-0.5">Due: {new Date(g.targetDate).toLocaleDateString()}</p>
                   )}
                 </div>
-                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${STATUS_COLORS[g.status] ?? ""}`}>
+                <span
+                  className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+                  style={STATUS_STYLE[g.status] ?? {}}
+                >
                   {g.status}
                 </span>
               </div>
 
               {/* Progress bar */}
               <div>
-                <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+                <div className="h-2 w-full rounded-full overflow-hidden" style={{ background: "rgba(228,225,216,0.6)" }}>
                   <div
-                    className={`h-full rounded-full transition-all ${g.status === "COMPLETED" ? "bg-emerald-500" : "bg-primary"}`}
-                    style={{ width: `${g.progress}%` }}
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{ width: `${g.progress}%`, background: g.status === "COMPLETED" ? "#93C4AE" : "#1A6644" }}
                   />
                 </div>
                 <div className="flex justify-between text-xs mt-1.5">

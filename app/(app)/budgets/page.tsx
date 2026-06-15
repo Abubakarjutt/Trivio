@@ -19,10 +19,13 @@ function fmt(n: number) {
 }
 
 function UtilBar({ pct }: { pct: number }) {
-  const color = pct >= 100 ? "bg-red-500" : pct >= 80 ? "bg-amber-500" : "bg-emerald-500";
+  const fillColor = pct >= 100 ? "#C05151" : pct >= 80 ? "#C9A86A" : "#1A6644";
   return (
-    <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
-      <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+    <div className="h-1.5 w-full rounded-full overflow-hidden" style={{ background: "rgba(228,225,216,0.6)" }}>
+      <div
+        className="h-full rounded-full transition-all duration-500"
+        style={{ width: `${Math.min(pct, 100)}%`, background: fillColor }}
+      />
     </div>
   );
 }
@@ -96,14 +99,18 @@ export default function BudgetsPage() {
       {budgets.length > 0 && (
         <div className="grid grid-cols-3 gap-4">
           {[
-            { label: "Total budget", value: fmt(totalLimit), sub: "across all categories" },
-            { label: "Total spent", value: fmt(totalSpent), sub: "this period" },
-            { label: "Remaining", value: fmt(Math.max(0, totalLimit - totalSpent)), sub: "available to spend" },
+            { label: "Total budget", value: fmt(totalLimit), sub: "across all categories", iconColor: "#C9A86A", iconBg: "rgba(201,168,106,0.10)" },
+            { label: "Total spent",  value: fmt(totalSpent), sub: "this period",           iconColor: "#C05151", iconBg: "rgba(192,81,81,0.08)" },
+            { label: "Remaining",    value: fmt(Math.max(0, totalLimit - totalSpent)), sub: "available to spend", iconColor: "#1A6644", iconBg: "rgba(26,102,68,0.08)" },
           ].map((card) => (
-            <div key={card.label} className="rounded-xl border bg-card p-4">
-              <p className="text-xs text-muted-foreground">{card.label}</p>
-              <p className="text-2xl font-semibold tabular-nums mt-1">{card.value}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">{card.sub}</p>
+            <div
+              key={card.label}
+              className="rounded-2xl bg-white p-5"
+              style={{ boxShadow: "0 0 0 1px rgba(15,17,23,0.04), 0 1px 2px rgba(15,17,23,0.04), 0 8px 24px -8px rgba(15,17,23,0.08)" }}
+            >
+              <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground/70">{card.label}</p>
+              <p className="font-serif text-2xl font-medium tabular-nums mt-2 text-foreground">{card.value}</p>
+              <p className="text-xs text-muted-foreground mt-1">{card.sub}</p>
             </div>
           ))}
         </div>
@@ -122,17 +129,21 @@ export default function BudgetsPage() {
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {budgets.map((b) => (
-            <div key={b.id} className="rounded-xl border bg-card p-5 flex flex-col gap-3">
+            <div
+              key={b.id}
+              className="rounded-2xl bg-white p-5 flex flex-col gap-3"
+              style={{ boxShadow: "0 0 0 1px rgba(15,17,23,0.04), 0 1px 2px rgba(15,17,23,0.04), 0 8px 24px -8px rgba(15,17,23,0.08)" }}
+            >
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <p className="font-semibold">{b.name}</p>
+                  <p className="font-medium text-foreground">{b.name}</p>
                   <p className="text-xs text-muted-foreground mt-0.5">{b.category} · {b.period.charAt(0) + b.period.slice(1).toLowerCase()}</p>
                 </div>
                 <div className="flex gap-1 shrink-0">
                   <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => archive.mutate({ id: b.id })} title="Archive">
                     <Archive className="h-3.5 w-3.5" />
                   </Button>
-                  <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => del.mutate({ id: b.id })} title="Delete">
+                  <Button variant="ghost" size="icon" className="h-7 w-7" style={{ color: "#C05151" }} onClick={() => del.mutate({ id: b.id })} title="Delete">
                     <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </div>
@@ -140,12 +151,15 @@ export default function BudgetsPage() {
               <UtilBar pct={b.utilization} />
               <div className="flex justify-between text-xs">
                 <span className="text-muted-foreground">Spent {fmt(b.spent)}</span>
-                <span className={b.utilization >= 100 ? "text-red-600 font-semibold" : b.utilization >= 80 ? "text-amber-600 font-medium" : "font-medium"}>
+                <span
+                  className="font-medium"
+                  style={{ color: b.utilization >= 100 ? "#C05151" : b.utilization >= 80 ? "#C9A86A" : "#1A6644" }}
+                >
                   {b.utilization}% of {fmt(b.limitAmount)}
                 </span>
               </div>
               {b.utilization >= 100 && (
-                <p className="text-xs text-red-600 font-medium">⚠ Over budget by {fmt(b.spent - b.limitAmount)}</p>
+                <p className="text-xs font-medium" style={{ color: "#C05151" }}>Over budget by {fmt(b.spent - b.limitAmount)}</p>
               )}
             </div>
           ))}
