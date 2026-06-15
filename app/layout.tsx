@@ -27,7 +27,7 @@ const dmMono = DM_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AutoAccounts — Accounting made simple",
+  title: "Trivio — Accounting made simple",
   description: "Smart accounting for freelancers and small businesses",
 };
 

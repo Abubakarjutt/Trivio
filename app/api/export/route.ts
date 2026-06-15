@@ -138,7 +138,7 @@ export async function GET(request: NextRequest) {
     status: 200,
     headers: {
       "Content-Type": "application/zip",
-      "Content-Disposition": `attachment; filename="autoaccounts-export-${new Date().toISOString().slice(0, 10)}.zip"`,
+      "Content-Disposition": `attachment; filename="trivio-export-${new Date().toISOString().slice(0, 10)}.zip"`,
     },
   });
 }

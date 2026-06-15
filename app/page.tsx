@@ -52,7 +52,7 @@ export default async function HomePage() {
               </svg>
             </div>
             <span className="font-semibold text-sm tracking-wide" style={{ color: "hsl(220 20% 92%)" }}>
-              AutoAccounts
+              Trivio
             </span>
           </div>
 
@@ -245,7 +245,7 @@ export default async function HomePage() {
               </div>
               <div className="flex-1 mx-4 rounded-md h-6 flex items-center px-3" style={{ background: "hsl(222 35% 10%)" }}>
                 <span className="text-[10px] font-mono" style={{ color: "hsl(220 15% 38%)" }}>
-                  app.autoaccounts.io/dashboard
+                  app.trivio-ai.com/dashboard
                 </span>
               </div>
             </div>
@@ -326,7 +326,7 @@ export default async function HomePage() {
         <div className="max-w-5xl mx-auto px-6">
           <div className="grid grid-cols-2 md:grid-cols-4 divide-x" style={{ borderColor: "hsl(220 16% 88%)" }}>
             {[
-              { value: "2,400+", label: "Businesses using AutoAccounts", sub: "across 40+ countries" },
+              { value: "2,400+", label: "Businesses using Trivio", sub: "across 40+ countries" },
               { value: "$2.4B+", label: "Transactions processed", sub: "this fiscal year" },
               { value: "98.7%", label: "Uptime last 12 months", sub: "SLA-backed guarantee" },
               { value: "< 2 min", label: "Average setup time", sub: "from signup to first entry" },
@@ -373,7 +373,7 @@ export default async function HomePage() {
                 step: "01",
                 icon: Upload,
                 title: "Upload a document",
-                desc: "Drag in a receipt photo, bank PDF, or invoice. AutoAccounts accepts images, PDFs, and scanned documents — no formatting required.",
+                desc: "Drag in a receipt photo, bank PDF, or invoice. Trivio accepts images, PDFs, and scanned documents — no formatting required.",
                 accent: "hsl(221 78% 38%)",
                 bg: "hsl(221 78% 38% / 0.08)",
               },
@@ -534,7 +534,7 @@ export default async function HomePage() {
                 We handle the rest.
               </h2>
               <p className="mt-4 text-base leading-relaxed" style={{ color: "hsl(220 12% 48%)" }}>
-                Upload a photo of your receipt or invoice. AutoAccounts reads it, categorises the
+                Upload a photo of your receipt or invoice. Trivio reads it, categorises the
                 expense, and drafts the journal entry — ready for your approval in seconds.
               </p>
               <ul className="mt-6 space-y-3">
@@ -664,7 +664,7 @@ export default async function HomePage() {
           <div className="grid md:grid-cols-3 gap-5">
             {[
               {
-                quote: "I used to spend 3 hours a week on bookkeeping. AutoAccounts cut that to 20 minutes. The AI extraction alone is worth it.",
+                quote: "I used to spend 3 hours a week on bookkeeping. Trivio cut that to 20 minutes. The AI extraction alone is worth it.",
                 name: "Sarah K.",
                 role: "Freelance Designer",
                 rating: 5,
@@ -794,7 +794,7 @@ export default async function HomePage() {
                 <path d="M2 3h12M2 8h8M2 13h5" stroke="hsl(221 78% 70%)" strokeWidth="1.75" strokeLinecap="round" />
               </svg>
             </div>
-            <span className="text-sm font-semibold" style={{ color: "hsl(220 20% 55%)" }}>AutoAccounts</span>
+            <span className="text-sm font-semibold" style={{ color: "hsl(220 20% 55%)" }}>Trivio</span>
           </div>
 
           <div className="flex items-center gap-6">
@@ -811,7 +811,7 @@ export default async function HomePage() {
           </div>
 
           <p className="text-xs font-mono" style={{ color: "hsl(220 20% 28%)" }}>
-            © 2026 AutoAccounts
+            © 2026 Trivio
           </p>
         </div>
       </footer>

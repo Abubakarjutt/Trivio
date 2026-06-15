@@ -22,6 +22,7 @@ import {
   Target,
   RefreshCw,
   Eye,
+  FileStack,
   Users2,
   UserPlus,
   Building2,
@@ -70,6 +71,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "Transactions", href: "/pf/transactions", icon: CreditCard, matchPrefix: true },
       { label: "Budgets", href: "/budgets", icon: TrendingUp, matchPrefix: true },
+      { label: "Tax Report", href: "/pf/tax-report", icon: FileStack, matchPrefix: true },
       { label: "Goals", href: "/goals", icon: Target, matchPrefix: true },
       { label: "Recurring", href: "/recurring", icon: RefreshCw, matchPrefix: true },
       { label: "Watchlists", href: "/watchlists", icon: Eye, matchPrefix: true },
@@ -130,7 +132,7 @@ export function Sidebar({ orgName, hasSampleData, onNavigate }: { orgName: strin
           </svg>
         </div>
         <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-sidebar-foreground/35">AutoAccounts</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-sidebar-foreground/35">Trivio</p>
           <p className="text-sm font-semibold text-sidebar-foreground truncate leading-tight">{orgName}</p>
         </div>
       </div>

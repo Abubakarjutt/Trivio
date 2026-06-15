@@ -216,7 +216,7 @@ export default function OnboardingPage() {
         {/* Header */}
         <div className="text-center space-y-2">
           <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold text-lg">A</div>
-          <h1 className="text-2xl font-bold">Set up AutoAccounts</h1>
+          <h1 className="text-2xl font-bold">Set up Trivio</h1>
           <p className="text-muted-foreground text-sm">
             {step < 3 ? `Step ${step} of 3 — takes about 2 minutes` : "Step 3 of 3 — choose how to begin"}
           </p>

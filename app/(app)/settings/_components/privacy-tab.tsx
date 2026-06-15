@@ -13,7 +13,7 @@ function DataExportCard() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `autoaccounts-export-${new Date().toISOString().slice(0, 10)}.json`;
+      a.download = `trivio-export-${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
       toast.success("Export downloaded");
@@ -203,8 +203,8 @@ export function PrivacyTab() {
       <DeleteAccountCard />
       <p className="text-xs text-muted-foreground pt-2">
         Questions? Email{" "}
-        <a href="mailto:privacy@autoaccounts.app" className="underline hover:text-foreground">
-          privacy@autoaccounts.app
+        <a href="mailto:privacy@trivio-ai.com" className="underline hover:text-foreground">
+          privacy@trivio-ai.com
         </a>
         {" "}or read our{" "}
         <Link href="/privacy" className="underline hover:text-foreground">Privacy Policy</Link>.

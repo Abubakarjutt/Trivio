@@ -159,7 +159,7 @@ export default function RegisterPage() {
                 <path d="M11 10.75v1.25l.75.5" stroke="rgba(147,196,174,0.9)" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
             </div>
-            <span className="text-white/80 font-semibold tracking-wide text-sm">AutoAccounts</span>
+            <span className="text-white/80 font-semibold tracking-wide text-sm">Trivio</span>
           </div>
 
           {/* Headline */}
@@ -209,13 +209,13 @@ export default function RegisterPage() {
               style={{ background: "rgba(255,255,255,0.04)", boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.07)" }}
             >
               <p className="text-white/65 text-sm italic leading-relaxed">
-                &ldquo;I finally stopped dreading my monthly accounting. AutoAccounts does in seconds what used to take me an entire afternoon.&rdquo;
+                &ldquo;I finally stopped dreading my monthly accounting. Trivio does in seconds what used to take me an entire afternoon.&rdquo;
               </p>
               <p className="mt-3 text-white/30 text-xs font-medium tracking-wide">— SARAH K. · INDEPENDENT CONSULTANT</p>
             </div>
           </div>
 
-          <p className="text-white/15 text-xs">© 2026 AutoAccounts · Free to start</p>
+          <p className="text-white/15 text-xs">© 2026 Trivio · Free to start</p>
         </div>
       </div>
 
@@ -231,15 +231,15 @@ export default function RegisterPage() {
                 <path d="M2 2h12v3H2zM2 7h8v2H2zM2 11h5v2H2z" stroke="#1A6644" strokeWidth="1.25" strokeLinejoin="round" fill="none"/>
               </svg>
             </div>
-            <span className="font-semibold text-slate-800 text-sm">AutoAccounts</span>
+            <span className="font-semibold text-slate-800 text-sm">Trivio</span>
           </div>
           <div className="hidden lg:block" />
           <Link
-            href="https://autoaccounts.app"
+            href="https://trivio-ai.com"
             className="flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-slate-700 transition-colors group"
           >
             <ArrowLeft className="h-3.5 w-3.5 transition-transform group-hover:-translate-x-0.5" />
-            Back to autoaccounts.app
+            Back to trivio-ai.com
           </Link>
         </div>
 

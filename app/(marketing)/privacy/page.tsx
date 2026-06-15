@@ -1,11 +1,11 @@
 import Link from "next/link";
 
-export const metadata = { title: "Privacy Policy — AutoAccounts" };
+export const metadata = { title: "Privacy Policy — Trivio" };
 
 const LAST_UPDATED = "6 June 2026";
-const CONTACT_EMAIL = "privacy@autoaccounts.app";
-const APP_NAME = "AutoAccounts";
-const COMPANY = "AutoAccounts";
+const CONTACT_EMAIL = "privacy@trivio-ai.com";
+const APP_NAME = "Trivio";
+const COMPANY = "Trivio";
 
 export default function PrivacyPolicyPage() {
   return (

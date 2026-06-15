@@ -156,6 +156,16 @@ export const orgRouter = createTRPCRouter({
       return { success: true };
     }),
 
+  setTaxJurisdiction: orgProcedure
+    .input(z.object({ jurisdiction: z.string().nullable() }))
+    .mutation(async ({ ctx, input }) => {
+      await ctx.db.organisation.update({
+        where: { id: ctx.organisationId },
+        data: { taxJurisdiction: input.jurisdiction },
+      });
+      return { success: true };
+    }),
+
   resetEmailImportToken: orgProcedure.mutation(async ({ ctx }) => {
     const { createId } = await import("@paralleldrive/cuid2");
     const newToken = createId();

@@ -131,8 +131,9 @@ model Organisation {
   createdAt            DateTime         @default(now())
   updatedAt            DateTime         @updatedAt
 
-  taxRegimeId String?
-  taxRegime   TaxRegime? @relation(fields: [taxRegimeId], references: [id])
+  taxJurisdiction String?
+  taxRegimeId     String?
+  taxRegime       TaxRegime? @relation(fields: [taxRegimeId], references: [id])
 
   users             User[]
   chartAccounts     ChartAccount[]
