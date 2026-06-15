@@ -6,6 +6,7 @@ import { CreditCard, User, Building2, ChevronRight, Download, Globe } from "luci
 import { EmailImportCard } from "./_components/email-import-card";
 import { PrivacyTab } from "./_components/privacy-tab";
 import { JurisdictionPicker } from "./_components/jurisdiction-picker";
+import { CurrencyPicker } from "./_components/currency-picker";
 
 export default async function SettingsPage() {
   const session = await auth();
@@ -65,16 +66,16 @@ export default async function SettingsPage() {
               </div>
               <h2 className="font-semibold">Organisation</h2>
             </div>
-            <dl className="grid grid-cols-2 gap-3 text-sm">
+            <div className="grid grid-cols-1 gap-4 text-sm">
               <div>
                 <dt className="text-[10px] font-bold uppercase tracking-[0.08em] text-muted-foreground mb-0.5">Name</dt>
                 <dd className="text-foreground">{user.organisation?.name}</dd>
               </div>
               <div>
-                <dt className="text-[10px] font-bold uppercase tracking-[0.08em] text-muted-foreground mb-0.5">Currency</dt>
-                <dd className="text-foreground">{user.organisation?.currency}</dd>
+                <dt className="text-[10px] font-bold uppercase tracking-[0.08em] text-muted-foreground mb-1.5">Currency</dt>
+                <CurrencyPicker />
               </div>
-            </dl>
+            </div>
           </div>
 
           {/* Tax Jurisdiction */}

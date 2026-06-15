@@ -49,8 +49,7 @@ interface ToolResult {
   error?: string;
 }
 
-const fmt = (v: unknown) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(Number(v ?? 0));
+import { formatCurrency } from "@/lib/utils";
 
 const fmtDate = (s: unknown) =>
   s ? new Date(s as string).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
@@ -811,6 +810,9 @@ export function ChatPanel() {
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const { toast } = useToast();
+
+  const { data: orgData } = trpc.org.get.useQuery(undefined, { enabled: isOpen });
+  const fmt = (v: unknown) => formatCurrency(Number(v ?? 0), orgData?.currency ?? "USD");
 
   const { data: conversations, refetch: refetchConversations } = trpc.chat.listConversations.useQuery(
     undefined,

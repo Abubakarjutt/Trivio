@@ -11,8 +11,7 @@ import {
   ArrowUpDown, Users, BarChart3, Plus, ArrowRight, Clock,
 } from "lucide-react";
 
-const fmt = (v: string | number | undefined) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(Number(v ?? 0));
+import { formatCurrency } from "@/lib/utils";
 
 /* Forest-spine palette — stays cohesive with the sidebar */
 const PIE_COLORS = ["#1A6644", "#C9A86A", "#93C4AE", "#C05151", "#2E8B57", "#D4A854"];
@@ -81,11 +80,15 @@ const TOOLTIP_STYLE = {
 };
 
 export default function DashboardPage() {
+  const org = trpc.org.get.useQuery();
   const kpis = trpc.dashboard.getKPIs.useQuery();
   const trend = trpc.dashboard.getIncomeExpenseTrend.useQuery();
   const breakdown = trpc.dashboard.getExpenseBreakdown.useQuery();
   const recent = trpc.dashboard.getRecentTransactions.useQuery();
   const outstanding = trpc.dashboard.getOutstandingInvoices.useQuery();
+
+  const currency = org.data?.currency ?? "USD";
+  const fmt = (v: string | number | undefined) => formatCurrency(Number(v ?? 0), currency);
 
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
 
@@ -155,7 +158,7 @@ export default function DashboardPage() {
               <ResponsiveContainer width="100%" height={210}>
                 <BarChart data={trend.data} barGap={2} barCategoryGap="25%">
                   <XAxis dataKey="month" tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${Number(v).toLocaleString()}`} width={60} />
+                  <YAxis tick={{ fontSize: 10, fill: "#9CA3AF" }} axisLine={false} tickLine={false} tickFormatter={(v) => fmt(v)} width={72} />
                   <Tooltip
                     formatter={(v: number | string, name: string) => [fmt(String(v)), name === "income" ? "Income" : "Expenses"]}
                     contentStyle={TOOLTIP_STYLE}
