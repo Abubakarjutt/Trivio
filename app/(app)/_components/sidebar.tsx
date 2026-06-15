@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
-import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
   ArrowUpDown,
@@ -14,7 +13,6 @@ import {
   BarChart3,
   Settings,
   LogOut,
-  ChevronRight,
   Sparkles,
   Landmark,
   CreditCard,
@@ -97,93 +95,145 @@ function NavItemComponent({ icon: Icon, href, label, matchPrefix, onNavigate }: 
     <Link
       href={href}
       onClick={onNavigate}
-      className={cn(
-        "relative group flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm transition-all duration-150",
-        active
-          ? "sidebar-item-active bg-sidebar-accent/80 text-sidebar-accent-foreground font-medium"
-          : "text-sidebar-foreground/55 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground/90"
-      )}
+      className={`sb-link${active ? " sb-active" : ""}`}
     >
-      <Icon
-        className={cn(
-          "h-[15px] w-[15px] shrink-0 transition-colors",
-          active ? "text-sidebar-primary" : "text-sidebar-foreground/35 group-hover:text-sidebar-foreground/60"
-        )}
-      />
-      <span className="flex-1">{label}</span>
-      {active && <ChevronRight className="h-3 w-3 text-sidebar-primary/60 shrink-0" />}
+      <Icon className="sb-icon h-4 w-4 flex-shrink-0" strokeWidth={1.75} />
+      {label}
     </Link>
   );
 }
 
 export function Sidebar({ orgName, hasSampleData, onNavigate }: { orgName: string; hasSampleData?: boolean; onNavigate?: () => void }) {
   return (
-    <div
-      className="flex flex-col h-full bg-[hsl(var(--sidebar-background))]"
-      style={{ width: "var(--sidebar-width, 232px)" }}
-    >
-      {/* Logo / Brand */}
-      <div className="flex items-center gap-3 px-5 py-5 border-b border-sidebar-border/40">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-primary/20 ring-1 ring-sidebar-primary/30">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M2 3h12M2 8h8M2 13h5" stroke="hsl(var(--sidebar-primary))" strokeWidth="1.75" strokeLinecap="round"/>
-            <circle cx="12" cy="11" r="3" stroke="hsl(var(--sidebar-primary))" strokeWidth="1.5"/>
-            <path d="M12 9.5v1.5l.75.75" stroke="hsl(var(--sidebar-primary))" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-        </div>
-        <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-sidebar-foreground/35">Trivio</p>
-          <p className="text-sm font-semibold text-sidebar-foreground truncate leading-tight">{orgName}</p>
-        </div>
-      </div>
+    <>
+      <style>{`
+        .sb-link {
+          position: relative;
+          display: flex; align-items: center; gap: 10px;
+          border-radius: 9px; padding: 9px 12px;
+          font-size: 13.5px; font-weight: 500;
+          color: rgba(235, 245, 240, 0.62);
+          transition: background 0.15s, color 0.15s;
+          text-decoration: none;
+        }
+        .sb-link:hover { background: rgba(235,245,240,0.06); color: rgba(235,245,240,0.92); }
+        .sb-link.sb-active { background: rgba(235,245,240,0.09); color: #F4F3EF; }
+        .sb-link.sb-active::before {
+          content: "";
+          position: absolute;
+          left: -12px; top: 50%; transform: translateY(-50%);
+          width: 3px; height: 18px; border-radius: 0 3px 3px 0;
+          background: #C9A86A;
+        }
+        .sb-link .sb-icon { color: rgba(147,196,174,0.55); transition: color 0.15s; }
+        .sb-link:hover .sb-icon { color: rgba(147,196,174,0.85); }
+        .sb-link.sb-active .sb-icon { color: #93C4AE; }
+        .sb-signout {
+          display: flex; align-items: center; gap: 10px; width: 100%;
+          border-radius: 9px; padding: 9px 12px;
+          font-size: 13.5px; font-weight: 500;
+          color: rgba(235,245,240,0.45);
+          transition: background 0.15s, color 0.15s;
+          border: none; cursor: pointer; background: transparent;
+        }
+        .sb-signout:hover { background: rgba(235,245,240,0.06); color: rgba(235,245,240,0.85); }
+        .sb-section {
+          font-size: 9px; font-weight: 700; text-transform: uppercase;
+          letter-spacing: 0.18em; color: rgba(235,245,240,0.28);
+          padding: 0 12px; margin-bottom: 4px;
+        }
+      `}</style>
 
-      {/* Nav */}
-      <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-3 py-4">
-        {NAV_GROUPS.map((group, idx) => (
-          <div key={idx} className={cn("flex flex-col gap-0.5", idx > 0 && "mt-4")}>
-            {group.label && (
-              <p className="px-3 pb-1.5 text-[10px] font-bold uppercase tracking-[0.1em] text-sidebar-foreground/28">
-                {group.label}
-              </p>
-            )}
-            {group.items.map((item, i) => (
-              <NavItemComponent key={i} {...item} onNavigate={onNavigate} />
-            ))}
-          </div>
-        ))}
-      </div>
+      <div
+        className="relative flex h-full w-56 flex-col px-3 py-5 gap-1 overflow-hidden"
+        style={{
+          background: "linear-gradient(178deg, #0C2A1B 0%, #0A2116 60%, #081B12 100%)",
+          borderRight: "1px solid rgba(8,27,18,0.9)",
+        }}
+      >
+        {/* Faint ledger grid texture */}
+        <div
+          aria-hidden
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            opacity: 0.05,
+            backgroundImage: "linear-gradient(rgba(147,196,174,1) 1px, transparent 1px)",
+            backgroundSize: "100% 28px",
+          }}
+        />
+        {/* Soft glow behind the monogram */}
+        <div
+          aria-hidden
+          className="absolute -top-16 -left-16 h-48 w-48 rounded-full pointer-events-none"
+          style={{ background: "radial-gradient(circle, rgba(42,138,90,0.25), transparent 70%)" }}
+        />
 
-      {/* Footer */}
-      <div className="border-t border-sidebar-border/40 px-3 py-3 space-y-0.5">
-        <Link
-          href="/settings"
-          onClick={onNavigate}
-          className="flex items-center gap-3 rounded-md px-3 py-2 text-sm text-sidebar-foreground/50 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground/90 transition-all duration-150"
-        >
-          <Settings className="h-[15px] w-[15px] shrink-0 text-sidebar-foreground/30" />
-          <span>Settings</span>
-        </Link>
-        <button
-          className="w-full flex items-center gap-3 rounded-md px-3 py-2 text-sm text-sidebar-foreground/50 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground/90 transition-all duration-150"
-          onClick={() => { onNavigate?.(); signOut({ callbackUrl: "/login" }); }}
-        >
-          <LogOut className="h-[15px] w-[15px] shrink-0 text-sidebar-foreground/30" />
-          <span>Sign out</span>
-        </button>
-        {hasSampleData && (
-          <div className="pt-3">
-            <div className="mx-3 rounded-lg px-3 py-2 text-center"
-              style={{ background: "rgba(201,168,106,0.12)", border: "1px solid rgba(201,168,106,0.3)" }}>
-              <p className="text-xs font-semibold" style={{ color: "#C9A86A", letterSpacing: "0.04em" }}>
-                Demo data active
+        {/* Masthead */}
+        <div className="relative px-3 pt-1 pb-5 mb-3" style={{ borderBottom: "1px solid rgba(235,245,240,0.08)" }}>
+          <div className="flex items-center gap-2.5">
+            <div
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px]"
+              style={{ background: "rgba(235,245,240,0.07)", boxShadow: "inset 0 0 0 1px rgba(147,196,174,0.25)" }}
+            >
+              <svg width="17" height="17" viewBox="0 0 16 16" fill="none">
+                <path d="M2 2h12v3H2zM2 7h8v2H2zM2 11h5v2H2z" stroke="#93C4AE" strokeWidth="1.25" strokeLinejoin="round" fill="none" />
+                <circle cx="11" cy="12" r="2.5" stroke="#93C4AE" strokeWidth="1.25" />
+                <path d="M11 10.75v1.25l.75.5" stroke="#93C4AE" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
+            <div className="min-w-0">
+              <p
+                className="truncate"
+                style={{ fontWeight: 400, fontSize: "1rem", color: "#F4F3EF", letterSpacing: "-0.01em", lineHeight: 1.15 }}
+                title={orgName}
+              >
+                {orgName}
               </p>
-              <p className="text-[10px] mt-0.5" style={{ color: "rgba(201,168,106,0.65)" }}>
-                Import a statement to switch to real data
+              <p style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.18em", color: "rgba(201,168,106,0.75)", marginTop: 2 }}>
+                Trivio
               </p>
             </div>
           </div>
-        )}
+        </div>
+
+        {/* Nav */}
+        <div className="relative flex flex-1 flex-col gap-4 overflow-y-auto">
+          {NAV_GROUPS.map((group, idx) => (
+            <div key={idx} className="flex flex-col gap-0.5">
+              {group.label && <p className="sb-section">{group.label}</p>}
+              {group.items.map((item, i) => (
+                <NavItemComponent key={i} {...item} onNavigate={onNavigate} />
+              ))}
+            </div>
+          ))}
+        </div>
+
+        {/* Footer */}
+        <div className="relative mt-4 pt-3 flex flex-col gap-0.5" style={{ borderTop: "1px solid rgba(235,245,240,0.08)" }}>
+          <Link href="/settings" onClick={onNavigate} className="sb-link">
+            <Settings className="sb-icon h-4 w-4 flex-shrink-0" strokeWidth={1.75} />
+            Settings
+          </Link>
+          <button
+            className="sb-signout"
+            onClick={() => { onNavigate?.(); signOut({ callbackUrl: "/login" }); }}
+          >
+            <LogOut className="h-4 w-4 flex-shrink-0" strokeWidth={1.75} style={{ color: "rgba(147,196,174,0.55)" }} />
+            Sign out
+          </button>
+          {hasSampleData && (
+            <div className="pt-3">
+              <div
+                className="mx-3 rounded-lg px-3 py-2 text-center"
+                style={{ background: "rgba(201,168,106,0.12)", border: "1px solid rgba(201,168,106,0.3)" }}
+              >
+                <p className="text-xs font-semibold" style={{ color: "#C9A86A", letterSpacing: "0.04em" }}>Demo data active</p>
+                <p className="text-[10px] mt-0.5" style={{ color: "rgba(201,168,106,0.65)" }}>Import a statement to switch to real data</p>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+    </>
   );
 }

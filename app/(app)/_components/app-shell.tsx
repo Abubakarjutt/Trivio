@@ -18,9 +18,9 @@ export function AppShell({ orgName, children }: Props) {
   const hasSampleData = org?.hasSampleData ?? false;
 
   return (
-    <div className="flex h-screen overflow-hidden bg-canvas">
+    <div className="flex h-screen overflow-hidden paper-grain" style={{ background: "#F4F3EF" }}>
       {/* Desktop sidebar */}
-      <aside className="hidden md:flex md:shrink-0 shadow-[1px_0_0_0_hsl(220_16%_88%)]">
+      <aside className="hidden md:flex md:shrink-0" style={{ boxShadow: "4px 0 24px -8px rgba(8,27,18,0.35)" }}>
         <Sidebar orgName={orgName} hasSampleData={hasSampleData} />
       </aside>
 
