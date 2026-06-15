@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
 
   // Rate-limit chat requests to protect AI compute costs
   try {
-    extractionRateLimiter(`chat:${user.id}`);
+    await extractionRateLimiter(`chat:${user.id}`);
   } catch {
     return new Response("Too many requests. Try again shortly.", { status: 429 });
   }
@@ -106,7 +106,7 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  const messages = await buildChatMessages(db, {
+  const { messages, nonce } = await buildChatMessages(db, {
     organisationId: user.organisationId,
     conversationId,
     userMessage: message,
@@ -168,7 +168,7 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        const { text, toolCalls } = parseToolCalls(fullContent);
+        const { text, toolCalls } = parseToolCalls(fullContent, nonce);
         const toolResults: ToolResult[] = [];
 
         if (toolCalls.length > 0) {

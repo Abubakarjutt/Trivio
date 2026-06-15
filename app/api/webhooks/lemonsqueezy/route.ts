@@ -5,7 +5,11 @@ import { verifyWebhookSignature } from "@/lib/lemonsqueezy";
 export async function POST(req: NextRequest) {
   const rawBody = await req.text();
   const signature = req.headers.get("X-Signature") ?? "";
-  const secret = process.env.LEMONSQUEEZY_WEBHOOK_SECRET ?? "";
+  const secret = process.env.LEMONSQUEEZY_WEBHOOK_SECRET;
+  if (!secret) {
+    console.error("[lemonsqueezy] LEMONSQUEEZY_WEBHOOK_SECRET is not set");
+    return NextResponse.json({ error: "Webhook not configured" }, { status: 500 });
+  }
 
   if (!verifyWebhookSignature(rawBody, signature, secret)) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });

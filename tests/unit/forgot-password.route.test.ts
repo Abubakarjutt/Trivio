@@ -65,7 +65,7 @@ beforeEach(() => {
   // Restore env var for each test
   process.env.NEXTAUTH_URL = "https://app.example.com";
   // Ensure rate limiter passes by default (individual tests override when testing 429)
-  vi.mocked(authRateLimiter).mockImplementation(() => undefined);
+  vi.mocked(authRateLimiter).mockImplementation(() => Promise.resolve());
   // Restore default db mock implementations
   vi.mocked(db.user.findFirst).mockResolvedValue(null);
   vi.mocked(db.passwordResetToken.deleteMany).mockResolvedValue({ count: 0 } as never);
@@ -96,9 +96,7 @@ describe("POST /api/auth/forgot-password", () => {
   });
 
   it("returns 429 when rate limit is exceeded", async () => {
-    vi.mocked(authRateLimiter).mockImplementation(() => {
-      throw new Error("Rate limit exceeded");
-    });
+    vi.mocked(authRateLimiter).mockImplementation(() => Promise.reject(new Error("Rate limit exceeded")));
     const req = makeRequest({ email: "user@example.com" });
     const res = await POST(req);
     expect(res.status).toBe(429);

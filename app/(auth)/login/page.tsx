@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { signIn } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,9 +18,20 @@ const FEATURES = [
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({ email: "", password: "" });
+
+  useEffect(() => {
+    if (searchParams.get("verified") === "1") {
+      toast({ title: "Email verified — you can now sign in." });
+    } else if (searchParams.get("error") === "expired-token") {
+      toast({ variant: "destructive", title: "Verification link expired. Please register again." });
+    } else if (searchParams.get("error") === "invalid-token") {
+      toast({ variant: "destructive", title: "Invalid verification link." });
+    }
+  }, [searchParams, toast]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

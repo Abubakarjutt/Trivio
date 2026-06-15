@@ -50,7 +50,7 @@ export const gdprRouter = createTRPCRouter({
   // ── Data export (GDPR portability) ─────────────────────────────────────────
   exportData: orgProcedure.mutation(async ({ ctx }) => {
     const userId = ctx.session.user.id;
-    exportRateLimiter(`${userId}:exportData`);
+    await exportRateLimiter(`${userId}:exportData`);
 
     const [user, org, invoices, bills, contacts, journalEntries, budgets, chatMessages] =
       await Promise.all([
@@ -124,7 +124,7 @@ export const gdprRouter = createTRPCRouter({
     .input(z.object({ confirmText: z.literal("DELETE") }))
     .mutation(async ({ ctx }) => {
       const userId = ctx.session.user.id;
-      deletionRateLimiter(`${userId}:deleteAccount`);
+      await deletionRateLimiter(`${userId}:deleteAccount`);
 
       const user = await ctx.db.user.findUnique({
         where: { id: userId },

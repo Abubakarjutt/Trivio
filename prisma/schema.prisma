@@ -899,3 +899,13 @@ model PasswordResetToken {
 
   @@index([email])
 }
+
+model EmailVerificationToken {
+  id        String   @id @default(cuid())
+  email     String
+  token     String   @unique @default(cuid())
+  expires   DateTime
+  createdAt DateTime @default(now())
+
+  @@index([email])
+}

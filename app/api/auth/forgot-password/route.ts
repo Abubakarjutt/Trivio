@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
     // Rate-limit by IP to prevent email flooding and user enumeration via timing
     const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
     try {
-      authRateLimiter(`forgot-password:${ip}`);
+      await authRateLimiter(`forgot-password:${ip}`);
     } catch {
       return NextResponse.json({ error: "Too many requests. Try again later." }, { status: 429 });
     }

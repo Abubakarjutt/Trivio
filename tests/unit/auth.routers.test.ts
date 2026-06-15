@@ -22,12 +22,22 @@ vi.mock("bcryptjs", () => ({
   },
 }));
 
-// Mock DB — user.findUnique and user.create are the only methods auth.ts touches
+// Mock resend so no real emails are sent
+vi.mock("@/lib/resend", () => ({
+  sendVerificationEmail: vi.fn().mockResolvedValue(undefined),
+  sendAlreadyRegisteredEmail: vi.fn().mockResolvedValue(undefined),
+}));
+
+// Mock DB — covers all methods auth.ts touches
 vi.mock("@/lib/db", () => ({
   db: {
     user: {
       findUnique: vi.fn(),
       create: vi.fn(),
+    },
+    emailVerificationToken: {
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      create: vi.fn().mockResolvedValue({ token: "mock-token" }),
     },
   },
 }));
@@ -38,12 +48,15 @@ import { createCallerFactory } from "@/server/trpc";
 import { authRouter } from "@/server/routers/auth";
 import { db } from "@/lib/db";
 import { registerRateLimiter } from "@/server/middleware/rateLimit";
+import { sendVerificationEmail, sendAlreadyRegisteredEmail } from "@/lib/resend";
 
 // ── Typed mock handles ────────────────────────────────────────────────────────
 
 const mockFindUnique = db.user.findUnique as ReturnType<typeof vi.fn>;
 const mockCreate = db.user.create as ReturnType<typeof vi.fn>;
 const mockRateLimiter = registerRateLimiter as ReturnType<typeof vi.fn>;
+const mockSendVerification = sendVerificationEmail as ReturnType<typeof vi.fn>;
+const mockSendAlreadyRegistered = sendAlreadyRegisteredEmail as ReturnType<typeof vi.fn>;
 
 // ── Caller factories ──────────────────────────────────────────────────────────
 
@@ -71,6 +84,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   // Default: rate limiter allows requests
   mockRateLimiter.mockReturnValue({ allowed: true, retryAfterSec: 0 });
+  // Restore default token mock
+  (db.emailVerificationToken.create as ReturnType<typeof vi.fn>).mockResolvedValue({ token: "mock-token" });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -84,14 +99,14 @@ describe("authRouter.register", () => {
     password: "secure123",
   };
 
-  it("returns {id, email} on successful registration", async () => {
+  it("returns { success: true } on successful registration", async () => {
     mockFindUnique.mockResolvedValue(null); // no existing user
     mockCreate.mockResolvedValue({ id: "user-new", email: validInput.email });
 
     const caller = makePublicCaller();
     const result = await caller.register(validInput);
 
-    expect(result).toEqual({ id: "user-new", email: validInput.email });
+    expect(result).toEqual({ success: true });
     expect(mockCreate).toHaveBeenCalledOnce();
   });
 
@@ -108,6 +123,18 @@ describe("authRouter.register", () => {
     expect(createData).not.toHaveProperty("password");
   });
 
+  it("sends verification email on successful registration", async () => {
+    mockFindUnique.mockResolvedValue(null);
+    mockCreate.mockResolvedValue({ id: "user-new", email: validInput.email });
+
+    const caller = makePublicCaller();
+    await caller.register(validInput);
+
+    expect(mockSendVerification).toHaveBeenCalledOnce();
+    expect(mockSendVerification.mock.calls[0][0]).toBe("alice@example.com");
+    expect(mockSendVerification.mock.calls[0][1]).toContain("/verify-email?token=");
+  });
+
   it("throws TOO_MANY_REQUESTS when rate-limited", async () => {
     mockRateLimiter.mockReturnValue({ allowed: false, retryAfterSec: 42 });
 
@@ -119,15 +146,26 @@ describe("authRouter.register", () => {
     expect(mockFindUnique).not.toHaveBeenCalled();
   });
 
-  it("throws CONFLICT when email is already registered", async () => {
+  it("returns { success: true } when email is already registered (anti-enumeration)", async () => {
     mockFindUnique.mockResolvedValue({ id: "existing-user" });
 
     const caller = makePublicCaller();
-    await expect(caller.register(validInput)).rejects.toMatchObject({
-      code: "CONFLICT",
-      message: "Email already registered",
-    });
+    const result = await caller.register(validInput);
+
+    // Must not expose that the email exists — no error thrown
+    expect(result).toEqual({ success: true });
+    // Must not create a duplicate user
     expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("sends already-registered notification when email is taken", async () => {
+    mockFindUnique.mockResolvedValue({ id: "existing-user" });
+
+    const caller = makePublicCaller();
+    await caller.register(validInput);
+
+    expect(mockSendAlreadyRegistered).toHaveBeenCalledOnce();
+    expect(mockSendAlreadyRegistered.mock.calls[0][0]).toBe("alice@example.com");
   });
 
   it("throws ZodError for password shorter than 8 characters", async () => {

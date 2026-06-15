@@ -1,4 +1,5 @@
 import { type PrismaClient, Prisma, InvoiceStatus } from "@prisma/client";
+import { randomBytes } from "crypto";
 import { createJournalEntry, voidJournalEntry } from "./accounting.service";
 import { createInvoice, postInvoiceToLedger, recordInvoicePayment, voidInvoice } from "./invoice.service";
 import { createBill, postBillToLedger, recordBillPayment, voidBill } from "./bill.service";
@@ -144,7 +145,7 @@ Personal Finance Budgets:
 - list_budgets: {} — show current budgets with spending progress
 Budget readjustment: always call list_budgets first to get current limits, compute the new values, then call set_budgets. Show before→after numbers in your reply.
 
-Format: TOOL_CALL: {"tool":"name","args":{...}}
+Format: TOOL_CALL_\${NONCE}: {"tool":"name","args":{...}}
 `;
 
 export function localDateString(): string {
@@ -155,12 +156,15 @@ export function localDateString(): string {
   return `${y}-${m}-${d}`;
 }
 
-export function buildSystemPrompt(orgContext: {
-  orgName: string;
-  currency: string;
-  accounts: { code: string; name: string; type: string }[];
-  contacts: { name: string; type: string }[];
-}): string {
+export function buildSystemPrompt(
+  orgContext: {
+    orgName: string;
+    currency: string;
+    accounts: { code: string; name: string; type: string }[];
+    contacts: { name: string; type: string }[];
+  },
+  nonce: string,
+): string {
   const accountList = orgContext.accounts
     .slice(0, 15)
     .map((a) => `${a.code}:${a.name}`)
@@ -173,11 +177,15 @@ export function buildSystemPrompt(orgContext: {
 
   const today = localDateString();
 
+  // Embed nonce into the tool-call format string. The LLM sees the resolved
+  // prefix; injected user text cannot forge tool calls without knowing the nonce.
+  const toolDefs = TOOL_DEFINITIONS.replace("${NONCE}", nonce);
+
   return `You are an accounting assistant for "${orgContext.orgName}". Currency: ${orgContext.currency}. Today's date: ${today}.
 Accounts: ${accountList}
 Contacts: ${contactList}
 ${APP_UI_GUIDE}
-${TOOL_DEFINITIONS}
+${toolDefs}
 Rules:
 - When the user asks "how do I…" or wants to do something themselves, give numbered UI steps from the guide above.
 - When the user asks you to perform a task directly (create, record, void, list, show), use the tools.
@@ -186,16 +194,17 @@ Rules:
 - IMPORTANT: When the user mentions relative dates (today, yesterday, last week, last month, etc.), resolve them to an explicit YYYY-MM-DD date using today's date above BEFORE passing to any tool. Never guess or use a date from your training data.`;
 }
 
-export function parseToolCalls(response: string): { text: string; toolCalls: ToolCall[] } {
+export function parseToolCalls(response: string, nonce: string): { text: string; toolCalls: ToolCall[] } {
+  const PREFIX = `TOOL_CALL_${nonce}:`;
   const lines = response.split("\n");
   const toolCalls: ToolCall[] = [];
   const textLines: string[] = [];
 
   for (const line of lines) {
     const trimmed = line.trim();
-    if (trimmed.startsWith("TOOL_CALL:")) {
+    if (trimmed.startsWith(PREFIX)) {
       try {
-        const json = trimmed.slice("TOOL_CALL:".length).trim();
+        const json = trimmed.slice(PREFIX.length).trim();
         const parsed = JSON.parse(json);
         if (parsed.tool && typeof parsed.tool === "string") {
           toolCalls.push({ tool: parsed.tool, args: parsed.args ?? {} });
@@ -1277,7 +1286,9 @@ export async function buildChatMessages(
     userMessage: string;
     attachmentId?: string;
   },
-): Promise<{ role: string; content: string }[]> {
+): Promise<{ messages: { role: string; content: string }[]; nonce: string }> {
+  const nonce = randomBytes(8).toString("hex");
+
   const org = await db.organisation.findUniqueOrThrow({
     where: { id: params.organisationId },
   });
@@ -1305,18 +1316,23 @@ export async function buildChatMessages(
   });
   history.reverse();
 
-  const systemPrompt = buildSystemPrompt({
-    orgName: org.name,
-    currency: org.currency,
-    accounts: accounts.map((a) => ({ code: a.code, name: a.name, type: a.type })),
-    contacts: contacts.map((c) => ({ name: c.name, type: c.type })),
-  });
+  const systemPrompt = buildSystemPrompt(
+    {
+      orgName: org.name,
+      currency: org.currency,
+      accounts: accounts.map((a) => ({ code: a.code, name: a.name, type: a.type })),
+      contacts: contacts.map((c) => ({ name: c.name, type: c.type })),
+    },
+    nonce,
+  );
 
-  return [
+  const messages = [
     { role: "system", content: systemPrompt },
     ...history.map((m) => ({ role: m.role, content: m.content })),
     { role: "user", content: params.attachmentId ? `[User attached a file (attachmentId: ${params.attachmentId})]\n\n${params.userMessage}` : params.userMessage },
   ];
+
+  return { messages, nonce };
 }
 
 export async function processMessage(
@@ -1329,7 +1345,7 @@ export async function processMessage(
     attachmentId?: string;
   },
 ): Promise<ChatResponse> {
-  const messages = await buildChatMessages(db, params);
+  const { messages, nonce } = await buildChatMessages(db, params);
 
   let aiResponse: string;
   try {
@@ -1356,7 +1372,7 @@ export async function processMessage(
     return { content: aiResponse, toolCalls: [], toolResults: [] };
   }
 
-  const { text, toolCalls } = parseToolCalls(aiResponse);
+  const { text, toolCalls } = parseToolCalls(aiResponse, nonce);
   const toolResults: ToolResult[] = [];
 
   for (const call of toolCalls) {

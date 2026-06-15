@@ -19,7 +19,7 @@ export const chatRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      chatRateLimiter(ctx.organisationId);
+      await chatRateLimiter(ctx.organisationId);
 
       const sanitizedMessage = sanitizeForPrompt(input.message);
       let conversationId = input.conversationId;

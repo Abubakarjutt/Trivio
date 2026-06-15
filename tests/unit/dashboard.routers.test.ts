@@ -80,7 +80,7 @@ describe("dashboardRouter.getKPIs", () => {
     mockInvoiceAggregate.mockResolvedValue({ _sum: { totalAmount: null, amountPaid: null } });
     mockBillAggregate.mockResolvedValue({ _sum: { totalAmount: null, amountPaid: null } });
 
-    const result = await makeCaller().getKPIs();
+    const result = await makeCaller().getKPIs({});
 
     expect(result).toHaveProperty("monthlyIncome");
     expect(result).toHaveProperty("monthlyExpenses");
@@ -95,7 +95,7 @@ describe("dashboardRouter.getKPIs", () => {
     mockInvoiceAggregate.mockResolvedValue({ _sum: { totalAmount: null, amountPaid: null } });
     mockBillAggregate.mockResolvedValue({ _sum: { totalAmount: null, amountPaid: null } });
 
-    const result = await makeCaller().getKPIs();
+    const result = await makeCaller().getKPIs({});
 
     expect(result.monthlyIncome).toBe("0.0000");
     expect(result.monthlyExpenses).toBe("0.0000");
@@ -122,7 +122,7 @@ describe("dashboardRouter.getKPIs", () => {
     mockInvoiceAggregate.mockResolvedValue({ _sum: { totalAmount: null, amountPaid: null } });
     mockBillAggregate.mockResolvedValue({ _sum: { totalAmount: null, amountPaid: null } });
 
-    const result = await makeCaller().getKPIs();
+    const result = await makeCaller().getKPIs({});
 
     // income = 3000 - 500 + 1500 - 0 = 4000
     expect(result.monthlyIncome).toBe("4000.0000");
@@ -142,7 +142,7 @@ describe("dashboardRouter.getKPIs", () => {
     mockInvoiceAggregate.mockResolvedValue({ _sum: { totalAmount: null, amountPaid: null } });
     mockBillAggregate.mockResolvedValue({ _sum: { totalAmount: null, amountPaid: null } });
 
-    const result = await makeCaller().getKPIs();
+    const result = await makeCaller().getKPIs({});
 
     // expenses = (2000-0) + (500-200) = 2300
     expect(result.monthlyExpenses).toBe("2300.0000");
@@ -160,7 +160,7 @@ describe("dashboardRouter.getKPIs", () => {
     mockInvoiceAggregate.mockResolvedValue({ _sum: { totalAmount: null, amountPaid: null } });
     mockBillAggregate.mockResolvedValue({ _sum: { totalAmount: null, amountPaid: null } });
 
-    const result = await makeCaller().getKPIs();
+    const result = await makeCaller().getKPIs({});
 
     expect(result.netProfit).toBe("3000.0000");
   });
@@ -172,7 +172,7 @@ describe("dashboardRouter.getKPIs", () => {
     });
     mockBillAggregate.mockResolvedValue({ _sum: { totalAmount: null, amountPaid: null } });
 
-    const result = await makeCaller().getKPIs();
+    const result = await makeCaller().getKPIs({});
 
     expect(result.outstandingAR).toBe("7000.0000");
   });
@@ -184,7 +184,7 @@ describe("dashboardRouter.getKPIs", () => {
       _sum: { totalAmount: dec("4000"), amountPaid: dec("1000") },
     });
 
-    const result = await makeCaller().getKPIs();
+    const result = await makeCaller().getKPIs({});
 
     expect(result.outstandingAP).toBe("3000.0000");
   });
@@ -268,7 +268,7 @@ describe("dashboardRouter.getExpenseBreakdown", () => {
   it("returns empty array when no expense lines", async () => {
     mockJournalLineFindMany.mockResolvedValue([]);
 
-    const result = await makeCaller().getExpenseBreakdown();
+    const result = await makeCaller().getExpenseBreakdown({});
 
     expect(result).toEqual([]);
   });
@@ -281,7 +281,7 @@ describe("dashboardRouter.getExpenseBreakdown", () => {
     ];
     mockJournalLineFindMany.mockResolvedValue(lines);
 
-    const result = await makeCaller().getExpenseBreakdown();
+    const result = await makeCaller().getExpenseBreakdown({});
 
     expect(result[0].name).toBe("Rent");
     expect(result[1].name).toBe("Salaries");
@@ -296,7 +296,7 @@ describe("dashboardRouter.getExpenseBreakdown", () => {
     }));
     mockJournalLineFindMany.mockResolvedValue(lines);
 
-    const result = await makeCaller().getExpenseBreakdown();
+    const result = await makeCaller().getExpenseBreakdown({});
 
     expect(result.length).toBeLessThanOrEqual(6);
   });
@@ -308,7 +308,7 @@ describe("dashboardRouter.getExpenseBreakdown", () => {
     ];
     mockJournalLineFindMany.mockResolvedValue(lines);
 
-    const result = await makeCaller().getExpenseBreakdown();
+    const result = await makeCaller().getExpenseBreakdown({});
 
     expect(result).toHaveLength(1);
     expect(result[0].name).toBe("Rent");
@@ -320,7 +320,7 @@ describe("dashboardRouter.getExpenseBreakdown", () => {
       { debit: dec("100"), credit: dec(0), account: { name: "Office" } },
     ]);
 
-    const result = await makeCaller().getExpenseBreakdown();
+    const result = await makeCaller().getExpenseBreakdown({});
 
     expect(result[0]).toHaveProperty("name");
     expect(result[0]).toHaveProperty("total");
