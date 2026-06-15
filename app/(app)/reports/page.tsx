@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { BarChart3, Scale, ListOrdered, Receipt } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 const REPORTS = [
   {
