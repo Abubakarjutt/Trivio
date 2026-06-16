@@ -13,6 +13,7 @@ import {
   PieChart, Pie, Cell,
 } from "recharts";
 import Link from "next/link";
+import { formatCurrency } from "@/lib/utils";
 
 const COLORS = ["#6366f1", "#8b5cf6", "#ec4899", "#f59e0b", "#10b981", "#3b82f6", "#ef4444"];
 
@@ -32,11 +33,10 @@ const ACTIVITY_COLOR: Record<string, string> = {
   TASK: "bg-slate-100 text-slate-700",
 };
 
-function fmt(n: number) {
-  return `$${n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
-}
-
 export default function CrmDashboardPage() {
+  const { data: orgData } = trpc.org.get.useQuery();
+  const currency = orgData?.currency ?? "USD";
+  const fmt = (n: number) => formatCurrency(n, currency);
   const { data: pipeline = [], isLoading: pipelineLoading } = trpc.crmReports.pipeline.useQuery({});
   const { data: forecast = [], isLoading: forecastLoading } = trpc.crmReports.salesForecast.useQuery({ months: 3 });
   const { data: leadSources = [] } = trpc.crmReports.leadSourceReport.useQuery();
@@ -246,7 +246,7 @@ export default function CrmDashboardPage() {
                 <XAxis dataKey="month" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} />
                 <YAxis
                   tick={{ fontSize: 11 }}
-                  tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`}
+                  tickFormatter={(v) => fmt(v)}
                   axisLine={false}
                   tickLine={false}
                 />

@@ -9,10 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Loader2, Plus, Trash2, Target, CheckCircle2, XCircle } from "lucide-react";
 import { toast } from "sonner";
-
-function fmt(n: number) {
-  return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+import { formatCurrency } from "@/lib/utils";
 
 const STATUS_STYLE: Record<string, React.CSSProperties> = {
   ACTIVE:    { color: "#1A6644",  background: "rgba(26,102,68,0.08)",   border: "1px solid rgba(26,102,68,0.2)" },
@@ -22,6 +19,9 @@ const STATUS_STYLE: Record<string, React.CSSProperties> = {
 
 export default function GoalsPage() {
   const utils = trpc.useUtils();
+  const { data: orgData } = trpc.org.get.useQuery();
+  const currency = orgData?.currency ?? "USD";
+  const fmt = (n: number) => formatCurrency(n, currency);
   const [open, setOpen] = useState(false);
   const [contributeOpen, setContributeOpen] = useState<string | null>(null);
   const [contributeAmount, setContributeAmount] = useState("");

@@ -10,15 +10,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Loader2, Plus, Trash2, RefreshCw, CheckCircle2, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
+import { formatCurrency } from "@/lib/utils";
 
 const FREQUENCIES = ["DAILY", "WEEKLY", "FORTNIGHTLY", "MONTHLY", "QUARTERLY", "YEARLY"] as const;
 
-function fmt(n: number) {
-  return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
 export default function RecurringPage() {
   const utils = trpc.useUtils();
+  const { data: orgData } = trpc.org.get.useQuery();
+  const currency = orgData?.currency ?? "USD";
+  const fmt = (n: number) => formatCurrency(n, currency);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({
     name: "", description: "", amount: "", type: "EXPENSE",
@@ -103,19 +103,19 @@ export default function RecurringPage() {
               <h3 className="text-sm font-semibold text-red-600 flex items-center gap-1.5 mb-3">
                 <AlertCircle className="h-4 w-4" /> Due now ({dueItems.length})
               </h3>
-              <RecurringList items={dueItems} onPaid={(id) => markPaid.mutate({ id })} onToggle={(id, v) => toggle.mutate({ id, isActive: v })} onDelete={(id) => del.mutate({ id })} />
+              <RecurringList items={dueItems} onPaid={(id) => markPaid.mutate({ id })} onToggle={(id, v) => toggle.mutate({ id, isActive: v })} onDelete={(id) => del.mutate({ id })} fmt={fmt} />
             </section>
           )}
           {upcomingItems.length > 0 && (
             <section>
               <h3 className="text-sm font-semibold text-muted-foreground mb-3">Upcoming ({upcomingItems.length})</h3>
-              <RecurringList items={upcomingItems} onPaid={(id) => markPaid.mutate({ id })} onToggle={(id, v) => toggle.mutate({ id, isActive: v })} onDelete={(id) => del.mutate({ id })} />
+              <RecurringList items={upcomingItems} onPaid={(id) => markPaid.mutate({ id })} onToggle={(id, v) => toggle.mutate({ id, isActive: v })} onDelete={(id) => del.mutate({ id })} fmt={fmt} />
             </section>
           )}
           {inactiveItems.length > 0 && (
             <section>
               <h3 className="text-sm font-semibold text-muted-foreground mb-3">Inactive ({inactiveItems.length})</h3>
-              <RecurringList items={inactiveItems} onPaid={(id) => markPaid.mutate({ id })} onToggle={(id, v) => toggle.mutate({ id, isActive: v })} onDelete={(id) => del.mutate({ id })} />
+              <RecurringList items={inactiveItems} onPaid={(id) => markPaid.mutate({ id })} onToggle={(id, v) => toggle.mutate({ id, isActive: v })} onDelete={(id) => del.mutate({ id })} fmt={fmt} />
             </section>
           )}
         </div>
@@ -195,15 +195,13 @@ type RecurringItemData = {
   isDue: boolean; daysUntilDue: number; isActive: boolean;
 };
 
-function RecurringList({ items, onPaid, onToggle, onDelete }: {
+function RecurringList({ items, onPaid, onToggle, onDelete, fmt }: {
   items: RecurringItemData[];
   onPaid: (id: string) => void;
   onToggle: (id: string, active: boolean) => void;
   onDelete: (id: string) => void;
+  fmt: (n: number) => string;
 }) {
-  function fmt(n: number) {
-    return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  }
   return (
     <div className="divide-y rounded-xl border bg-card overflow-hidden">
       {items.map((item) => (

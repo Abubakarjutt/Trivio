@@ -11,12 +11,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Loader2, Plus, Trash2, Archive, TrendingUp, Zap } from "lucide-react";
 import { toast } from "sonner";
+import { formatCurrency } from "@/lib/utils";
 
 const PERIODS = ["WEEKLY", "MONTHLY", "QUARTERLY", "YEARLY"] as const;
-
-function fmt(n: number) {
-  return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
 
 function UtilBar({ pct }: { pct: number }) {
   const fillColor = pct >= 100 ? "#C05151" : pct >= 80 ? "#C9A86A" : "#1A6644";
@@ -32,6 +29,8 @@ function UtilBar({ pct }: { pct: number }) {
 
 export default function BudgetsPage() {
   const { data: orgData } = trpc.org.get.useQuery();
+  const currency = orgData?.currency ?? "USD";
+  const fmt = (n: number) => formatCurrency(n, currency);
   const utils = trpc.useUtils();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ name: "", category: "", limitAmount: "", period: "MONTHLY" });

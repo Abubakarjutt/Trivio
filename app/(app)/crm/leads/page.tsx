@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Loader2, Plus, UserPlus, ArrowRight, Trash2, Search } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
+import { formatCurrency } from "@/lib/utils";
 
 const STATUSES = ["NEW", "CONTACTED", "QUALIFIED", "UNQUALIFIED", "CONVERTED"] as const;
 const SOURCES = ["WEBSITE", "REFERRAL", "SOCIAL_MEDIA", "COLD_OUTREACH", "EVENT", "ADVERTISING", "OTHER"] as const;
@@ -22,10 +23,6 @@ const STATUS_STYLE: Record<string, string> = {
   UNQUALIFIED: "bg-slate-100 text-slate-600 border-slate-200",
   CONVERTED: "bg-purple-100 text-purple-700 border-purple-200",
 };
-
-function fmt(n: number) {
-  return `$${n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
-}
 
 function Initials({ name }: { name: string }) {
   const parts = name.trim().split(" ");
@@ -54,6 +51,9 @@ const emptyForm = {
 
 export default function LeadsPage() {
   const utils = trpc.useUtils();
+  const { data: orgData } = trpc.org.get.useQuery();
+  const currency = orgData?.currency ?? "USD";
+  const fmt = (n: number) => formatCurrency(n, currency);
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);

@@ -13,6 +13,7 @@ import {
 import { toast } from "sonner";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { formatCurrency } from "@/lib/utils";
 
 const STATUSES = ["NEW", "CONTACTED", "QUALIFIED", "UNQUALIFIED", "CONVERTED"] as const;
 
@@ -55,6 +56,8 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
   const [editForm, setEditForm] = useState<EditForm | null>(null);
 
   const { data: lead, isLoading } = trpc.crmLeads.get.useQuery({ id });
+  const { data: orgData } = trpc.org.get.useQuery();
+  const currency = orgData?.currency ?? "USD";
 
   const update = trpc.crmLeads.update.useMutation({
     onSuccess: () => {
@@ -269,7 +272,7 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
                   icon: DollarSign,
                   label: "Est. value",
                   value: lead.estimatedValue
-                    ? `$${Number(lead.estimatedValue).toLocaleString()}`
+                    ? formatCurrency(Number(lead.estimatedValue), currency)
                     : null,
                 },
                 {

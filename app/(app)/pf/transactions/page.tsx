@@ -13,6 +13,7 @@ import { ImportDialog } from "./_components/import-dialog";
 import { TransactionCard } from "./_components/transaction-card";
 import { CATEGORY_DEFINITIONS } from "@/server/services/statement-categorization.service";
 import { MonthPicker, currentMonth } from "@/app/(app)/pf/_components/month-picker";
+import { formatCurrency } from "@/lib/utils";
 
 type PendingBatch = { batchId: string; items: { date: string | Date; description: string; amount: number }[] };
 
@@ -51,10 +52,6 @@ const CATEGORY_COLORS: Record<string, string> = {
   "Other":             "bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-300",
 };
 
-function fmt(n: number) {
-  return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
 export default function PfTransactionsPage() {
   const utils = trpc.useUtils();
   const [importOpen, setImportOpen] = useState(false);
@@ -66,6 +63,8 @@ export default function PfTransactionsPage() {
   const [cursor, setCursor]         = useState<string | undefined>(undefined);
 
   const { data: org } = trpc.org.get.useQuery();
+  const currency = org?.currency ?? "USD";
+  const fmt = (n: number) => formatCurrency(n, currency);
 
   const { data: summary } = trpc.statementTransactions.summary.useQuery({ month });
 
