@@ -63,6 +63,7 @@ import {
 } from "@/server/services/invoice.service";
 import { sendInvoiceEmail } from "@/server/services/email.service";
 import { writeAuditLog } from "@/server/services/audit.service";
+import { clearAccountingSampleData } from "@/lib/accounting-sample-data";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -289,6 +290,19 @@ describe("invoices.create", () => {
     await expect(
       caller.create({ ...validInput, lines: [] })
     ).rejects.toThrow();
+  });
+
+  it("calls clearAccountingSampleData when hasSampleData=true", async () => {
+    const orgFindUnique = vi.fn().mockResolvedValue({ hasSampleData: true });
+    const caller = createCaller(makeCtx({ invoice: {}, organisation: { findUnique: orgFindUnique } }));
+    await caller.create(validInput);
+    expect(clearAccountingSampleData).toHaveBeenCalledWith(expect.anything(), ORG);
+  });
+
+  it("does not call clearAccountingSampleData when hasSampleData=false", async () => {
+    const caller = createCaller(makeCtx({ invoice: {} }));
+    await caller.create(validInput);
+    expect(clearAccountingSampleData).not.toHaveBeenCalled();
   });
 });
 

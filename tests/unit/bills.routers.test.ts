@@ -58,6 +58,7 @@ import {
   effectiveBillStatus,
 } from "@/server/services/bill.service";
 import { writeAuditLog } from "@/server/services/audit.service";
+import { clearAccountingSampleData } from "@/lib/accounting-sample-data";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -278,6 +279,19 @@ describe("bills.create", () => {
         entityId: "bill-1",
       })
     );
+  });
+
+  it("calls clearAccountingSampleData when hasSampleData=true", async () => {
+    const orgFindUnique = vi.fn().mockResolvedValue({ hasSampleData: true });
+    const caller = createCaller(makeCtx({ bill: {}, organisation: { findUnique: orgFindUnique } }));
+    await caller.create(validInput);
+    expect(clearAccountingSampleData).toHaveBeenCalledWith(expect.anything(), ORG);
+  });
+
+  it("does not call clearAccountingSampleData when hasSampleData=false", async () => {
+    const caller = createCaller(makeCtx({ bill: {} }));
+    await caller.create(validInput);
+    expect(clearAccountingSampleData).not.toHaveBeenCalled();
   });
 });
 

@@ -55,6 +55,11 @@ vi.mock("@/server/services/audit.service", () => ({
   writeAuditLog: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("@/lib/accounting-sample-data", () => ({
+  loadAccountingSampleData: vi.fn().mockResolvedValue(0),
+  clearAccountingSampleData: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("@/lib/db", () => ({
   db: {
     user: {
@@ -78,6 +83,7 @@ import {
   buildExpenseEntry,
 } from "@/server/services/accounting.service";
 import { writeAuditLog } from "@/server/services/audit.service";
+import { clearAccountingSampleData } from "@/lib/accounting-sample-data";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -365,6 +371,72 @@ describe("transactions.createExpense", () => {
     await expect(
       caller.createExpense({ ...validInput, amount: 0 })
     ).rejects.toThrow();
+  });
+});
+
+// ─── sample data clearing ─────────────────────────────────────────────────────
+
+describe("transactions sample data auto-clear", () => {
+  const incomeInput = {
+    date: new Date("2026-01-15"),
+    description: "Consulting payment",
+    amount: 1500,
+    incomeAccountId: "acc-income",
+    cashAccountId: "acc-cash",
+  };
+  const expenseInput = {
+    date: new Date("2026-02-01"),
+    description: "Office rent",
+    amount: 2000,
+    expenseAccountId: "acc-expense",
+    cashAccountId: "acc-cash",
+  };
+  const rawInput = {
+    date: new Date("2026-03-01"),
+    description: "Manual adjustment",
+    lines: [
+      { accountId: "acc-1", debit: 500 },
+      { accountId: "acc-2", credit: 500 },
+    ],
+  };
+
+  it("createIncome clears sample data when hasSampleData=true", async () => {
+    const orgFindUnique = vi.fn().mockResolvedValue({ hasSampleData: true });
+    const caller = createCaller(makeCtx({ journalEntry: {}, organisation: { findUnique: orgFindUnique } }));
+    await caller.createIncome(incomeInput);
+    expect(clearAccountingSampleData).toHaveBeenCalledWith(expect.anything(), ORG);
+  });
+
+  it("createIncome does not clear when hasSampleData=false", async () => {
+    const caller = createCaller(makeCtx({ journalEntry: {} }));
+    await caller.createIncome(incomeInput);
+    expect(clearAccountingSampleData).not.toHaveBeenCalled();
+  });
+
+  it("createExpense clears sample data when hasSampleData=true", async () => {
+    const orgFindUnique = vi.fn().mockResolvedValue({ hasSampleData: true });
+    const caller = createCaller(makeCtx({ journalEntry: {}, organisation: { findUnique: orgFindUnique } }));
+    await caller.createExpense(expenseInput);
+    expect(clearAccountingSampleData).toHaveBeenCalledWith(expect.anything(), ORG);
+  });
+
+  it("createExpense does not clear when hasSampleData=false", async () => {
+    const caller = createCaller(makeCtx({ journalEntry: {} }));
+    await caller.createExpense(expenseInput);
+    expect(clearAccountingSampleData).not.toHaveBeenCalled();
+  });
+
+  it("createRaw clears sample data when hasSampleData=true", async () => {
+    const orgFindUnique = vi.fn().mockResolvedValue({ hasSampleData: true });
+    const caller = createCaller(makeCtx({ journalEntry: {}, organisation: { findUnique: orgFindUnique } }));
+    await caller.createRaw(rawInput);
+    expect(clearAccountingSampleData).toHaveBeenCalledWith(expect.anything(), ORG);
+  });
+
+  it("createRaw does not clear when hasSampleData=false", async () => {
+    const caller = createCaller(makeCtx({ journalEntry: {} }));
+    await caller.createRaw(rawInput);
+    expect(clearAccountingSampleData).not.toHaveBeenCalled();
   });
 });
 
