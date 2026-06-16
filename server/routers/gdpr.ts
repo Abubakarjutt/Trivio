@@ -1,37 +1,10 @@
 import { z } from "zod";
 import { createTRPCRouter, orgProcedure, protectedProcedure } from "@/server/trpc";
 import { TRPCError } from "@trpc/server";
-import type { PrismaClient } from "@prisma/client";
-import { Prisma } from "@prisma/client";
 import { headers } from "next/headers";
 import { exportRateLimiter, deletionRateLimiter } from "@/server/middleware/rateLimit";
-
-// ── Audit helper ──────────────────────────────────────────────────────────────
-
-export async function writeAuditLog(params: {
-  db: PrismaClient;
-  organisationId: string;
-  userId: string;
-  action: "CREATE" | "UPDATE" | "VOID" | "DELETE" | "EXPORT" | "LOGIN" | "LOGOUT";
-  entityType: string;
-  entityId?: string;
-  after?: Prisma.InputJsonValue;
-}) {
-  try {
-    await params.db.auditLog.create({
-      data: {
-        organisationId: params.organisationId,
-        userId: params.userId,
-        action: params.action,
-        entityType: params.entityType,
-        entityId: params.entityId ?? "",
-        after: params.after,
-      },
-    });
-  } catch {
-    // Audit log write failure must never break the main flow
-  }
-}
+import { writeAuditLog } from "@/lib/audit-log";
+export { writeAuditLog } from "@/lib/audit-log";
 
 export const gdprRouter = createTRPCRouter({
   // ── Audit log ───────────────────────────────────────────────────────────────

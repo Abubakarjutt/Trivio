@@ -5,7 +5,7 @@ import GoogleProvider from "next-auth/providers/google";
 import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
 import { z } from "zod";
-import { writeAuditLog } from "@/server/routers/gdpr";
+import { writeAuditLog } from "@/lib/audit-log";
 
 const credentialsSchema = z.object({
   email: z.string().email(),
