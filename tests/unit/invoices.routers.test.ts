@@ -33,6 +33,11 @@ vi.mock("@/server/services/audit.service", () => ({
   writeAuditLog: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("@/lib/accounting-sample-data", () => ({
+  loadAccountingSampleData: vi.fn().mockResolvedValue(0),
+  clearAccountingSampleData: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("@/lib/db", () => ({
   db: {
     user: {
@@ -110,10 +115,11 @@ const lineItem = {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function makeCtx(db: Record<string, unknown> = {}): any {
+  const defaultOrg = { organisation: { findUnique: vi.fn().mockResolvedValue({ hasSampleData: false }) } };
   return {
     session: { user: { id: USER_ID, email: "u@test.com" } },
     user: { id: USER_ID, organisationId: ORG, organisation: { id: ORG, name: "Test Org" } },
-    db,
+    db: { ...defaultOrg, ...db },
     organisationId: ORG,
     organisation: { id: ORG, name: "Test Org" },
   };

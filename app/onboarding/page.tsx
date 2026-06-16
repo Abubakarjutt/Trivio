@@ -393,8 +393,8 @@ export default function OnboardingPage() {
                   <div>
                     <p className="font-semibold text-sm">Explore with sample data</p>
                     <p className="text-xs text-muted-foreground mt-1">
-                      See the app with realistic demo transactions — PKR groceries, bills, transfers.
-                      Cleared automatically when you import your own data.
+                      See the app with realistic invoices, bills, contacts, and journal entries.
+                      Cleared automatically when you create your first real transaction.
                     </p>
                   </div>
                 </div>

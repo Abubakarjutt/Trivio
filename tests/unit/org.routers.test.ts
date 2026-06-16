@@ -30,6 +30,12 @@ vi.mock("@/lib/sample-data", () => ({
   ],
 }));
 
+// accounting-sample-data: no-op in unit tests
+vi.mock("@/lib/accounting-sample-data", () => ({
+  loadAccountingSampleData: vi.fn().mockResolvedValue(0),
+  clearAccountingSampleData: vi.fn().mockResolvedValue(undefined),
+}));
+
 // The orgProcedure middleware imports `db` directly from @/lib/db (not ctx.db).
 // We must mock that module so the middleware resolves organisationId.
 vi.mock("@/lib/db", () => ({

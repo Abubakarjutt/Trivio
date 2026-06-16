@@ -291,6 +291,7 @@ model JournalEntry {
   isVoid         Boolean            @default(false)
   voidedAt       DateTime?
   voidReason     String?
+  isSampleData   Boolean            @default(false)
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
 
@@ -325,6 +326,7 @@ model Contact {
   address        String?
   taxNumber      String?
   isArchived     Boolean      @default(false)
+  isSampleData   Boolean      @default(false)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
@@ -358,6 +360,7 @@ model Invoice {
   amountPaid     Decimal       @db.Decimal(19, 4) @default(0)
   notes          String?
   journalEntryId String?
+  isSampleData   Boolean       @default(false)
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
@@ -402,6 +405,7 @@ model Bill {
   amountPaid     Decimal       @db.Decimal(19, 4) @default(0)
   notes          String?
   journalEntryId String?
+  isSampleData   Boolean       @default(false)
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
@@ -436,6 +440,7 @@ model BankAccount {
   accountId      String // FK → ChartAccount
   chartAccount   ChartAccount @relation(fields: [accountId], references: [id])
   currentBalance Decimal      @db.Decimal(19, 4) @default(0)
+  isSampleData   Boolean      @default(false)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 

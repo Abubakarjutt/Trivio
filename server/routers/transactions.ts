@@ -8,6 +8,7 @@ import {
   buildExpenseEntry,
 } from "@/server/services/accounting.service";
 import { writeAuditLog } from "@/server/services/audit.service";
+import { clearAccountingSampleData } from "@/lib/accounting-sample-data";
 
 const PAGE_SIZE = 50;
 
@@ -76,6 +77,9 @@ export const transactionsRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      const org = await ctx.db.organisation.findUnique({ where: { id: ctx.organisationId }, select: { hasSampleData: true } });
+      if (org?.hasSampleData) await clearAccountingSampleData(ctx.db as any, ctx.organisationId);
+
       const entryData = buildIncomeEntry({
         date: input.date,
         description: input.description,
@@ -120,6 +124,9 @@ export const transactionsRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      const org2 = await ctx.db.organisation.findUnique({ where: { id: ctx.organisationId }, select: { hasSampleData: true } });
+      if (org2?.hasSampleData) await clearAccountingSampleData(ctx.db as any, ctx.organisationId);
+
       const entryData = buildExpenseEntry({
         date: input.date,
         description: input.description,
@@ -170,6 +177,9 @@ export const transactionsRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      const org3 = await ctx.db.organisation.findUnique({ where: { id: ctx.organisationId }, select: { hasSampleData: true } });
+      if (org3?.hasSampleData) await clearAccountingSampleData(ctx.db as any, ctx.organisationId);
+
       const entry = await createJournalEntry(ctx.db, {
         organisationId: ctx.organisationId,
         userId: ctx.session.user.id,

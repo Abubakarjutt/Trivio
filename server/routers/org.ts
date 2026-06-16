@@ -3,6 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, protectedProcedure, orgProcedure, publicProcedure } from "@/server/trpc";
 import { seedDefaultChartOfAccounts } from "@/server/services/chart-of-accounts.service";
 import { SAMPLE_TRANSACTIONS } from "@/lib/sample-data";
+import { loadAccountingSampleData } from "@/lib/accounting-sample-data";
 
 const SUPPORTED_CURRENCIES = [
   { code: "USD", name: "US Dollar" },
@@ -223,6 +224,9 @@ export const orgRouter = createTRPCRouter({
       });
       return count;
     });
+
+    // Also load accounting module sample data
+    await loadAccountingSampleData(ctx.db as any, ctx.organisationId);
 
     return { success: true, count };
   }),

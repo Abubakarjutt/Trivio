@@ -13,6 +13,7 @@ import { sendInvoiceEmail } from "@/server/services/email.service";
 import { writeAuditLog } from "@/server/services/audit.service";
 import { formatDate, formatCurrency } from "@/lib/utils";
 import { Prisma } from "@prisma/client";
+import { clearAccountingSampleData } from "@/lib/accounting-sample-data";
 
 const lineSchema = z.object({
   description: z.string().min(1),
@@ -97,6 +98,10 @@ export const invoicesRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      // Clear sample data on first real invoice
+      const org = await ctx.db.organisation.findUnique({ where: { id: ctx.organisationId }, select: { hasSampleData: true } });
+      if (org?.hasSampleData) await clearAccountingSampleData(ctx.db as any, ctx.organisationId);
+
       const invoice = await createInvoice(ctx.db, {
         organisationId: ctx.organisationId,
         ...input,

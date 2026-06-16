@@ -11,6 +11,7 @@ import {
 } from "@/server/services/bill.service";
 import { writeAuditLog } from "@/server/services/audit.service";
 import { Prisma } from "@prisma/client";
+import { clearAccountingSampleData } from "@/lib/accounting-sample-data";
 
 const lineSchema = z.object({
   description: z.string().min(1),
@@ -100,6 +101,10 @@ export const billsRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      // Clear sample data on first real bill
+      const org = await ctx.db.organisation.findUnique({ where: { id: ctx.organisationId }, select: { hasSampleData: true } });
+      if (org?.hasSampleData) await clearAccountingSampleData(ctx.db as any, ctx.organisationId);
+
       const bill = await createBill(ctx.db, { organisationId: ctx.organisationId, ...input });
       await writeAuditLog(ctx.db, {
         organisationId: ctx.organisationId,
