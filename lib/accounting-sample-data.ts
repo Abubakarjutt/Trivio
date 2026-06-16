@@ -2,7 +2,7 @@
 // All records created here are tagged isSampleData=true and automatically
 // cleared when the user creates their first real Invoice, Bill, or JournalEntry.
 
-import { type PrismaClient, Prisma } from "@prisma/client";
+import { type PrismaClient } from "@prisma/client";
 import { seedDefaultChartOfAccounts } from "@/server/services/chart-of-accounts.service";
 
 function daysAgo(n: number): Date {
@@ -37,7 +37,6 @@ export async function loadAccountingSampleData(
   const CASH  = by("1100");
   const AP    = by("2100");
   const REV   = by("4200");
-  const SALES = by("4100");
   const SAL   = by("5200");
   const RENT  = by("5300");
   const UTIL  = by("5400");
