@@ -40,23 +40,23 @@ type KpiCardProps = {
 function KpiCard({ label, value, icon: Icon, iconBg, iconColor, sub, href, delay = 0 }: KpiCardProps) {
   const inner = (
     <div
-      className="rise group relative rounded-2xl bg-white p-5 cursor-default hover:translate-y-[-1px] transition-transform duration-200"
+      className="rise group relative rounded-2xl bg-white p-5 cursor-default hover:translate-y-[-2px] transition-all duration-200"
       style={{
         boxShadow: "0 0 0 1px rgba(15,17,23,0.04), 0 1px 2px rgba(15,17,23,0.04), 0 8px 24px -8px rgba(15,17,23,0.08)",
         animationDelay: `${delay}ms`,
       }}
     >
-      <div className="flex items-center justify-between mb-4">
-        <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted-foreground/70">{label}</span>
+      <div className="flex items-center justify-between mb-3">
         <div
-          className="flex h-7 w-7 items-center justify-center rounded-lg"
+          className="flex h-8 w-8 items-center justify-center rounded-xl"
           style={{ background: iconBg }}
         >
-          <Icon className="h-3.5 w-3.5" style={{ color: iconColor }} />
+          <Icon className="h-4 w-4" style={{ color: iconColor }} />
         </div>
+        {sub && <span className="text-[10px] font-medium text-muted-foreground/60 uppercase tracking-[0.1em]">{sub}</span>}
       </div>
-      <p className="font-serif font-medium text-foreground leading-tight tracking-tight break-all" style={{ fontSize: "clamp(1.1rem, 2.5vw, 1.6rem)" }} title={value}>{value}</p>
-      {sub && <p className="text-[11px] text-muted-foreground mt-2">{sub}</p>}
+      <p className="font-serif text-[1.75rem] font-medium text-foreground leading-none tracking-tight" title={value}>{value}</p>
+      <p className="text-[11px] font-bold uppercase tracking-[0.1em] mt-2" style={{ color: iconColor, opacity: 0.7 }}>{label}</p>
 
       {/* gilt hairline accent on hover */}
       <div
@@ -124,28 +124,40 @@ export default function DashboardPage() {
 
       <div className="p-8 space-y-7 max-w-7xl">
 
-        {/* KPI Row */}
-        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-          {kpis.isLoading ? (
-            Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-[108px]" />)
-          ) : (
-            <>
-              <KpiCard label="Income"     value={fmt(kpis.data?.monthlyIncome)}   icon={TrendingUp}   iconBg="rgba(26,102,68,0.08)"  iconColor="#1A6644" sub={periodLabel}  delay={0}   />
-              <KpiCard label="Expenses"   value={fmt(kpis.data?.monthlyExpenses)} icon={TrendingDown} iconBg="rgba(192,81,81,0.08)"   iconColor="#C05151" sub={periodLabel}  delay={55}  />
-              <KpiCard
-                label="Net Profit"
-                value={fmt(kpis.data?.netProfit)}
-                icon={DollarSign}
-                iconBg={Number(kpis.data?.netProfit ?? 0) >= 0 ? "rgba(26,102,68,0.08)" : "rgba(192,81,81,0.08)"}
-                iconColor={Number(kpis.data?.netProfit ?? 0) >= 0 ? "#1A6644" : "#C05151"}
-                sub={periodLabel}
-                delay={110}
-              />
-              <KpiCard label="AR"         value={fmt(kpis.data?.outstandingAR)}  icon={FileText}     iconBg="rgba(201,168,106,0.10)" iconColor="#B8860B" sub="Outstanding" href="/invoices" delay={165} />
-              <KpiCard label="AP"         value={fmt(kpis.data?.outstandingAP)}  icon={Receipt}      iconBg="rgba(201,168,106,0.10)" iconColor="#B8860B" sub="Outstanding" href="/bills"    delay={220} />
-              <KpiCard label="Cash"       value={fmt(kpis.data?.cashPosition)}   icon={Landmark}     iconBg="rgba(147,196,174,0.15)" iconColor="#2E7D52" sub="Position"    delay={275} />
-            </>
-          )}
+        {/* KPI Grid — two rows of 3 */}
+        <div className="space-y-3">
+          {/* Row 1: P&L */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {kpis.isLoading ? (
+              Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-[120px]" />)
+            ) : (
+              <>
+                <KpiCard label="Income"    value={fmt(kpis.data?.monthlyIncome)}   icon={TrendingUp}   iconBg="rgba(26,102,68,0.08)"  iconColor="#1A6644" sub={periodLabel} delay={0}  />
+                <KpiCard label="Expenses"  value={fmt(kpis.data?.monthlyExpenses)} icon={TrendingDown} iconBg="rgba(192,81,81,0.08)"   iconColor="#C05151" sub={periodLabel} delay={50} />
+                <KpiCard
+                  label="Net Profit"
+                  value={fmt(kpis.data?.netProfit)}
+                  icon={DollarSign}
+                  iconBg={Number(kpis.data?.netProfit ?? 0) >= 0 ? "rgba(26,102,68,0.08)" : "rgba(192,81,81,0.08)"}
+                  iconColor={Number(kpis.data?.netProfit ?? 0) >= 0 ? "#1A6644" : "#C05151"}
+                  sub={periodLabel}
+                  delay={100}
+                />
+              </>
+            )}
+          </div>
+          {/* Row 2: Balance sheet */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {kpis.isLoading ? (
+              Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-[120px]" />)
+            ) : (
+              <>
+                <KpiCard label="Receivables" value={fmt(kpis.data?.outstandingAR)} icon={FileText} iconBg="rgba(201,168,106,0.10)" iconColor="#B8860B" sub="Outstanding" href="/invoices" delay={150} />
+                <KpiCard label="Payables"    value={fmt(kpis.data?.outstandingAP)} icon={Receipt}  iconBg="rgba(201,168,106,0.10)" iconColor="#B8860B" sub="Outstanding" href="/bills"    delay={200} />
+                <KpiCard label="Cash"        value={fmt(kpis.data?.cashPosition)}  icon={Landmark} iconBg="rgba(147,196,174,0.15)" iconColor="#2E7D52" sub="Position"                      delay={250} />
+              </>
+            )}
+          </div>
         </div>
 
         {/* Charts Row */}
