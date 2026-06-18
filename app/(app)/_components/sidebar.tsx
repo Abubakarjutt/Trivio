@@ -26,6 +26,7 @@ import {
   Building2,
   Handshake,
   Calendar,
+  MessageSquare,
 } from "lucide-react";
 
 type NavItem = {
@@ -208,8 +209,19 @@ export function Sidebar({ orgName, hasSampleData, onNavigate }: { orgName: strin
           ))}
         </div>
 
+        {/* AI Chat */}
+        <div className="relative pt-3" style={{ borderTop: "1px solid rgba(235,245,240,0.08)" }}>
+          <button
+            className="sb-link w-full"
+            onClick={() => { onNavigate?.(); window.dispatchEvent(new CustomEvent("open-chat")); }}
+          >
+            <MessageSquare className="sb-icon h-4 w-4 flex-shrink-0" strokeWidth={1.75} />
+            AI Chat
+          </button>
+        </div>
+
         {/* Footer */}
-        <div className="relative mt-4 pt-3 flex flex-col gap-0.5" style={{ borderTop: "1px solid rgba(235,245,240,0.08)" }}>
+        <div className="relative mt-2 pt-3 flex flex-col gap-0.5" style={{ borderTop: "1px solid rgba(235,245,240,0.08)" }}>
           <Link href="/settings" onClick={onNavigate} className="sb-link">
             <Settings className="sb-icon h-4 w-4 flex-shrink-0" strokeWidth={1.75} />
             Settings

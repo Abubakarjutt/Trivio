@@ -798,6 +798,12 @@ function MessageBubble({ message, fmt }: { message: Message; fmt: (v: unknown) =
 
 export function ChatPanel() {
   const [isOpen, setIsOpen] = useState(false);
+
+  useEffect(() => {
+    const handler = () => setIsOpen(true);
+    window.addEventListener("open-chat", handler);
+    return () => window.removeEventListener("open-chat", handler);
+  }, []);
   const [showHistory, setShowHistory] = useState(false);
   const [input, setInput] = useState("");
   const [conversationId, setConversationId] = useState<string | null>(null);
