@@ -16,6 +16,24 @@ function buildToolSummary(toolResults: ToolResult[]): string {
           return `✓ Bill ${d?.number} created for ${d?.supplier} — total $${d?.total}`;
         case "create_journal_entry":
           return `✓ Journal entry recorded`;
+        case "create_crm_lead":
+          return `✓ Lead ${d?.name} added (${d?.source}, status: ${d?.status})`;
+        case "update_crm_lead_status":
+          return `✓ Lead ${d?.name} updated to ${d?.status}`;
+        case "create_crm_deal":
+          return `✓ Deal "${d?.name}" created for ${d?.contact} — stage: ${d?.stage}, value: $${d?.value}`;
+        case "move_crm_deal":
+          return `✓ Deal "${d?.name}" moved to ${d?.newStage}`;
+        case "create_crm_activity":
+          return `✓ ${d?.type} activity "${d?.subject}" logged${d?.dueDate ? ` (due ${d?.dueDate})` : ""}`;
+        case "create_recurring":
+          return `✓ Recurring ${String(d?.type ?? "").toLowerCase()} "${d?.name}" created — $${d?.amount} ${String(d?.frequency ?? "").toLowerCase()}, next due ${d?.nextDueDate}`;
+        case "mark_recurring_paid":
+          return `✓ "${d?.name}" marked paid — next due ${d?.nextDueDate}`;
+        case "create_goal":
+          return `✓ Goal "${d?.name}" created — target $${d?.targetAmount}${d?.targetDate ? `, by ${d?.targetDate}` : ""}`;
+        case "update_goal_progress":
+          return `✓ Goal "${d?.name}" progress updated to $${d?.currentAmount} / $${d?.targetAmount} (${d?.progress}%)${d?.status === "COMPLETED" ? " — 🎉 Goal achieved!" : ""}`;
         case "list_invoices":
         case "list_bills":
         case "get_invoice":
@@ -29,6 +47,11 @@ function buildToolSummary(toolResults: ToolResult[]): string {
         case "get_trial_balance":
         case "get_ar_aging":
         case "get_ap_aging":
+        case "list_crm_leads":
+        case "list_crm_deals":
+        case "list_crm_activities":
+        case "list_recurring":
+        case "list_goals":
           return "";
         default:
           return `✓ ${r.tool.replace(/_/g, " ")} completed`;

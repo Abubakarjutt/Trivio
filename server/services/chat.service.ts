@@ -1,4 +1,4 @@
-import { type PrismaClient, Prisma, InvoiceStatus } from "@prisma/client";
+import { type PrismaClient, Prisma, InvoiceStatus, CrmLeadStatus, CrmLeadSource, CrmActivityType, RecurringType, RecurringFrequency, GoalStatus } from "@prisma/client";
 import { randomBytes } from "crypto";
 import { createJournalEntry, voidJournalEntry } from "./accounting.service";
 import { createInvoice, postInvoiceToLedger, recordInvoicePayment, voidInvoice } from "./invoice.service";
@@ -40,6 +40,13 @@ App pages & navigation:
 /transactions/new — manual journal: date, description, add lines (account + debit or credit); debits must equal credits
 /extract — AI document extraction: drag-drop or click to upload PDF/image → AI reads it → review extracted data → confirm to save as invoice or bill
 /reconciliation — bank reconciliation: select bank account → upload CSV statement → match transactions to journal entries → mark reconciled
+/recurring — recurring items: income and expense items that repeat; "New Recurring" button; track salary, rent, subscriptions
+/goals — financial goals: set target amount, target date; track progress manually or auto-calculated from transactions
+/crm — CRM overview: leads, deals, companies, activities pipeline
+/crm/leads — lead list; "New Lead" button; set status, source, estimated value
+/crm/deals — deals board; kanban by pipeline stage; "New Deal" button
+/crm/activities — activity log; schedule calls/emails/meetings/tasks
+/crm/companies — company list linked to contacts
 /reports — report hub; links to all reports below
 /reports/profit-loss — P&L: set date range → Run
 /reports/balance-sheet — Balance Sheet: set as-of date → Run
@@ -144,6 +151,25 @@ Personal Finance Budgets:
 - set_budgets: {"budgets":[{"category","limitAmount","name?","period?"},...]} — create or update multiple category budgets at once; use this when the user asks to set several budgets, wants a full budget plan, or asks to readjust existing budgets (e.g. "cut all by 10%", "move 1000 from Transport to Food", "keep total under 30000")
 - list_budgets: {} — show current budgets with spending progress
 Budget readjustment: always call list_budgets first to get current limits, compute the new values, then call set_budgets. Show before→after numbers in your reply.
+CRM — Leads:
+- create_crm_lead: {"firstName","lastName","email?","phone?","companyName?","jobTitle?","estimatedValue?","source?":"WEBSITE|REFERRAL|SOCIAL_MEDIA|COLD_OUTREACH|EVENT|ADVERTISING|OTHER","notes?"}
+- list_crm_leads: {"status?":"NEW|CONTACTED|QUALIFIED|UNQUALIFIED|CONVERTED","search?","limit?"}
+- update_crm_lead_status: {"leadId","status":"NEW|CONTACTED|QUALIFIED|UNQUALIFIED|CONVERTED","notes?"}
+CRM — Deals:
+- create_crm_deal: {"name","contactName","value?","expectedCloseDate?","stageName?","notes?"}
+- list_crm_deals: {"search?","limit?"}
+- move_crm_deal: {"dealId","stageName"}
+CRM — Activities:
+- create_crm_activity: {"type":"CALL|EMAIL|MEETING|NOTE|TASK","subject","notes?","contactName?","dealId?","dueDate?"}
+- list_crm_activities: {"contactName?","limit?"}
+Recurring Items:
+- create_recurring: {"name","amount","type":"INCOME|EXPENSE","frequency":"DAILY|WEEKLY|FORTNIGHTLY|MONTHLY|QUARTERLY|YEARLY","nextDueDate?","category?","description?"}
+- list_recurring: {"type?":"INCOME|EXPENSE"}
+- mark_recurring_paid: {"recurringId"}
+Goals:
+- create_goal: {"name","targetAmount","targetDate?","description?"}
+- list_goals: {}
+- update_goal_progress: {"goalId","currentAmount"}
 
 Format: TOOL_CALL_\${NONCE}: {"tool":"name","args":{...}}
 `;
@@ -295,6 +321,39 @@ export async function executeToolCall(
         return await toolSetBudgets(db, organisationId, toolCall.args);
       case "list_budgets":
         return await toolListBudgets(db, organisationId);
+      // CRM — Leads
+      case "create_crm_lead":
+        return await toolCreateCrmLead(db, organisationId, toolCall.args);
+      case "list_crm_leads":
+        return await toolListCrmLeads(db, organisationId, toolCall.args);
+      case "update_crm_lead_status":
+        return await toolUpdateCrmLeadStatus(db, organisationId, toolCall.args);
+      // CRM — Deals
+      case "create_crm_deal":
+        return await toolCreateCrmDeal(db, organisationId, toolCall.args);
+      case "list_crm_deals":
+        return await toolListCrmDeals(db, organisationId, toolCall.args);
+      case "move_crm_deal":
+        return await toolMoveCrmDeal(db, organisationId, toolCall.args);
+      // CRM — Activities
+      case "create_crm_activity":
+        return await toolCreateCrmActivity(db, organisationId, userId, toolCall.args);
+      case "list_crm_activities":
+        return await toolListCrmActivities(db, organisationId, toolCall.args);
+      // Recurring
+      case "create_recurring":
+        return await toolCreateRecurring(db, organisationId, toolCall.args);
+      case "list_recurring":
+        return await toolListRecurring(db, organisationId, toolCall.args);
+      case "mark_recurring_paid":
+        return await toolMarkRecurringPaid(db, organisationId, toolCall.args);
+      // Goals
+      case "create_goal":
+        return await toolCreateGoal(db, organisationId, toolCall.args);
+      case "list_goals":
+        return await toolListGoals(db, organisationId);
+      case "update_goal_progress":
+        return await toolUpdateGoalProgress(db, organisationId, toolCall.args);
       default:
         return { tool: toolCall.tool, success: false, error: `Unknown tool: ${toolCall.tool}` };
     }
@@ -1276,6 +1335,468 @@ async function toolListBudgets(
   });
 
   return { tool: "list_budgets", success: true, data: { budgets: result } };
+}
+
+// ─── CRM — Lead tools ─────────────────────────────────────────────────────────
+
+async function toolCreateCrmLead(
+  db: PrismaClient,
+  organisationId: string,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  const firstName = args.firstName as string;
+  const lastName = args.lastName as string;
+  if (!firstName || !lastName) return { tool: "create_crm_lead", success: false, error: "firstName and lastName are required" };
+
+  const validSources = ["WEBSITE","REFERRAL","SOCIAL_MEDIA","COLD_OUTREACH","EVENT","ADVERTISING","OTHER"];
+  const source = validSources.includes(args.source as string) ? (args.source as CrmLeadSource) : "OTHER";
+
+  const lead = await db.crmLead.create({
+    data: {
+      organisationId,
+      firstName,
+      lastName,
+      email: (args.email as string) || null,
+      phone: (args.phone as string) || null,
+      companyName: (args.companyName as string) || null,
+      jobTitle: (args.jobTitle as string) || null,
+      estimatedValue: args.estimatedValue ? new Prisma.Decimal(args.estimatedValue as number) : null,
+      source,
+      notes: (args.notes as string) || null,
+      status: "NEW",
+    },
+  });
+
+  return { tool: "create_crm_lead", success: true, data: { id: lead.id, name: `${lead.firstName} ${lead.lastName}`, status: lead.status, source: lead.source } };
+}
+
+async function toolListCrmLeads(
+  db: PrismaClient,
+  organisationId: string,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  const validStatuses: CrmLeadStatus[] = ["NEW","CONTACTED","QUALIFIED","UNQUALIFIED","CONVERTED"];
+  const status = validStatuses.includes(args.status as CrmLeadStatus) ? (args.status as CrmLeadStatus) : undefined;
+  const search = args.search as string | undefined;
+  const limit = Math.min((args.limit as number) || 15, 30);
+
+  const leads = await db.crmLead.findMany({
+    where: {
+      organisationId,
+      ...(status ? { status } : {}),
+      ...(search ? { OR: [
+        { firstName: { contains: search, mode: "insensitive" as const } },
+        { lastName: { contains: search, mode: "insensitive" as const } },
+        { companyName: { contains: search, mode: "insensitive" as const } },
+        { email: { contains: search, mode: "insensitive" as const } },
+      ]} : {}),
+    },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+  });
+
+  return {
+    tool: "list_crm_leads",
+    success: true,
+    data: leads.map((l) => ({
+      id: l.id,
+      name: `${l.firstName} ${l.lastName}`,
+      company: l.companyName,
+      email: l.email,
+      status: l.status,
+      source: l.source,
+      estimatedValue: l.estimatedValue ? Number(l.estimatedValue) : null,
+    })),
+  };
+}
+
+async function toolUpdateCrmLeadStatus(
+  db: PrismaClient,
+  organisationId: string,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  const leadId = args.leadId as string;
+  const status = args.status as CrmLeadStatus;
+  if (!leadId) return { tool: "update_crm_lead_status", success: false, error: "leadId is required" };
+  const validStatuses: CrmLeadStatus[] = ["NEW","CONTACTED","QUALIFIED","UNQUALIFIED","CONVERTED"];
+  if (!validStatuses.includes(status)) return { tool: "update_crm_lead_status", success: false, error: "status must be NEW|CONTACTED|QUALIFIED|UNQUALIFIED|CONVERTED" };
+
+  const lead = await db.crmLead.findFirst({ where: { id: leadId, organisationId } });
+  if (!lead) return { tool: "update_crm_lead_status", success: false, error: `Lead "${leadId}" not found` };
+
+  const updated = await db.crmLead.update({
+    where: { id: leadId },
+    data: {
+      status,
+      ...(args.notes ? { notes: args.notes as string } : {}),
+      ...(status === "CONVERTED" ? { convertedAt: new Date() } : {}),
+    },
+  });
+
+  return { tool: "update_crm_lead_status", success: true, data: { id: updated.id, name: `${updated.firstName} ${updated.lastName}`, status: updated.status } };
+}
+
+// ─── CRM — Deal tools ─────────────────────────────────────────────────────────
+
+async function toolCreateCrmDeal(
+  db: PrismaClient,
+  organisationId: string,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  const name = args.name as string;
+  const contactName = args.contactName as string;
+  if (!name) return { tool: "create_crm_deal", success: false, error: "name is required" };
+  if (!contactName) return { tool: "create_crm_deal", success: false, error: "contactName is required" };
+
+  const contact = await db.contact.findFirst({
+    where: { organisationId, name: { contains: contactName, mode: "insensitive" } },
+  });
+  if (!contact) return { tool: "create_crm_deal", success: false, error: `Contact "${contactName}" not found — create them first` };
+
+  // Find default pipeline
+  const pipeline = await db.crmPipeline.findFirst({
+    where: { organisationId },
+    orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
+    include: { stages: { orderBy: { order: "asc" } } },
+  });
+  if (!pipeline || pipeline.stages.length === 0) return { tool: "create_crm_deal", success: false, error: "No CRM pipeline found. Create one from the CRM settings page first." };
+
+  let stage = pipeline.stages[0];
+  if (args.stageName) {
+    const named = pipeline.stages.find((s) => s.name.toLowerCase().includes((args.stageName as string).toLowerCase()));
+    if (named) stage = named;
+  }
+
+  const deal = await db.crmDeal.create({
+    data: {
+      organisationId,
+      name,
+      contactId: contact.id,
+      pipelineId: pipeline.id,
+      stageId: stage.id,
+      value: args.value ? new Prisma.Decimal(args.value as number) : new Prisma.Decimal(0),
+      expectedCloseDate: args.expectedCloseDate ? new Date(args.expectedCloseDate as string) : null,
+      probability: stage.probability,
+    },
+  });
+
+  return { tool: "create_crm_deal", success: true, data: { id: deal.id, name: deal.name, contact: contact.name, stage: stage.name, value: Number(deal.value) } };
+}
+
+async function toolListCrmDeals(
+  db: PrismaClient,
+  organisationId: string,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  const search = args.search as string | undefined;
+  const limit = Math.min((args.limit as number) || 15, 30);
+
+  const deals = await db.crmDeal.findMany({
+    where: {
+      organisationId,
+      ...(search ? { OR: [
+        { name: { contains: search, mode: "insensitive" as const } },
+        { contact: { name: { contains: search, mode: "insensitive" as const } } },
+      ]} : {}),
+    },
+    include: { contact: { select: { name: true } }, stage: { select: { name: true } } },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+  });
+
+  return {
+    tool: "list_crm_deals",
+    success: true,
+    data: deals.map((d) => ({
+      id: d.id,
+      name: d.name,
+      contact: d.contact.name,
+      stage: d.stage.name,
+      value: Number(d.value),
+      expectedCloseDate: d.expectedCloseDate?.toISOString().slice(0, 10) ?? null,
+      probability: d.probability,
+    })),
+  };
+}
+
+async function toolMoveCrmDeal(
+  db: PrismaClient,
+  organisationId: string,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  const dealId = args.dealId as string;
+  const stageName = args.stageName as string;
+  if (!dealId) return { tool: "move_crm_deal", success: false, error: "dealId is required" };
+  if (!stageName) return { tool: "move_crm_deal", success: false, error: "stageName is required" };
+
+  const deal = await db.crmDeal.findFirst({ where: { id: dealId, organisationId }, include: { pipeline: { include: { stages: true } } } });
+  if (!deal) return { tool: "move_crm_deal", success: false, error: `Deal "${dealId}" not found` };
+
+  const stage = deal.pipeline.stages.find((s) => s.name.toLowerCase().includes(stageName.toLowerCase()));
+  if (!stage) return { tool: "move_crm_deal", success: false, error: `Stage "${stageName}" not found in pipeline "${deal.pipeline.name}"` };
+
+  const updated = await db.crmDeal.update({ where: { id: dealId }, data: { stageId: stage.id, probability: stage.probability } });
+  return { tool: "move_crm_deal", success: true, data: { id: updated.id, name: deal.name, newStage: stage.name } };
+}
+
+// ─── CRM — Activity tools ─────────────────────────────────────────────────────
+
+async function toolCreateCrmActivity(
+  db: PrismaClient,
+  organisationId: string,
+  userId: string,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  const validTypes: CrmActivityType[] = ["CALL","EMAIL","MEETING","NOTE","TASK"];
+  const type = args.type as CrmActivityType;
+  const subject = args.subject as string;
+  if (!validTypes.includes(type)) return { tool: "create_crm_activity", success: false, error: "type must be CALL|EMAIL|MEETING|NOTE|TASK" };
+  if (!subject) return { tool: "create_crm_activity", success: false, error: "subject is required" };
+
+  let contactId: string | null = null;
+  if (args.contactName) {
+    const contact = await db.contact.findFirst({ where: { organisationId, name: { contains: args.contactName as string, mode: "insensitive" } } });
+    if (contact) contactId = contact.id;
+  }
+
+  let dealId: string | null = null;
+  if (args.dealId) {
+    const deal = await db.crmDeal.findFirst({ where: { id: args.dealId as string, organisationId } });
+    if (deal) dealId = deal.id;
+  }
+
+  const activity = await db.crmActivity.create({
+    data: {
+      organisationId,
+      type,
+      subject,
+      notes: (args.notes as string) || null,
+      contactId,
+      dealId,
+      dueDate: args.dueDate ? new Date(args.dueDate as string) : null,
+      createdById: userId,
+    },
+  });
+
+  return { tool: "create_crm_activity", success: true, data: { id: activity.id, type: activity.type, subject: activity.subject, dueDate: activity.dueDate?.toISOString().slice(0, 10) ?? null } };
+}
+
+async function toolListCrmActivities(
+  db: PrismaClient,
+  organisationId: string,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  const limit = Math.min((args.limit as number) || 15, 30);
+
+  let contactId: string | undefined;
+  if (args.contactName) {
+    const contact = await db.contact.findFirst({ where: { organisationId, name: { contains: args.contactName as string, mode: "insensitive" } } });
+    if (contact) contactId = contact.id;
+  }
+
+  const activities = await db.crmActivity.findMany({
+    where: { organisationId, ...(contactId ? { contactId } : {}) },
+    include: { contact: { select: { name: true } }, deal: { select: { name: true } } },
+    orderBy: [{ completedAt: "asc" }, { dueDate: "asc" }, { createdAt: "desc" }],
+    take: limit,
+  });
+
+  return {
+    tool: "list_crm_activities",
+    success: true,
+    data: activities.map((a) => ({
+      id: a.id,
+      type: a.type,
+      subject: a.subject,
+      contact: a.contact?.name ?? null,
+      deal: a.deal?.name ?? null,
+      dueDate: a.dueDate?.toISOString().slice(0, 10) ?? null,
+      completed: !!a.completedAt,
+    })),
+  };
+}
+
+// ─── Recurring tools ──────────────────────────────────────────────────────────
+
+function nextDueDateFromFrequency(from: Date, frequency: RecurringFrequency): Date {
+  const d = new Date(from);
+  switch (frequency) {
+    case "DAILY":        d.setDate(d.getDate() + 1); break;
+    case "WEEKLY":       d.setDate(d.getDate() + 7); break;
+    case "FORTNIGHTLY":  d.setDate(d.getDate() + 14); break;
+    case "MONTHLY":      d.setMonth(d.getMonth() + 1); break;
+    case "QUARTERLY":    d.setMonth(d.getMonth() + 3); break;
+    case "YEARLY":       d.setFullYear(d.getFullYear() + 1); break;
+  }
+  return d;
+}
+
+async function toolCreateRecurring(
+  db: PrismaClient,
+  organisationId: string,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  const name = args.name as string;
+  const amount = Number(args.amount);
+  const validTypes: RecurringType[] = ["INCOME", "EXPENSE"];
+  const validFreqs: RecurringFrequency[] = ["DAILY","WEEKLY","FORTNIGHTLY","MONTHLY","QUARTERLY","YEARLY"];
+  const type = validTypes.includes(args.type as RecurringType) ? (args.type as RecurringType) : null;
+  const frequency = validFreqs.includes(args.frequency as RecurringFrequency) ? (args.frequency as RecurringFrequency) : "MONTHLY";
+
+  if (!name) return { tool: "create_recurring", success: false, error: "name is required" };
+  if (!amount || amount <= 0) return { tool: "create_recurring", success: false, error: "amount must be a positive number" };
+  if (!type) return { tool: "create_recurring", success: false, error: "type must be INCOME or EXPENSE" };
+
+  const nextDueDate = args.nextDueDate ? new Date(args.nextDueDate as string) : new Date();
+
+  const item = await db.recurringItem.create({
+    data: {
+      organisationId,
+      name,
+      amount: new Prisma.Decimal(amount),
+      type,
+      frequency,
+      nextDueDate,
+      category: (args.category as string) || null,
+      description: (args.description as string) || null,
+      isActive: true,
+    },
+  });
+
+  return { tool: "create_recurring", success: true, data: { id: item.id, name: item.name, amount: Number(item.amount), type: item.type, frequency: item.frequency, nextDueDate: item.nextDueDate.toISOString().slice(0, 10) } };
+}
+
+async function toolListRecurring(
+  db: PrismaClient,
+  organisationId: string,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  const validTypes: RecurringType[] = ["INCOME", "EXPENSE"];
+  const type = validTypes.includes(args.type as RecurringType) ? (args.type as RecurringType) : undefined;
+
+  const items = await db.recurringItem.findMany({
+    where: { organisationId, isActive: true, ...(type ? { type } : {}) },
+    orderBy: { nextDueDate: "asc" },
+  });
+
+  return {
+    tool: "list_recurring",
+    success: true,
+    data: items.map((i) => ({
+      id: i.id,
+      name: i.name,
+      amount: Number(i.amount),
+      type: i.type,
+      frequency: i.frequency,
+      category: i.category,
+      nextDueDate: i.nextDueDate.toISOString().slice(0, 10),
+      lastPaidAt: i.lastPaidAt?.toISOString().slice(0, 10) ?? null,
+    })),
+  };
+}
+
+async function toolMarkRecurringPaid(
+  db: PrismaClient,
+  organisationId: string,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  const id = args.recurringId as string;
+  if (!id) return { tool: "mark_recurring_paid", success: false, error: "recurringId is required" };
+
+  const item = await db.recurringItem.findFirst({ where: { id, organisationId } });
+  if (!item) return { tool: "mark_recurring_paid", success: false, error: `Recurring item "${id}" not found` };
+
+  const newNextDueDate = nextDueDateFromFrequency(item.nextDueDate, item.frequency);
+
+  const updated = await db.recurringItem.update({
+    where: { id },
+    data: { lastPaidAt: new Date(), nextDueDate: newNextDueDate },
+  });
+
+  return { tool: "mark_recurring_paid", success: true, data: { name: updated.name, lastPaidAt: updated.lastPaidAt?.toISOString().slice(0, 10), nextDueDate: updated.nextDueDate.toISOString().slice(0, 10) } };
+}
+
+// ─── Goal tools ───────────────────────────────────────────────────────────────
+
+async function toolCreateGoal(
+  db: PrismaClient,
+  organisationId: string,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  const name = args.name as string;
+  const targetAmount = Number(args.targetAmount);
+  if (!name) return { tool: "create_goal", success: false, error: "name is required" };
+  if (!targetAmount || targetAmount <= 0) return { tool: "create_goal", success: false, error: "targetAmount must be a positive number" };
+
+  const goal = await db.goal.create({
+    data: {
+      organisationId,
+      name,
+      targetAmount: new Prisma.Decimal(targetAmount),
+      targetDate: args.targetDate ? new Date(args.targetDate as string) : null,
+      description: (args.description as string) || null,
+      status: "ACTIVE",
+    },
+  });
+
+  return { tool: "create_goal", success: true, data: { id: goal.id, name: goal.name, targetAmount: Number(goal.targetAmount), targetDate: goal.targetDate?.toISOString().slice(0, 10) ?? null } };
+}
+
+async function toolListGoals(
+  db: PrismaClient,
+  organisationId: string,
+): Promise<ToolResult> {
+  const goals = await db.goal.findMany({
+    where: { organisationId, status: { not: "CANCELLED" } },
+    orderBy: { createdAt: "asc" },
+  });
+
+  return {
+    tool: "list_goals",
+    success: true,
+    data: goals.map((g) => ({
+      id: g.id,
+      name: g.name,
+      targetAmount: Number(g.targetAmount),
+      currentAmount: Number(g.currentAmount),
+      progress: Math.min(100, Math.round((Number(g.currentAmount) / Number(g.targetAmount)) * 100)),
+      targetDate: g.targetDate?.toISOString().slice(0, 10) ?? null,
+      status: g.status,
+    })),
+  };
+}
+
+async function toolUpdateGoalProgress(
+  db: PrismaClient,
+  organisationId: string,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  const goalId = args.goalId as string;
+  const currentAmount = Number(args.currentAmount);
+  if (!goalId) return { tool: "update_goal_progress", success: false, error: "goalId is required" };
+  if (isNaN(currentAmount) || currentAmount < 0) return { tool: "update_goal_progress", success: false, error: "currentAmount must be a non-negative number" };
+
+  const goal = await db.goal.findFirst({ where: { id: goalId, organisationId } });
+  if (!goal) return { tool: "update_goal_progress", success: false, error: `Goal "${goalId}" not found` };
+
+  const newStatus: GoalStatus = currentAmount >= Number(goal.targetAmount) ? "COMPLETED" : "ACTIVE";
+
+  const updated = await db.goal.update({
+    where: { id: goalId },
+    data: { currentAmount: new Prisma.Decimal(currentAmount), status: newStatus },
+  });
+
+  return {
+    tool: "update_goal_progress",
+    success: true,
+    data: {
+      name: updated.name,
+      currentAmount: Number(updated.currentAmount),
+      targetAmount: Number(updated.targetAmount),
+      progress: Math.min(100, Math.round((Number(updated.currentAmount) / Number(updated.targetAmount)) * 100)),
+      status: updated.status,
+    },
+  };
 }
 
 export async function buildChatMessages(
