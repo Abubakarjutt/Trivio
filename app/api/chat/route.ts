@@ -47,11 +47,17 @@ function buildToolSummary(toolResults: ToolResult[]): string {
         case "get_trial_balance":
         case "get_ar_aging":
         case "get_ap_aging":
+        case "create_crm_company":
+          return `✓ Company "${d?.name}" added (${d?.size}, ${d?.industry ?? "no industry set"})`;
+        case "create_watchlist":
+          return `✓ Watchlist "${d?.name}" created — alert when ${d?.category} exceeds $${d?.threshold} per ${String(d?.period ?? "").toLowerCase()}`;
         case "list_crm_leads":
         case "list_crm_deals":
         case "list_crm_activities":
+        case "list_crm_companies":
         case "list_recurring":
         case "list_goals":
+        case "list_watchlists":
           return "";
         default:
           return `✓ ${r.tool.replace(/_/g, " ")} completed`;

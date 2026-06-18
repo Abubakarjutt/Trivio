@@ -170,6 +170,12 @@ Goals:
 - create_goal: {"name","targetAmount","targetDate?","description?"}
 - list_goals: {}
 - update_goal_progress: {"goalId","currentAmount"}
+CRM — Companies:
+- create_crm_company: {"name","industry?","website?","phone?","address?","size?":"SOLO|SMALL|MEDIUM|LARGE|ENTERPRISE","notes?"}
+- list_crm_companies: {"search?","limit?"}
+Watchlists:
+- create_watchlist: {"name","category","threshold","period?":"WEEKLY|MONTHLY|QUARTERLY|YEARLY"}
+- list_watchlists: {}
 
 Format: TOOL_CALL_\${NONCE}: {"tool":"name","args":{...}}
 `;
@@ -354,6 +360,16 @@ export async function executeToolCall(
         return await toolListGoals(db, organisationId);
       case "update_goal_progress":
         return await toolUpdateGoalProgress(db, organisationId, toolCall.args);
+      // CRM — Companies
+      case "create_crm_company":
+        return await toolCreateCrmCompany(db, organisationId, toolCall.args);
+      case "list_crm_companies":
+        return await toolListCrmCompanies(db, organisationId, toolCall.args);
+      // Watchlists
+      case "create_watchlist":
+        return await toolCreateWatchlist(db, organisationId, toolCall.args);
+      case "list_watchlists":
+        return await toolListWatchlists(db, organisationId);
       default:
         return { tool: toolCall.tool, success: false, error: `Unknown tool: ${toolCall.tool}` };
     }
@@ -1796,6 +1812,121 @@ async function toolUpdateGoalProgress(
       progress: Math.min(100, Math.round((Number(updated.currentAmount) / Number(updated.targetAmount)) * 100)),
       status: updated.status,
     },
+  };
+}
+
+// ─── CRM — Company tools ──────────────────────────────────────────────────────
+
+async function toolCreateCrmCompany(
+  db: PrismaClient,
+  organisationId: string,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  const name = args.name as string;
+  if (!name) return { tool: "create_crm_company", success: false, error: "name is required" };
+
+  const validSizes = ["SOLO", "SMALL", "MEDIUM", "LARGE", "ENTERPRISE"];
+  const size = validSizes.includes(args.size as string) ? (args.size as "SOLO" | "SMALL" | "MEDIUM" | "LARGE" | "ENTERPRISE") : "SMALL";
+
+  const company = await db.crmCompany.create({
+    data: {
+      organisationId,
+      name,
+      industry: (args.industry as string) || null,
+      website: (args.website as string) || null,
+      phone: (args.phone as string) || null,
+      address: (args.address as string) || null,
+      size,
+      notes: (args.notes as string) || null,
+    },
+  });
+
+  return { tool: "create_crm_company", success: true, data: { id: company.id, name: company.name, industry: company.industry, size: company.size } };
+}
+
+async function toolListCrmCompanies(
+  db: PrismaClient,
+  organisationId: string,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  const search = args.search as string | undefined;
+  const limit = Math.min((args.limit as number) || 15, 30);
+
+  const companies = await db.crmCompany.findMany({
+    where: {
+      organisationId,
+      ...(search ? { name: { contains: search, mode: "insensitive" as const } } : {}),
+    },
+    include: { _count: { select: { deals: true } } },
+    orderBy: { createdAt: "desc" },
+    take: limit,
+  });
+
+  return {
+    tool: "list_crm_companies",
+    success: true,
+    data: companies.map((c) => ({
+      id: c.id,
+      name: c.name,
+      industry: c.industry,
+      size: c.size,
+      phone: c.phone,
+      website: c.website,
+      dealCount: c._count.deals,
+    })),
+  };
+}
+
+// ─── Watchlist tools ──────────────────────────────────────────────────────────
+
+async function toolCreateWatchlist(
+  db: PrismaClient,
+  organisationId: string,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  const name = args.name as string;
+  const category = args.category as string;
+  const threshold = Number(args.threshold);
+  if (!name) return { tool: "create_watchlist", success: false, error: "name is required" };
+  if (!category) return { tool: "create_watchlist", success: false, error: "category is required" };
+  if (!threshold || threshold <= 0) return { tool: "create_watchlist", success: false, error: "threshold must be a positive number" };
+
+  const validPeriods = ["WEEKLY", "MONTHLY", "QUARTERLY", "YEARLY"];
+  const period = validPeriods.includes(args.period as string) ? (args.period as "WEEKLY" | "MONTHLY" | "QUARTERLY" | "YEARLY") : "MONTHLY";
+
+  const watchlist = await db.watchlist.create({
+    data: {
+      organisationId,
+      name,
+      category,
+      threshold: new Prisma.Decimal(threshold),
+      period,
+      isActive: true,
+    },
+  });
+
+  return { tool: "create_watchlist", success: true, data: { id: watchlist.id, name: watchlist.name, category: watchlist.category, threshold: Number(watchlist.threshold), period: watchlist.period } };
+}
+
+async function toolListWatchlists(
+  db: PrismaClient,
+  organisationId: string,
+): Promise<ToolResult> {
+  const watchlists = await db.watchlist.findMany({
+    where: { organisationId, isActive: true },
+    orderBy: { createdAt: "asc" },
+  });
+
+  return {
+    tool: "list_watchlists",
+    success: true,
+    data: watchlists.map((w) => ({
+      id: w.id,
+      name: w.name,
+      category: w.category,
+      threshold: Number(w.threshold),
+      period: w.period,
+    })),
   };
 }
 
