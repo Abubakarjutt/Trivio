@@ -55,7 +55,7 @@ function KpiCard({ label, value, icon: Icon, iconBg, iconColor, sub, href, delay
           <Icon className="h-3.5 w-3.5" style={{ color: iconColor }} />
         </div>
       </div>
-      <p className="font-serif text-[1.6rem] font-medium text-foreground leading-none tracking-tight truncate" title={value}>{value}</p>
+      <p className="font-serif font-medium text-foreground leading-tight tracking-tight break-all" style={{ fontSize: "clamp(1.1rem, 2.5vw, 1.6rem)" }} title={value}>{value}</p>
       {sub && <p className="text-[11px] text-muted-foreground mt-2">{sub}</p>}
 
       {/* gilt hairline accent on hover */}
