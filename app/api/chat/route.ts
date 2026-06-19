@@ -153,6 +153,7 @@ export async function POST(req: NextRequest) {
       sendEvent("start", { conversationId });
 
       try {
+        console.log("[chat] step=start msgs=", messages.length, "nonce=", nonce);
         if (!GEMINI_API_KEY) {
           sendEvent("error", { message: "AI chat is not configured. Please set GEMINI_API_KEY." });
           controller.close();
@@ -170,6 +171,7 @@ export async function POST(req: NextRequest) {
         }));
 
         const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+        console.log("[chat] step=calling-gemini model=", GEMINI_MODEL, "contents=", contents.length);
 
         const res = await fetch(geminiUrl, {
           method: "POST",
@@ -181,8 +183,10 @@ export async function POST(req: NextRequest) {
           }),
         });
 
+        console.log("[chat] step=gemini-response status=", res.status);
         if (!res.ok) {
           const errText = await res.text().catch(() => "");
+          console.error("[chat] gemini-error", res.status, errText.slice(0, 500));
           sendEvent("error", { message: `Gemini returned ${res.status}: ${errText.slice(0, 200)}` });
           controller.close();
           return;
@@ -200,6 +204,7 @@ export async function POST(req: NextRequest) {
           .join("")
           .trim();
 
+        console.log("[chat] step=parsed fullContent.length=", fullContent.length, "preview=", fullContent.slice(0, 100));
         if (fullContent) {
           sendEvent("token", { content: fullContent });
         }
