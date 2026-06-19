@@ -1980,7 +1980,8 @@ export async function buildChatMessages(
 
   const messages = [
     { role: "system", content: systemPrompt },
-    ...history.map((m) => ({ role: m.role, content: m.content })),
+    // Skip empty assistant messages — Gemini rejects parts with empty text
+    ...history.filter((m) => m.content.trim()).map((m) => ({ role: m.role, content: m.content })),
     { role: "user", content: params.attachmentId ? `[User attached a file (attachmentId: ${params.attachmentId})]\n\n${params.userMessage}` : params.userMessage },
   ];
 
