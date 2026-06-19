@@ -1,8 +1,15 @@
 import { NextRequest } from "next/server";
+import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { buildChatMessages, executeToolCall, parseToolCalls, type ToolResult } from "@/server/services/chat.service";
 import { chatRateLimiter } from "@/server/middleware/rateLimit";
+
+const chatBodySchema = z.object({
+  message: z.string().min(1).max(4000),
+  conversationId: z.string().uuid().optional(),
+  attachmentId: z.string().uuid().optional(),
+});
 
 function buildToolSummary(toolResults: ToolResult[]): string {
   return toolResults
@@ -34,6 +41,32 @@ function buildToolSummary(toolResults: ToolResult[]): string {
           return `✓ Goal "${d?.name}" created — target $${d?.targetAmount}${d?.targetDate ? `, by ${d?.targetDate}` : ""}`;
         case "update_goal_progress":
           return `✓ Goal "${d?.name}" progress updated to $${d?.currentAmount} / $${d?.targetAmount} (${d?.progress}%)${d?.status === "COMPLETED" ? " — 🎉 Goal achieved!" : ""}`;
+        case "send_invoice":
+          return `✓ Invoice ${d?.number} marked as sent`;
+        case "void_invoice":
+          return `✓ Invoice ${d?.number} voided`;
+        case "record_invoice_payment":
+          return `✓ Payment of $${d?.amountPaid} recorded on invoice ${d?.number} — now ${d?.newStatus} (via ${d?.cashAccount})`;
+        case "approve_bill":
+          return `✓ Bill ${d?.number} approved`;
+        case "void_bill":
+          return `✓ Bill ${d?.number} voided`;
+        case "record_bill_payment":
+          return `✓ Payment of $${d?.amountPaid} recorded on bill ${d?.number} — now ${d?.newStatus} (via ${d?.cashAccount})`;
+        case "void_transaction":
+          return `✓ Journal entry voided: "${d?.description}"`;
+        case "create_contact":
+          return `✓ Contact "${d?.name}" (${d?.type}) created`;
+        case "update_contact":
+          return `✓ Contact "${d?.name}" updated`;
+        case "create_account":
+          return `✓ Account ${d?.code} — ${d?.name} (${String(d?.type ?? "").toLowerCase()}) created`;
+        case "set_budget":
+          return `✓ Budget ${d?.action === "updated" ? "updated" : "created"} — ${d?.category}: $${d?.limitAmount}/${String(d?.period ?? "MONTHLY").toLowerCase()}`;
+        case "set_budgets":
+          return `✓ ${d?.saved} budget(s) saved`;
+        case "extract_document":
+          return `✓ Document queued for extraction — check Attachments for results`;
         case "create_crm_company":
           return `✓ Company "${d?.name}" added (${d?.size}, ${d?.industry ?? "no industry set"})`;
         case "list_invoices":
@@ -52,6 +85,7 @@ function buildToolSummary(toolResults: ToolResult[]): string {
           return "";
         case "create_watchlist":
           return `✓ Watchlist "${d?.name}" created — alert when ${d?.category} exceeds $${d?.threshold} per ${String(d?.period ?? "").toLowerCase()}`;
+        case "list_budgets":
         case "list_crm_leads":
         case "list_crm_deals":
         case "list_crm_activities":
@@ -88,16 +122,11 @@ export async function POST(req: NextRequest) {
     return new Response("No organisation", { status: 403 });
   }
 
-  const body = await req.json();
-  const { message, conversationId: inputConvId, attachmentId } = body as {
-    message: string;
-    conversationId?: string;
-    attachmentId?: string;
-  };
-
-  if (!message?.trim()) {
-    return new Response("Message required", { status: 400 });
+  const parsed = chatBodySchema.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) {
+    return new Response("Invalid request body", { status: 400 });
   }
+  const { message, conversationId: inputConvId, attachmentId } = parsed.data;
 
   // Rate-limit chat requests to protect AI compute costs
   try {

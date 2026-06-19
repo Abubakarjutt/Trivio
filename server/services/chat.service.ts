@@ -3,6 +3,7 @@ import { randomBytes } from "crypto";
 import { createJournalEntry, voidJournalEntry } from "./accounting.service";
 import { createInvoice, postInvoiceToLedger, recordInvoicePayment, voidInvoice } from "./invoice.service";
 import { createBill, postBillToLedger, recordBillPayment, voidBill } from "./bill.service";
+import { extractionQueue } from "@/lib/queue";
 
 export interface ToolCall {
   tool: string;
@@ -171,6 +172,8 @@ CRM — Companies:
 Watchlists:
 - create_watchlist: {"name","category","threshold","period?":"WEEKLY|MONTHLY|QUARTERLY|YEARLY"}
 - list_watchlists: {}
+Document Extraction:
+- extract_document: {"attachmentId"} — extract invoice/bill/receipt data from an uploaded file (use the attachmentId shown in the user message)
 
 Format: TOOL_CALL_\${NONCE}: {"tool":"name","args":{...}}
 `;
@@ -317,8 +320,14 @@ export async function executeToolCall(
         return await toolGetArAging(db, organisationId);
       case "get_ap_aging":
         return await toolGetApAging(db, organisationId);
-      case "extract_document":
-        return { tool: toolCall.tool, success: true, data: { message: "Document extraction queued. Results will appear shortly." } };
+      case "extract_document": {
+        const attachmentId = toolCall.args.attachmentId as string | undefined;
+        if (!attachmentId) return { tool: "extract_document", success: false, error: "attachmentId is required" };
+        const attachment = await db.attachment.findFirst({ where: { id: attachmentId, organisationId } });
+        if (!attachment) return { tool: "extract_document", success: false, error: "Attachment not found" };
+        await extractionQueue.add("extract", { attachmentId, organisationId, userId });
+        return { tool: "extract_document", success: true, data: { attachmentId, status: "queued" } };
+      }
       // Personal Finance Budgets
       case "set_budget":
         return await toolSetBudget(db, organisationId, toolCall.args);
