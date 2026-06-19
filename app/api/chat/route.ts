@@ -205,6 +205,7 @@ export async function POST(req: NextRequest) {
           finishReason: json.candidates?.[0]?.finishReason,
           partCount: json.candidates?.[0]?.content?.parts?.length ?? 0,
           blockReason: json.promptFeedback?.blockReason,
+          rawCandidate: JSON.stringify(json.candidates?.[0]).slice(0, 500),
         }));
 
         const parts = json.candidates?.[0]?.content?.parts ?? [];
