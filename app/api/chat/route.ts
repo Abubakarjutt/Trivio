@@ -69,8 +69,9 @@ function buildToolSummary(toolResults: ToolResult[]): string {
 
 export const maxDuration = 120;
 
-const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "gemma4:e4b";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? "";
+const GEMINI_MODEL   = process.env.GEMINI_MODEL   ?? "gemini-2.0-flash";
+const GEMINI_URL     = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:streamGenerateContent?alt=sse&key=${GEMINI_API_KEY}`;
 
 export async function POST(req: NextRequest) {
   const session = await auth();
@@ -153,14 +154,37 @@ export async function POST(req: NextRequest) {
       sendEvent("start", { conversationId });
 
       try {
-        const res = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+        if (!GEMINI_API_KEY) {
+          sendEvent("error", { message: "AI chat is not configured. Please set GEMINI_API_KEY." });
+          controller.close();
+          return;
+        }
+
+        // Separate system prompt from conversation history
+        const systemMsg = messages.find((m) => m.role === "system");
+        const chatMsgs  = messages.filter((m) => m.role !== "system");
+
+        // Convert to Gemini's contents format (user/model roles)
+        const contents = chatMsgs.map((m) => ({
+          role: m.role === "assistant" ? "model" : "user",
+          parts: [{ text: m.content }],
+        }));
+
+        const body = {
+          ...(systemMsg ? { systemInstruction: { parts: [{ text: systemMsg.content }] } } : {}),
+          contents,
+          generationConfig: { temperature: 0.2, maxOutputTokens: 2048 },
+        };
+
+        const res = await fetch(GEMINI_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ model: OLLAMA_MODEL, messages, stream: true, think: false }),
+          body: JSON.stringify(body),
         });
 
         if (!res.ok || !res.body) {
-          sendEvent("error", { message: `Ollama returned ${res.status}` });
+          const errText = await res.text().catch(() => "");
+          sendEvent("error", { message: `Gemini returned ${res.status}: ${errText.slice(0, 200)}` });
           controller.close();
           return;
         }
@@ -169,7 +193,6 @@ export async function POST(req: NextRequest) {
         const decoder = new TextDecoder();
         let fullContent = "";
         let buffer = "";
-        let sentThinking = false;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -180,16 +203,15 @@ export async function POST(req: NextRequest) {
           buffer = lines.pop() ?? "";
 
           for (const line of lines) {
-            if (!line.trim()) continue;
+            if (!line.startsWith("data:")) continue;
+            const data = line.slice(5).trim();
+            if (!data || data === "[DONE]") continue;
             try {
-              const json = JSON.parse(line);
-              if (json.message?.content) {
-                const token = json.message.content;
+              const json = JSON.parse(data);
+              const token: string = json.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+              if (token) {
                 fullContent += token;
                 sendEvent("token", { content: token });
-              } else if (json.message?.thinking && !sentThinking) {
-                sentThinking = true;
-                sendEvent("thinking", { status: "thinking" });
               }
             } catch {
               // skip malformed lines
