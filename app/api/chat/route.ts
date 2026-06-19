@@ -177,7 +177,7 @@ export async function POST(req: NextRequest) {
           body: JSON.stringify({
             ...(systemMsg ? { systemInstruction: { parts: [{ text: systemMsg.content }] } } : {}),
             contents,
-            generationConfig: { temperature: 0.2, maxOutputTokens: 2048 },
+            generationConfig: { temperature: 0.2, maxOutputTokens: 8192 },
           }),
         });
 
@@ -194,17 +194,23 @@ export async function POST(req: NextRequest) {
 
         // Filter out thought parts, concatenate only real answer parts
         const parts = json.candidates?.[0]?.content?.parts ?? [];
+        const finishReason = (json.candidates?.[0] as Record<string, unknown>)?.finishReason as string | undefined;
         const fullContent = parts
           .filter((p) => !p.thought && p.text)
           .map((p) => p.text!)
           .join("")
           .trim();
 
-        if (fullContent) {
-          sendEvent("token", { content: fullContent });
-        }
+        // If the model only produced thinking tokens (all budget consumed by reasoning),
+        // send a graceful fallback rather than silent empty response.
+        const responseText = fullContent ||
+          (finishReason === "MAX_TOKENS"
+            ? "I'm sorry, I ran out of space to form a reply. Please try asking a shorter or simpler question."
+            : "I'm sorry, I wasn't able to generate a response. Please try again.");
 
-        const { text, toolCalls } = parseToolCalls(fullContent, nonce);
+        sendEvent("token", { content: responseText });
+
+        const { text, toolCalls } = parseToolCalls(responseText, nonce);
         const toolResults: ToolResult[] = [];
 
         if (toolCalls.length > 0) {
