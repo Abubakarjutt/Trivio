@@ -54,4 +54,4 @@ export const extractionRateLimiter = createRateLimiter(20, 60_000);
 export const exportRateLimiter     = createRateLimiter(3, 60 * 60_000);
 export const deletionRateLimiter   = createRateLimiter(2, 60 * 60_000);
 export const registerRateLimiter   = createRouteRateLimiter(5, 60 * 60 * 1000);
-export const chatRateLimiter       = createRateLimiter(30, 60 * 60 * 1000);
+export const chatRateLimiter       = createRateLimiter(20, 60_000);

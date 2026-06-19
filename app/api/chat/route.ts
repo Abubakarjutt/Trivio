@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { buildChatMessages, executeToolCall, parseToolCalls, type ToolResult } from "@/server/services/chat.service";
-import { extractionRateLimiter } from "@/server/middleware/rateLimit";
+import { chatRateLimiter } from "@/server/middleware/rateLimit";
 
 function buildToolSummary(toolResults: ToolResult[]): string {
   return toolResults
@@ -101,7 +101,7 @@ export async function POST(req: NextRequest) {
 
   // Rate-limit chat requests to protect AI compute costs
   try {
-    await extractionRateLimiter(`chat:${user.id}`);
+    await chatRateLimiter(`chat:${user.id}`);
   } catch {
     return new Response("Too many requests. Try again shortly.", { status: 429 });
   }

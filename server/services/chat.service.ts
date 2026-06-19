@@ -4,9 +4,6 @@ import { createJournalEntry, voidJournalEntry } from "./accounting.service";
 import { createInvoice, postInvoiceToLedger, recordInvoicePayment, voidInvoice } from "./invoice.service";
 import { createBill, postBillToLedger, recordBillPayment, voidBill } from "./bill.service";
 
-const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL ?? "gemma4:e4b";
-
 export interface ToolCall {
   tool: string;
   args: Record<string, unknown>;
@@ -17,12 +14,6 @@ export interface ToolResult {
   success: boolean;
   data?: unknown;
   error?: string;
-}
-
-export interface ChatResponse {
-  content: string;
-  toolCalls: ToolCall[];
-  toolResults: ToolResult[];
 }
 
 const APP_UI_GUIDE = `
@@ -1996,50 +1987,3 @@ export async function buildChatMessages(
   return { messages, nonce };
 }
 
-export async function processMessage(
-  db: PrismaClient,
-  params: {
-    organisationId: string;
-    userId: string;
-    conversationId: string;
-    userMessage: string;
-    attachmentId?: string;
-  },
-): Promise<ChatResponse> {
-  const { messages, nonce } = await buildChatMessages(db, params);
-
-  let aiResponse: string;
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 120000);
-
-    const res = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: OLLAMA_MODEL, messages, stream: false }),
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeout);
-    if (!res.ok) throw new Error(`Ollama returned ${res.status}`);
-    const json = await res.json();
-    aiResponse = json.message?.content ?? "I'm sorry, I couldn't process that request.";
-  } catch (err) {
-    if (err instanceof Error && err.name === "AbortError") {
-      aiResponse = "The AI model took too long to respond. Please try a shorter or simpler request.";
-    } else {
-      aiResponse = `I'm having trouble connecting to the AI model. Please make sure Ollama is running. Error: ${err instanceof Error ? err.message : "Unknown"}`;
-    }
-    return { content: aiResponse, toolCalls: [], toolResults: [] };
-  }
-
-  const { text, toolCalls } = parseToolCalls(aiResponse, nonce);
-  const toolResults: ToolResult[] = [];
-
-  for (const call of toolCalls) {
-    const result = await executeToolCall(db, params.organisationId, params.userId, call);
-    toolResults.push(result);
-  }
-
-  return { content: text, toolCalls, toolResults };
-}
