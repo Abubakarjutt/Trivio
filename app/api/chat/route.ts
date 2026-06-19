@@ -191,33 +191,44 @@ export async function POST(req: NextRequest) {
         }
 
         const json = await res.json() as {
-          candidates?: Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean }> }; finishReason?: string }>;
+          candidates?: Array<{
+            content?: { parts?: Array<{ text?: string; thought?: boolean; functionCall?: { name?: string; args?: Record<string, unknown> } }> };
+            finishReason?: string;
+          }>;
           promptFeedback?: { blockReason?: string };
           error?: { message?: string; code?: number };
         };
 
-        // Log the raw response structure for debugging
         console.log("[chat] Gemini response:", JSON.stringify({
           model: GEMINI_MODEL,
           candidateCount: json.candidates?.length ?? 0,
           finishReason: json.candidates?.[0]?.finishReason,
           partCount: json.candidates?.[0]?.content?.parts?.length ?? 0,
           blockReason: json.promptFeedback?.blockReason,
-          error: json.error,
         }));
 
-        // Filter out thought parts, concatenate only real answer parts
         const parts = json.candidates?.[0]?.content?.parts ?? [];
         const finishReason = json.candidates?.[0]?.finishReason;
+
+        // gemini-2.5-flash-lite sometimes emits native function calls even when
+        // toolConfig mode=NONE. When it does, parts contain a functionCall object
+        // instead of text. Extract it and synthesise a TOOL_CALL text line so the
+        // rest of the pipeline can execute it normally.
+        let nativeFnText = "";
+        if (finishReason === "UNEXPECTED_TOOL_CALL") {
+          const fnParts = parts.filter((p) => p.functionCall);
+          nativeFnText = fnParts
+            .map((p) => `TOOL_CALL_${nonce}: ${JSON.stringify({ tool: p.functionCall!.name, args: p.functionCall!.args ?? {} })}`)
+            .join("\n");
+        }
+
         const fullContent = parts
           .filter((p) => !p.thought && p.text)
           .map((p) => p.text!)
           .join("")
           .trim();
 
-        // If the model only produced thinking tokens (all budget consumed by reasoning),
-        // send a graceful fallback rather than silent empty response.
-        const responseText = fullContent ||
+        const responseText = (nativeFnText || fullContent) ||
           (finishReason === "MAX_TOKENS"
             ? "I'm sorry, I ran out of space to form a reply. Please try asking a shorter or simpler question."
             : "I'm sorry, I wasn't able to generate a response. Please try again.");
