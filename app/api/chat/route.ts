@@ -71,7 +71,6 @@ export const maxDuration = 120;
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? "";
 const GEMINI_MODEL   = process.env.GEMINI_MODEL   ?? "gemini-2.0-flash";
-const GEMINI_URL     = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:streamGenerateContent?alt=sse&key=${GEMINI_API_KEY}`;
 
 export async function POST(req: NextRequest) {
   const session = await auth();
@@ -170,53 +169,39 @@ export async function POST(req: NextRequest) {
           parts: [{ text: m.content }],
         }));
 
-        const body = {
-          ...(systemMsg ? { systemInstruction: { parts: [{ text: systemMsg.content }] } } : {}),
-          contents,
-          generationConfig: { temperature: 0.2, maxOutputTokens: 2048 },
-        };
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
 
-        const res = await fetch(GEMINI_URL, {
+        const res = await fetch(geminiUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
+          body: JSON.stringify({
+            ...(systemMsg ? { systemInstruction: { parts: [{ text: systemMsg.content }] } } : {}),
+            contents,
+            generationConfig: { temperature: 0.2, maxOutputTokens: 2048 },
+          }),
         });
 
-        if (!res.ok || !res.body) {
+        if (!res.ok) {
           const errText = await res.text().catch(() => "");
           sendEvent("error", { message: `Gemini returned ${res.status}: ${errText.slice(0, 200)}` });
           controller.close();
           return;
         }
 
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let fullContent = "";
-        let buffer = "";
+        const json = await res.json() as {
+          candidates?: Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean }> } }>;
+        };
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+        // Filter out thought parts, concatenate only real answer parts
+        const parts = json.candidates?.[0]?.content?.parts ?? [];
+        const fullContent = parts
+          .filter((p) => !p.thought && p.text)
+          .map((p) => p.text!)
+          .join("")
+          .trim();
 
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() ?? "";
-
-          for (const line of lines) {
-            if (!line.startsWith("data:")) continue;
-            const data = line.slice(5).trim();
-            if (!data || data === "[DONE]") continue;
-            try {
-              const json = JSON.parse(data);
-              const token: string = json.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-              if (token) {
-                fullContent += token;
-                sendEvent("token", { content: token });
-              }
-            } catch {
-              // skip malformed lines
-            }
-          }
+        if (fullContent) {
+          sendEvent("token", { content: fullContent });
         }
 
         const { text, toolCalls } = parseToolCalls(fullContent, nonce);
