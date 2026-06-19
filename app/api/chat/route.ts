@@ -189,12 +189,24 @@ export async function POST(req: NextRequest) {
         }
 
         const json = await res.json() as {
-          candidates?: Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean }> } }>;
+          candidates?: Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean }> }; finishReason?: string }>;
+          promptFeedback?: { blockReason?: string };
+          error?: { message?: string; code?: number };
         };
+
+        // Log the raw response structure for debugging
+        console.log("[chat] Gemini response:", JSON.stringify({
+          model: GEMINI_MODEL,
+          candidateCount: json.candidates?.length ?? 0,
+          finishReason: json.candidates?.[0]?.finishReason,
+          partCount: json.candidates?.[0]?.content?.parts?.length ?? 0,
+          blockReason: json.promptFeedback?.blockReason,
+          error: json.error,
+        }));
 
         // Filter out thought parts, concatenate only real answer parts
         const parts = json.candidates?.[0]?.content?.parts ?? [];
-        const finishReason = (json.candidates?.[0] as Record<string, unknown>)?.finishReason as string | undefined;
+        const finishReason = json.candidates?.[0]?.finishReason;
         const fullContent = parts
           .filter((p) => !p.thought && p.text)
           .map((p) => p.text!)
