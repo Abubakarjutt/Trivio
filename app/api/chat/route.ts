@@ -199,15 +199,6 @@ export async function POST(req: NextRequest) {
           error?: { message?: string; code?: number };
         };
 
-        console.log("[chat] Gemini response:", JSON.stringify({
-          model: GEMINI_MODEL,
-          candidateCount: json.candidates?.length ?? 0,
-          finishReason: json.candidates?.[0]?.finishReason,
-          partCount: json.candidates?.[0]?.content?.parts?.length ?? 0,
-          blockReason: json.promptFeedback?.blockReason,
-          rawCandidate: JSON.stringify(json.candidates?.[0]).slice(0, 500),
-        }));
-
         const parts = json.candidates?.[0]?.content?.parts ?? [];
         const finishReason = json.candidates?.[0]?.finishReason;
 
