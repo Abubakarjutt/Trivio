@@ -178,6 +178,8 @@ export async function POST(req: NextRequest) {
             ...(systemMsg ? { systemInstruction: { parts: [{ text: systemMsg.content }] } } : {}),
             contents,
             generationConfig: { temperature: 0.2, maxOutputTokens: 8192 },
+            // Disable native function calling — we use our own TOOL_CALL text format
+            toolConfig: { functionCallingConfig: { mode: "NONE" } },
           }),
         });
 
