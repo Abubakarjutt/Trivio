@@ -114,7 +114,11 @@ Run a report:
   4. Use the export button to download as PDF or CSV
 `;
 
-const TOOL_DEFINITIONS = `Tools (use TOOL_CALL format to invoke):
+const TOOL_DEFINITIONS = `IMPORTANT: You must ONLY output plain text. Never use function calling or structured output.
+When you need to perform an action, write a single ACTION line in plain text using this exact format:
+TOOL_CALL_\${NONCE}: {"tool":"<name>","args":{...}}
+
+Available actions:
 Invoices & Bills:
 - create_invoice: {"contactName","date?","dueDate?","lines":[{"description","quantity","unitPrice"}],"notes?"}
 - list_invoices: {"status?":"ALL|DRAFT|SENT|PARTIAL|PAID|OVERDUE|VOID","search?","limit?"}
@@ -211,19 +215,23 @@ export function buildSystemPrompt(
 
   // Embed nonce into the tool-call format string. The LLM sees the resolved
   // prefix; injected user text cannot forge tool calls without knowing the nonce.
-  const toolDefs = TOOL_DEFINITIONS.replace("${NONCE}", nonce);
+  const toolDefs = TOOL_DEFINITIONS.replaceAll("${NONCE}", nonce);
 
-  return `You are an accounting assistant for "${orgContext.orgName}". Currency: ${orgContext.currency}. Today's date: ${today}.
+  const prompt = `You are an accounting assistant for "${orgContext.orgName}". Currency: ${orgContext.currency}. Today's date: ${today}.
 Accounts: ${accountList}
 Contacts: ${contactList}
 ${APP_UI_GUIDE}
 ${toolDefs}
 Rules:
+- ALWAYS output plain text only. NEVER use function calling, JSON mode, or structured output.
+- When performing an action, write the ACTION line in plain text: TOOL_CALL_\${NONCE}: {"tool":"...","args":{...}}
 - When the user asks "how do I…" or wants to do something themselves, give numbered UI steps from the guide above.
-- When the user asks you to perform a task directly (create, record, void, list, show), use the tools.
-- For UI-only tasks (document upload, bank reconciliation, settings), always provide UI steps — no tool exists for these.
+- When the user asks you to perform a task directly (create, record, void, list, show), output the ACTION line.
+- For UI-only tasks (document upload, bank reconciliation, settings), always provide UI steps — no action exists for these.
 - Be concise. Confirm details before creating records.
-- IMPORTANT: When the user mentions relative dates (today, yesterday, last week, last month, etc.), resolve them to an explicit YYYY-MM-DD date using today's date above BEFORE passing to any tool. Never guess or use a date from your training data.`;
+- IMPORTANT: When the user mentions relative dates (today, yesterday, last week, last month, etc.), resolve them to an explicit YYYY-MM-DD date using today's date above BEFORE passing to any action. Never guess or use a date from your training data.`;
+
+  return prompt.replaceAll("${NONCE}", nonce);
 }
 
 export function parseToolCalls(response: string, nonce: string): { text: string; toolCalls: ToolCall[] } {
