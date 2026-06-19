@@ -34,6 +34,8 @@ function buildToolSummary(toolResults: ToolResult[]): string {
           return `✓ Goal "${d?.name}" created — target $${d?.targetAmount}${d?.targetDate ? `, by ${d?.targetDate}` : ""}`;
         case "update_goal_progress":
           return `✓ Goal "${d?.name}" progress updated to $${d?.currentAmount} / $${d?.targetAmount} (${d?.progress}%)${d?.status === "COMPLETED" ? " — 🎉 Goal achieved!" : ""}`;
+        case "create_crm_company":
+          return `✓ Company "${d?.name}" added (${d?.size}, ${d?.industry ?? "no industry set"})`;
         case "list_invoices":
         case "list_bills":
         case "get_invoice":
@@ -47,8 +49,7 @@ function buildToolSummary(toolResults: ToolResult[]): string {
         case "get_trial_balance":
         case "get_ar_aging":
         case "get_ap_aging":
-        case "create_crm_company":
-          return `✓ Company "${d?.name}" added (${d?.size}, ${d?.industry ?? "no industry set"})`;
+          return "";
         case "create_watchlist":
           return `✓ Watchlist "${d?.name}" created — alert when ${d?.category} exceeds $${d?.threshold} per ${String(d?.period ?? "").toLowerCase()}`;
         case "list_crm_leads":
