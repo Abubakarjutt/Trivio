@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 
-const ADMIN_EMAIL = "abubakarsahi534@gmail.com";
+const ADMIN_EMAIL = "abubakarsahi@hotmail.com";
 
 function kpi(label: string, value: string | number, sub?: string) {
   return (
