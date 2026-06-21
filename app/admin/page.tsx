@@ -20,6 +20,16 @@ export default async function AdminPage() {
     redirect("/dashboard");
   }
 
+  // Defense-in-depth: verify the admin account's email is confirmed in the DB,
+  // blocking any session issued before Fix 1 (emailVerified gate in auth.ts) was deployed.
+  const adminUser = await db.user.findUnique({
+    where: { email: ADMIN_EMAIL },
+    select: { emailVerified: true },
+  });
+  if (!adminUser?.emailVerified) {
+    redirect("/dashboard");
+  }
+
   const now = new Date();
   const d7  = new Date(now.getTime() - 7  * 86400_000);
   const d30 = new Date(now.getTime() - 30 * 86400_000);
