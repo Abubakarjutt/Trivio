@@ -15,6 +15,8 @@ export interface JurisdictionConfig {
   sections: TaxSection[]
 }
 
+// ─── Pakistan (FBR) ───────────────────────────────────────────────────────────
+// Fiscal year: 1 Jul → 30 Jun (e.g. FY2025 = 1 Jul 2024 – 30 Jun 2025)
 const pakistanConfig: JurisdictionConfig = {
   code: "PAK",
   name: "Pakistan (FBR)",
@@ -34,18 +36,29 @@ const pakistanConfig: JurisdictionConfig = {
       label: "Section 153 — Services / Contracts",
       type: "income",
       reference: "ITO 2001 s.153",
+      // Removed: "Bank Fees & Charges" (expense, not services income)
+      // Removed: "Investments & Trading" (taxed separately under s.37/s.151 — see pak_s37 below)
       categories: [
-        "Freelance & Services", "Business Revenue",
-        "Software & Subscriptions", "Professional Services",
-        "Bank Fees & Charges", "Investments & Trading",
+        "Freelance & Services",
+        "Business Revenue",
+        "Software & Subscriptions",
+        "Professional Services",
       ],
+    },
+    {
+      id: "pak_s37",
+      label: "Section 37 / 151 — Capital Gains & Investment Income",
+      type: "income",
+      reference: "ITO 2001 s.37, s.151",
+      categories: ["Investments & Trading"],
     },
     {
       id: "pak_7e",
       label: "Section 7E — Property Income",
       type: "income",
       reference: "ITO 2001 s.7E",
-      categories: ["Rent & Mortgage", "Home Improvement", "Rental Income"],
+      categories: ["Rent & Mortgage", "Rental Income"],
+      // Removed: "Home Improvement" — a cost category, not income
     },
     {
       id: "pak_biz_exp",
@@ -53,17 +66,28 @@ const pakistanConfig: JurisdictionConfig = {
       type: "deduction",
       reference: "ITO 2001 s.20-21",
       categories: [
-        "Software & Subscriptions", "Office Supplies", "Professional Services", "Shipping & Postage",
-        "Electricity & Gas", "Internet & Phone", "Water & Waste",
-        "Fuel & Gas", "Ride-sharing & Taxis", "Public Transit", "Parking", "Vehicle Maintenance",
+        "Software & Subscriptions",
+        "Office Supplies",
+        "Professional Services",
+        "Shipping & Postage",
+        "Bank Fees & Charges",   // moved from income — DEBIT transactions are business costs
+        "Electricity & Gas",
+        "Internet & Phone",
+        "Water & Waste",
+        "Fuel & Gas",
+        "Ride-sharing & Taxis",
+        "Public Transit",
+        "Parking",
+        "Vehicle Maintenance",
       ],
     },
     {
       id: "pak_medical",
-      label: "Medical Deductions",
+      label: "Medical Expenses (tax credit)",
       type: "deduction",
-      reference: "ITO 2001 s.61",
-      categories: ["Pharmacy & Drugstore", "Doctor & Medical", "Gym & Fitness"],
+      reference: "ITO 2001 s.62",
+      // Removed: "Gym & Fitness" — not deductible under Pakistan tax law
+      categories: ["Pharmacy & Drugstore", "Doctor & Medical"],
     },
     {
       id: "pak_education",
@@ -75,6 +99,8 @@ const pakistanConfig: JurisdictionConfig = {
   ],
 }
 
+// ─── United States (IRS) ──────────────────────────────────────────────────────
+// Fiscal year: 1 Jan → 31 Dec
 const usaConfig: JurisdictionConfig = {
   code: "USA",
   name: "United States (IRS)",
@@ -94,18 +120,30 @@ const usaConfig: JurisdictionConfig = {
       label: "Schedule C — Business Income",
       type: "income",
       reference: "IRS Schedule C",
+      // Removed: "Bank Fees & Charges" (expense, not business revenue)
+      // Removed: "Investments & Trading" (Schedule D capital gains — see usa_sched_d below)
       categories: [
-        "Freelance & Services", "Business Revenue",
-        "Software & Subscriptions", "Professional Services",
-        "Bank Fees & Charges", "Investments & Trading",
+        "Freelance & Services",
+        "Business Revenue",
+        "Software & Subscriptions",
+        "Professional Services",
       ],
+    },
+    {
+      id: "usa_sched_d",
+      label: "Schedule D — Capital Gains",
+      type: "income",
+      reference: "IRS Schedule D",
+      categories: ["Investments & Trading"],
     },
     {
       id: "usa_sched_e",
       label: "Schedule E — Rental / Passive",
       type: "income",
       reference: "IRS Schedule E",
-      categories: ["Rent & Mortgage", "Home Improvement", "Rental Income"],
+      categories: ["Rental Income"],
+      // Removed: "Rent & Mortgage" (expense paid, not rental income received)
+      // Removed: "Home Improvement" (expense category)
     },
     {
       id: "usa_biz_exp",
@@ -113,16 +151,28 @@ const usaConfig: JurisdictionConfig = {
       type: "deduction",
       reference: "IRS Schedule C",
       categories: [
-        "Software & Subscriptions", "Office Supplies", "Professional Services", "Shipping & Postage",
-        "Electricity & Gas", "Internet & Phone", "Water & Waste",
-        "Fuel & Gas", "Ride-sharing & Taxis", "Public Transit", "Parking", "Vehicle Maintenance",
+        "Software & Subscriptions",
+        "Office Supplies",
+        "Professional Services",
+        "Shipping & Postage",
+        "Bank Fees & Charges",   // moved from income — deductible as ordinary business expense
+        "Electricity & Gas",
+        "Internet & Phone",
+        "Water & Waste",
+        "Fuel & Gas",
+        "Ride-sharing & Taxis",
+        "Public Transit",
+        "Parking",
+        "Vehicle Maintenance",
       ],
     },
     {
       id: "usa_medical",
       label: "Medical Deductions (Schedule A)",
       type: "deduction",
-      reference: "IRS Schedule A",
+      reference: "IRS Schedule A §213",
+      // Gym & Fitness only deductible if medically prescribed; kept as an indicator
+      // but user should verify against the 7.5% AGI threshold
       categories: ["Pharmacy & Drugstore", "Doctor & Medical", "Gym & Fitness"],
     },
     {
@@ -135,6 +185,8 @@ const usaConfig: JurisdictionConfig = {
   ],
 }
 
+// ─── United Kingdom (HMRC) ────────────────────────────────────────────────────
+// Fiscal year: 6 Apr → 5 Apr next year
 const ukConfig: JurisdictionConfig = {
   code: "UK",
   name: "United Kingdom (HMRC)",
@@ -154,18 +206,29 @@ const ukConfig: JurisdictionConfig = {
       label: "Self-Employment Income",
       type: "income",
       reference: "ITTOIA 2005 s.3",
+      // Removed: "Bank Fees & Charges" (expense, not self-employment revenue)
+      // Removed: "Investments & Trading" (CGT — see uk_cgt below)
       categories: [
-        "Freelance & Services", "Business Revenue",
-        "Software & Subscriptions", "Professional Services",
-        "Bank Fees & Charges", "Investments & Trading",
+        "Freelance & Services",
+        "Business Revenue",
+        "Software & Subscriptions",
+        "Professional Services",
       ],
+    },
+    {
+      id: "uk_cgt",
+      label: "Capital Gains",
+      type: "income",
+      reference: "TCGA 1992",
+      categories: ["Investments & Trading"],
     },
     {
       id: "uk_property",
       label: "Property Income",
       type: "income",
       reference: "ITTOIA 2005 s.261",
-      categories: ["Rent & Mortgage", "Home Improvement", "Rental Income"],
+      categories: ["Rental Income"],
+      // Removed: "Rent & Mortgage" and "Home Improvement" (expenses, not income)
     },
     {
       id: "uk_biz_exp",
@@ -173,9 +236,19 @@ const ukConfig: JurisdictionConfig = {
       type: "deduction",
       reference: "ITTOIA 2005 s.34",
       categories: [
-        "Software & Subscriptions", "Office Supplies", "Professional Services", "Shipping & Postage",
-        "Electricity & Gas", "Internet & Phone", "Water & Waste",
-        "Fuel & Gas", "Ride-sharing & Taxis", "Public Transit", "Parking", "Vehicle Maintenance",
+        "Software & Subscriptions",
+        "Office Supplies",
+        "Professional Services",
+        "Shipping & Postage",
+        "Bank Fees & Charges",   // moved from income — allowable as business cost
+        "Electricity & Gas",
+        "Internet & Phone",
+        "Water & Waste",
+        "Fuel & Gas",
+        "Ride-sharing & Taxis",
+        "Public Transit",
+        "Parking",
+        "Vehicle Maintenance",
       ],
     },
     {
@@ -183,6 +256,7 @@ const ukConfig: JurisdictionConfig = {
       label: "Medical / Professional Expenses",
       type: "deduction",
       reference: "ITTOIA 2005 s.34",
+      // Gym & Fitness only deductible if wholly and exclusively for business (e.g. personal trainer)
       categories: ["Pharmacy & Drugstore", "Doctor & Medical", "Gym & Fitness"],
     },
     {

@@ -92,6 +92,10 @@ export default function TaxReportPage() {
 
         {!isLoading && report && (
           <>
+            <div className="mb-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+              <strong>Estimate only.</strong> Figures are based on imported bank statement transactions categorised in the Personal Finance module. Invoices, bills, and journal entries from the accounting module are not included. Review each section with a qualified tax professional before filing.
+            </div>
+
             <TaxSummaryCards
               totalIncome={report.summary.totalIncome}
               totalDeductions={report.summary.totalDeductions}
