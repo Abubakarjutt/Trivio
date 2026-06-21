@@ -84,9 +84,21 @@ export default function TaxReportPage() {
 
         {!isLoading && years.length === 0 && (
           <div className="flex items-center justify-center py-16">
-            <p className="text-sm" style={{ color: "#9CA3AF" }}>
-              No transactions found. Import bank statements to generate your tax report.
-            </p>
+            <div className="text-center max-w-xs">
+              <p className="text-sm font-medium mb-1" style={{ color: "#0F1117" }}>
+                No transactions yet
+              </p>
+              <p className="text-xs mb-4" style={{ color: "#6B7180" }}>
+                Import bank statements to generate your tax report.
+              </p>
+              <Link
+                href="/pf/transactions"
+                className="inline-block text-xs font-semibold px-4 py-2 rounded-lg"
+                style={{ background: "#1A6644", color: "#fff" }}
+              >
+                Import Transactions
+              </Link>
+            </div>
           </div>
         )}
 

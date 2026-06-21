@@ -1,5 +1,5 @@
 "use client"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { trpc } from "@/lib/trpc/client"
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetClose,
@@ -29,6 +29,8 @@ const PAGE_SIZE = 20
 
 export function TaxSectionDrawer({ section, fiscalYear, currency, open, onClose }: Props) {
   const [page, setPage] = useState(1)
+
+  useEffect(() => { setPage(1) }, [section?.id])
 
   const { data, isLoading } = trpc.taxReport.sectionTransactions.useQuery(
     { fiscalYear, sectionId: section?.id ?? "", page, pageSize: PAGE_SIZE },

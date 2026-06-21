@@ -57,8 +57,9 @@ const pakistanConfig: JurisdictionConfig = {
       label: "Section 7E — Property Income",
       type: "income",
       reference: "ITO 2001 s.7E",
-      categories: ["Rent & Mortgage", "Rental Income"],
-      // Removed: "Home Improvement" — a cost category, not income
+      // "Rent & Mortgage" removed — category name is ambiguous (used for rent paid too);
+      // only "Rental Income" unambiguously means income received from tenants
+      categories: ["Rental Income"],
     },
     {
       id: "pak_biz_exp",

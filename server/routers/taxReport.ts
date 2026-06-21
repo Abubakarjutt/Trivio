@@ -43,9 +43,9 @@ export const taxReportRouter = createTRPCRouter({
         }),
       ])
 
-      type Row = { category: string; _sum: { amount: unknown }; _count: { id: number } }
+      type Row = { category: string; _sum: { amount: { toNumber(): number } | null }; _count: { id: number } }
       const toMap = (rows: Row[]) =>
-        Object.fromEntries(rows.map(r => [r.category, { total: Number(r._sum.amount ?? 0), count: r._count.id }]))
+        Object.fromEntries(rows.map(r => [r.category, { total: r._sum.amount?.toNumber() ?? 0, count: r._count.id }]))
 
       const creditMap = toMap(creditRows as Row[])
       const debitMap  = toMap(debitRows as Row[])
