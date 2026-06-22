@@ -21,7 +21,17 @@ import { PrismaClient } from "@prisma/client";
 import { extractDocument } from "@/server/services/extraction.service";
 import type { ExtractionJob } from "@/lib/queue";
 
-const connection = new IORedis({ host: "localhost", port: 6379, maxRetriesPerRequest: null });
+function parseRedisUrl(url: string): { host: string; port: number } {
+  try {
+    const u = new URL(url);
+    return { host: u.hostname, port: Number(u.port) || 6379 };
+  } catch {
+    return { host: "localhost", port: 6379 };
+  }
+}
+
+const redisConfig = parseRedisUrl(process.env.REDIS_URL ?? "redis://localhost:6379");
+const connection = new IORedis({ ...redisConfig, maxRetriesPerRequest: null });
 
 const prisma = new PrismaClient({
   log: ["error", "warn"],
