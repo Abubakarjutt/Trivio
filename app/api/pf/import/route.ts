@@ -239,6 +239,16 @@ async function runStreamingImport(
   });
 
   emit("progress", { step: "saving", pct: 90 });
+
+  // Clear demo data before saving real transactions
+  const org = await db.organisation.findUnique({ where: { id: organisationId }, select: { hasSampleData: true } });
+  if (org?.hasSampleData) {
+    await db.$transaction([
+      db.statementTransaction.deleteMany({ where: { organisationId, isSampleData: true } }),
+      db.organisation.update({ where: { id: organisationId }, data: { hasSampleData: false } }),
+    ]);
+  }
+
   if (safe.length > 0) {
     await db.statementTransaction.createMany({
       data: safe.map((txn) => {

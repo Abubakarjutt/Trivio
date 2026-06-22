@@ -111,7 +111,7 @@ async function callGemini(prompt: string): Promise<RawTransaction[]> {
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: { temperature: 0, maxOutputTokens: 8192 },
     }),
-    signal: AbortSignal.timeout(120_000),
+    signal: AbortSignal.timeout(180_000),
   });
 
   if (!response.ok) {

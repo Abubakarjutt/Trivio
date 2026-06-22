@@ -234,6 +234,7 @@ export function ImportDialog({ open, onOpenChange, onComplete, emailImportToken,
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) reset(); onOpenChange(o); }}>
       <DialogContent className="bg-white p-0 max-h-[90vh] overflow-y-auto w-full rounded-t-2xl sm:rounded-lg sm:max-w-lg fixed !top-auto !bottom-0 !left-0 !right-0 !translate-x-0 !translate-y-0 sm:!top-[50%] sm:!left-[50%] sm:!translate-x-[-50%] sm:!translate-y-[-50%] sm:!bottom-auto sm:!right-auto">
+        <div className="px-6 pt-4 pb-6 flex flex-col gap-4">
         <DialogHeader>
           <DialogTitle>
             {state === "duplicates"       ? "Possible Duplicates Found" :
@@ -418,6 +419,7 @@ export function ImportDialog({ open, onOpenChange, onComplete, emailImportToken,
             </div>
           </div>
         )}
+        </div>
       </DialogContent>
     </Dialog>
   );
