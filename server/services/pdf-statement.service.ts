@@ -80,23 +80,33 @@ export async function extractTextFromPdf(buffer: Buffer): Promise<string> {
   return pages.join("\n\n--- PAGE BREAK ---\n\n");
 }
 
-const PARSE_PROMPT = `Given the bank statement text below, return a JSON array of ALL transactions.
+const PARSE_PROMPT = `Extract ALL financial transactions from the text below and return a JSON array.
 
-Each transaction must have these fields:
-- date: convert to YYYY-MM-DD format
-- description: payee, merchant, or transaction reference text
-- amount: the transaction amount as a positive number (NEVER use the balance/running-total column)
-- type: "DEBIT" if money left the account (payments, withdrawals, fees), "CREDIT" if money entered (deposits, refunds, interest)
+The text may be a bank statement (table format) OR a bank/merchant notification email (prose format). Handle both:
 
-IMPORTANT rules:
-- Bank statements have columns like: Date | Description | Debit | Credit | Balance
-- The BALANCE column shows the running account total — IGNORE it, never use it as the amount
-- Include EVERY row that has a date: card payments, direct debits, standing orders, transfers, ATM withdrawals, bank fees, service charges, interest charges, interest credits, refunds, foreign-exchange fees
-- Exclude ONLY: column header rows and explicit "Opening Balance" / "Closing Balance" summary lines
-- If a row has a date and changed the account balance, include it — when in doubt, include it
-- amounts must be positive numbers; direction is captured in the "type" field
+TABLE FORMAT (bank statements):
+- Columns like: Date | Description | Debit | Credit | Balance
+- IGNORE the Balance/running-total column — never use it as the amount
+- Include every row with a date: payments, withdrawals, transfers, ATM, fees, interest, refunds
+- Exclude only: column header rows and "Opening Balance" / "Closing Balance" summary lines
 
-Statement text:
+NOTIFICATION FORMAT (bank alert or payment confirmation emails):
+- Extract the transaction even if it is described in a single sentence
+- Examples: "PKR 5,000 debited from your account at XYZ Store on 22-Jun-2026"
+  → { date: "2026-06-22", description: "XYZ Store", amount: 5000, type: "DEBIT" }
+- Examples: "You received Rs. 10,000 from Ali Ahmed"
+  → { date: "<today if no date given>", description: "Ali Ahmed", amount: 10000, type: "CREDIT" }
+- Look for: amount, merchant/payee name, date, and whether money left or entered the account
+
+Each transaction MUST have:
+- date: YYYY-MM-DD format (use today's date if not mentioned)
+- description: payee, merchant, sender, or transaction reference
+- amount: positive number (NEVER negative)
+- type: "DEBIT" if money left the account, "CREDIT" if money entered
+
+If no financial transaction is present in the text, return an empty array [].
+
+Text:
 `;
 
 const PARSE_PROMPT_SUFFIX = `

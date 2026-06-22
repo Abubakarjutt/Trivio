@@ -448,7 +448,22 @@ function EmailImportBanner({ emailImportToken }: { emailImportToken: string }) {
         <span className="font-mono text-[11px] text-blue-700 truncate">{importAddress}</span>
         <button
           type="button"
-          onClick={() => { navigator.clipboard.writeText(importAddress); toast.success("Copied!"); }}
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(importAddress);
+              toast.success("Copied!");
+            } catch {
+              const el = document.createElement("textarea");
+              el.value = importAddress;
+              el.style.position = "fixed";
+              el.style.opacity = "0";
+              document.body.appendChild(el);
+              el.select();
+              document.execCommand("copy");
+              document.body.removeChild(el);
+              toast.success("Copied!");
+            }
+          }}
           className="ml-2 text-[11px] font-semibold text-blue-600 hover:text-blue-800 flex-shrink-0"
         >
           Copy

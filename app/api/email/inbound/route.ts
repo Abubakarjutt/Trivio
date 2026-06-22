@@ -66,9 +66,13 @@ export async function POST(request: NextRequest) {
       select: { id: true },
     });
 
-    if (!org) return NextResponse.json({ ok: true });
+    if (!org) {
+      console.info("[email-inbound] no org found for token:", token);
+      return NextResponse.json({ ok: true });
+    }
 
     const organisationId = org.id;
+    console.info("[email-inbound] processing email for org:", organisationId, "| subject:", payload.subject);
 
     let rawTransactions;
 
@@ -80,19 +84,27 @@ export async function POST(request: NextRequest) {
     );
 
     if (pdfAttachment) {
+      console.info("[email-inbound] processing PDF attachment:", pdfAttachment.filename);
       const buffer = Buffer.from(pdfAttachment.content);
       const text = await extractTextFromPdf(buffer);
       rawTransactions = await parseTransactionsFromText(redactPiiText(text));
     } else if (imageAttachment) {
+      console.info("[email-inbound] processing image attachment:", imageAttachment.filename);
       const buffer = Buffer.from(imageAttachment.content);
       rawTransactions = await parseTransactionsFromImage(buffer, imageAttachment.mimeType);
     } else {
+      console.info("[email-inbound] processing email body text, length:", (payload.text || payload.html).length);
       const bodyText = payload.text || payload.html.replace(/<[^>]+>/g, " ");
       rawTransactions = await parseTransactionsFromText(redactPiiText(bodyText));
     }
 
+    console.info("[email-inbound] raw transactions extracted:", rawTransactions.length);
+
     const deduped = deduplicateIncoming(rawTransactions);
-    if (deduped.length === 0) return NextResponse.json({ ok: true });
+    if (deduped.length === 0) {
+      console.info("[email-inbound] 0 transactions after dedup — skipping");
+      return NextResponse.json({ ok: true });
+    }
 
     const existingRaw = await db.statementTransaction.findMany({
       where: { organisationId, importBatch: { status: "DONE" } },
@@ -101,7 +113,19 @@ export async function POST(request: NextRequest) {
     const existing = existingRaw.map((e) => ({ ...e, amount: Number(e.amount) }));
     const { safe } = detectDuplicates(deduped, existing);
 
-    if (safe.length === 0) return NextResponse.json({ ok: true });
+    if (safe.length === 0) {
+      console.info("[email-inbound] all transactions already exist — skipping");
+      return NextResponse.json({ ok: true });
+    }
+
+    // Clear demo data before saving real transactions
+    const orgRecord = await db.organisation.findUnique({ where: { id: organisationId }, select: { hasSampleData: true } });
+    if (orgRecord?.hasSampleData) {
+      await db.$transaction([
+        db.statementTransaction.deleteMany({ where: { organisationId, isSampleData: true } }),
+        db.organisation.update({ where: { id: organisationId }, data: { hasSampleData: false } }),
+      ]);
+    }
 
     const categorized = await categorizeBatch(safe.map((t) => t.description));
 
@@ -130,6 +154,7 @@ export async function POST(request: NextRequest) {
       })),
     });
 
+    console.info("[email-inbound] saved", safe.length, "transactions for org:", organisationId);
     return NextResponse.json({ ok: true });
   } catch (err) {
     // Always return 200 — prevents Cloudflare Worker from retrying on app errors
