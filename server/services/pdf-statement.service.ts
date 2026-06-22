@@ -92,11 +92,13 @@ TABLE FORMAT (bank statements):
 
 NOTIFICATION FORMAT (bank alert or payment confirmation emails):
 - Extract the transaction even if it is described in a single sentence
-- Examples: "PKR 5,000 debited from your account at XYZ Store on 22-Jun-2026"
+- Examples: "PKR 5,000 debited from your account at XYZ Store on 22-Jun-2026. Available balance: PKR 45,000."
   → { date: "2026-06-22", description: "XYZ Store", amount: 5000, type: "DEBIT" }
+  (5000 is the transaction; 45000 is the balance — NEVER use the balance as the amount)
 - Examples: "You received Rs. 10,000 from Ali Ahmed"
   → { date: "<today if no date given>", description: "Ali Ahmed", amount: 10000, type: "CREDIT" }
-- Look for: amount, merchant/payee name, date, and whether money left or entered the account
+- CRITICAL: "Available balance", "Remaining balance", "Current balance" shown after a transaction — IGNORE completely, it is NOT the transaction amount
+- The transaction amount is what was spent/received, always the FIRST amount mentioned
 
 Each transaction MUST have:
 - date: YYYY-MM-DD format (use today's date if not mentioned)

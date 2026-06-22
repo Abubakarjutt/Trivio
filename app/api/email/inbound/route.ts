@@ -98,7 +98,7 @@ export async function POST(request: NextRequest) {
       rawTransactions = await parseTransactionsFromText(redactPiiText(bodyText));
     }
 
-    console.info("[email-inbound] raw transactions extracted:", rawTransactions.length);
+    console.info("[email-inbound] raw transactions extracted:", rawTransactions.length, JSON.stringify(rawTransactions));
 
     const deduped = deduplicateIncoming(rawTransactions);
     if (deduped.length === 0) {

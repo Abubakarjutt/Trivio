@@ -74,6 +74,9 @@ Category rules (follow strictly):
 - Internet bill, broadband, PTCL, Jazz internet, Zong internet, Nayatel, StormFiber → "Internet & Phone"
 - Salary, payroll, monthly pay → "Salary & Employment"
 - ATM withdrawal, cash withdrawal → "Other"
+- Upwork, Fiverr, Freelancer.com, Toptal, PeoplePerHour, 99designs, freelance platform → "Professional Services"
+- Netflix, Spotify, YouTube Premium, Disney+, Apple TV, Hulu, Amazon Prime Video, HBO → "Movies & Streaming"
+- ChatGPT, OpenAI, GitHub Copilot, Adobe, Microsoft 365, Google Workspace, Slack, Zoom, Dropbox, Notion, Figma → "Software & Subscriptions"
 
 Input:
 ${JSON.stringify(descriptions)}`;
