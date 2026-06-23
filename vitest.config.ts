@@ -14,6 +14,7 @@ export default defineConfig({
       "tests/integration/**/*.test.ts",
       "app/api/email/**/*.test.ts",
       "app/api/chat/**/*.test.ts",
+      "app/api/export/**/*.test.ts",
       // cloudflare/email-worker tests require a Cloudflare Workers runtime (postal-mime uses `self`)
       // and cannot run under Vitest's Node.js environment. Run them with wrangler test instead.
     ],
