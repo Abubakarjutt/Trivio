@@ -66,6 +66,7 @@ vi.mock("@/lib/db", () => ({
 
 // ── Imports (after mocks) ─────────────────────────────────────────────────────
 
+import { Prisma } from "@prisma/client";
 import { createCallerFactory } from "@/server/trpc";
 import { taxReportRouter } from "@/server/routers/taxReport";
 import { db } from "@/lib/db";
@@ -122,12 +123,12 @@ describe("taxReportRouter.get", () => {
     // groupBy called twice (credits then debits)
     mockGroupBy
       .mockResolvedValueOnce([
-        { category: "Salary", _sum: { amount: "5000" }, _count: { id: 3 } },
-        { category: "Business Revenue", _sum: { amount: "3000" }, _count: { id: 2 } },
+        { category: "Salary", _sum: { amount: new Prisma.Decimal("5000") }, _count: { id: 3 } },
+        { category: "Business Revenue", _sum: { amount: new Prisma.Decimal("3000") }, _count: { id: 2 } },
       ])
       .mockResolvedValueOnce([
-        { category: "Rent", _sum: { amount: "1200" }, _count: { id: 1 } },
-        { category: "Utilities", _sum: { amount: "300" }, _count: { id: 1 } },
+        { category: "Rent", _sum: { amount: new Prisma.Decimal("1200") }, _count: { id: 1 } },
+        { category: "Utilities", _sum: { amount: new Prisma.Decimal("300") }, _count: { id: 1 } },
       ]);
 
     const result = await makeCaller().get({ fiscalYear: 2024 });
@@ -150,7 +151,7 @@ describe("taxReportRouter.get", () => {
 
     mockGroupBy
       .mockResolvedValueOnce([
-        { category: "Salary", _sum: { amount: "4000" }, _count: { id: 2 } },
+        { category: "Salary", _sum: { amount: new Prisma.Decimal("4000") }, _count: { id: 2 } },
       ])
       .mockResolvedValueOnce([]);
 
@@ -165,7 +166,7 @@ describe("taxReportRouter.get", () => {
     mockGroupBy
       .mockResolvedValueOnce([]) // no credits
       .mockResolvedValueOnce([
-        { category: "Rent", _sum: { amount: "900" }, _count: { id: 1 } },
+        { category: "Rent", _sum: { amount: new Prisma.Decimal("900") }, _count: { id: 1 } },
       ]);
 
     const result = await makeCaller().get({ fiscalYear: 2024 });
