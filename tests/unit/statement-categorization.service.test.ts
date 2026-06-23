@@ -237,3 +237,44 @@ describe("categorizeBatch", () => {
     expect(result[1].category).toBe("Flights");
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// buildCategorizationPrompt — explicit category rules
+// ─────────────────────────────────────────────────────────────────────────────
+describe("buildCategorizationPrompt — explicit category rules", () => {
+  it("maps Upwork to Professional Services", () => {
+    const prompt = buildCategorizationPrompt(["Upwork Pro membership"]);
+    expect(prompt).toContain("Upwork");
+    expect(prompt).toContain("Professional Services");
+  });
+
+  it("maps Fiverr to Professional Services", () => {
+    const prompt = buildCategorizationPrompt(["Fiverr gig payment"]);
+    expect(prompt).toContain("Fiverr");
+    expect(prompt).toContain("Professional Services");
+  });
+
+  it("maps Netflix to Movies & Streaming", () => {
+    const prompt = buildCategorizationPrompt(["Netflix monthly subscription"]);
+    expect(prompt).toContain("Netflix");
+    expect(prompt).toContain("Movies & Streaming");
+  });
+
+  it("maps Spotify to Movies & Streaming", () => {
+    const prompt = buildCategorizationPrompt(["Spotify Premium"]);
+    expect(prompt).toContain("Spotify");
+    expect(prompt).toContain("Movies & Streaming");
+  });
+
+  it("maps ChatGPT to Software & Subscriptions", () => {
+    const prompt = buildCategorizationPrompt(["ChatGPT Plus"]);
+    expect(prompt).toContain("ChatGPT");
+    expect(prompt).toContain("Software & Subscriptions");
+  });
+
+  it("maps GitHub Copilot to Software & Subscriptions", () => {
+    const prompt = buildCategorizationPrompt(["GitHub Copilot subscription"]);
+    expect(prompt).toContain("GitHub Copilot");
+    expect(prompt).toContain("Software & Subscriptions");
+  });
+});
