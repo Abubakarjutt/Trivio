@@ -68,11 +68,14 @@ const baseAttachmentList = [
 
 const createCaller = createCallerFactory(attachmentsRouter);
 
-function makeCtx(overrides: Record<string, unknown> = {}) {
+function makeCtx(overrides: Record<string, unknown> = {}): any {
   return {
     session: { user: { id: USER_ID } },
+    user: { id: USER_ID, organisationId: ORG, organisation: { id: ORG, name: "Test Org" } },
     db: overrides,
-  } as any;
+    organisationId: ORG,
+    organisation: { id: ORG, name: "Test Org" },
+  };
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -86,16 +89,22 @@ describe("attachmentsRouter", () => {
 
   describe("getStatus", () => {
     it("returns attachment when found", async () => {
+      const mockFindFirst = vi.fn().mockResolvedValue(baseAttachment);
       const caller = createCaller(
         makeCtx({
           attachment: {
-            findFirst: vi.fn().mockResolvedValue(baseAttachment),
+            findFirst: mockFindFirst,
           },
         })
       );
 
       const result = await caller.getStatus({ id: "att-1" });
       expect(result).toMatchObject({ id: "att-1", originalFilename: "receipt.pdf" });
+      expect(mockFindFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ organisationId: ORG }),
+        })
+      );
     });
 
     it("throws NOT_FOUND when attachment does not exist", async () => {
@@ -117,13 +126,15 @@ describe("attachmentsRouter", () => {
 
   describe("listForInvoice", () => {
     it("returns attachments for a valid invoice", async () => {
+      const mockInvoiceFindFirst = vi.fn().mockResolvedValue({ id: "inv-1" });
+      const mockAttachmentFindMany = vi.fn().mockResolvedValue(baseAttachmentList);
       const caller = createCaller(
         makeCtx({
           invoice: {
-            findFirst: vi.fn().mockResolvedValue({ id: "inv-1" }),
+            findFirst: mockInvoiceFindFirst,
           },
           attachment: {
-            findMany: vi.fn().mockResolvedValue(baseAttachmentList),
+            findMany: mockAttachmentFindMany,
           },
         })
       );
@@ -131,6 +142,16 @@ describe("attachmentsRouter", () => {
       const result = await caller.listForInvoice({ invoiceId: "inv-1" });
       expect(result).toHaveLength(1);
       expect(result[0]).toMatchObject({ id: "att-1" });
+      expect(mockInvoiceFindFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ organisationId: ORG }),
+        })
+      );
+      expect(mockAttachmentFindMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ organisationId: ORG }),
+        })
+      );
     });
 
     it("throws NOT_FOUND when invoice does not exist", async () => {
@@ -155,13 +176,15 @@ describe("attachmentsRouter", () => {
 
   describe("listForBill", () => {
     it("returns attachments for a valid bill", async () => {
+      const mockBillFindFirst = vi.fn().mockResolvedValue({ id: "bill-1" });
+      const mockAttachmentFindMany = vi.fn().mockResolvedValue(baseAttachmentList);
       const caller = createCaller(
         makeCtx({
           bill: {
-            findFirst: vi.fn().mockResolvedValue({ id: "bill-1" }),
+            findFirst: mockBillFindFirst,
           },
           attachment: {
-            findMany: vi.fn().mockResolvedValue(baseAttachmentList),
+            findMany: mockAttachmentFindMany,
           },
         })
       );
@@ -169,6 +192,16 @@ describe("attachmentsRouter", () => {
       const result = await caller.listForBill({ billId: "bill-1" });
       expect(result).toHaveLength(1);
       expect(result[0]).toMatchObject({ id: "att-1" });
+      expect(mockBillFindFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ organisationId: ORG }),
+        })
+      );
+      expect(mockAttachmentFindMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ organisationId: ORG }),
+        })
+      );
     });
 
     it("throws NOT_FOUND when bill does not exist", async () => {
@@ -193,11 +226,12 @@ describe("attachmentsRouter", () => {
 
   describe("delete", () => {
     it("deletes attachment and calls deleteFile with s3Key", async () => {
+      const mockFindFirst = vi.fn().mockResolvedValue({ id: "att-1", s3Key: "uploads/org-1/receipt.pdf" });
       const mockDelete = vi.fn().mockResolvedValue(undefined);
       const caller = createCaller(
         makeCtx({
           attachment: {
-            findFirst: vi.fn().mockResolvedValue({ id: "att-1", s3Key: "uploads/org-1/receipt.pdf" }),
+            findFirst: mockFindFirst,
             delete: mockDelete,
           },
         })
@@ -208,6 +242,11 @@ describe("attachmentsRouter", () => {
       expect(result).toEqual({ success: true });
       expect(deleteFile).toHaveBeenCalledWith("uploads/org-1/receipt.pdf");
       expect(mockDelete).toHaveBeenCalledWith({ where: { id: "att-1" } });
+      expect(mockFindFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ organisationId: ORG }),
+        })
+      );
     });
 
     it("throws NOT_FOUND and does NOT call deleteFile when attachment missing", async () => {
@@ -231,15 +270,17 @@ describe("attachmentsRouter", () => {
 
   describe("linkToInvoice", () => {
     it("links attachment to invoice and clears billId", async () => {
+      const mockAttachmentFindFirst = vi.fn().mockResolvedValue({ id: "att-1" });
+      const mockInvoiceFindFirst = vi.fn().mockResolvedValue({ id: "inv-1" });
       const mockUpdate = vi.fn().mockResolvedValue({ id: "att-1", invoiceId: "inv-1" });
       const caller = createCaller(
         makeCtx({
           attachment: {
-            findFirst: vi.fn().mockResolvedValue({ id: "att-1" }),
+            findFirst: mockAttachmentFindFirst,
             update: mockUpdate,
           },
           invoice: {
-            findFirst: vi.fn().mockResolvedValue({ id: "inv-1" }),
+            findFirst: mockInvoiceFindFirst,
           },
         })
       );
@@ -250,6 +291,16 @@ describe("attachmentsRouter", () => {
       expect(mockUpdate).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({ invoiceId: "inv-1", billId: null }),
+        })
+      );
+      expect(mockAttachmentFindFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ organisationId: ORG }),
+        })
+      );
+      expect(mockInvoiceFindFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ organisationId: ORG }),
         })
       );
     });
@@ -293,15 +344,17 @@ describe("attachmentsRouter", () => {
 
   describe("linkToBill", () => {
     it("links attachment to bill and clears invoiceId", async () => {
+      const mockAttachmentFindFirst = vi.fn().mockResolvedValue({ id: "att-1" });
+      const mockBillFindFirst = vi.fn().mockResolvedValue({ id: "bill-1" });
       const mockUpdate = vi.fn().mockResolvedValue({ id: "att-1", billId: "bill-1" });
       const caller = createCaller(
         makeCtx({
           attachment: {
-            findFirst: vi.fn().mockResolvedValue({ id: "att-1" }),
+            findFirst: mockAttachmentFindFirst,
             update: mockUpdate,
           },
           bill: {
-            findFirst: vi.fn().mockResolvedValue({ id: "bill-1" }),
+            findFirst: mockBillFindFirst,
           },
         })
       );
@@ -312,6 +365,16 @@ describe("attachmentsRouter", () => {
       expect(mockUpdate).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({ billId: "bill-1", invoiceId: null }),
+        })
+      );
+      expect(mockAttachmentFindFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ organisationId: ORG }),
+        })
+      );
+      expect(mockBillFindFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ organisationId: ORG }),
         })
       );
     });
