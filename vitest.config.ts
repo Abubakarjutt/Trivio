@@ -14,6 +14,7 @@ export default defineConfig({
       "tests/integration/**/*.test.ts",
       "app/api/email/**/*.test.ts",
       "app/api/chat/**/*.test.ts",
+      "app/api/cron/**/*.test.ts",
       "app/api/export/**/*.test.ts",
       "app/api/webhooks/**/*.test.ts",
       "app/api/attachments/**/*.test.ts",
