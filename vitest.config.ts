@@ -13,9 +13,9 @@ export default defineConfig({
       "tests/unit/**/*.test.tsx",
       "tests/integration/**/*.test.ts",
       "app/api/email/**/*.test.ts",
-      "cloudflare/email-worker/**/*.test.ts",
+      "cloudflare/email-worker/payload.test.ts",
     ],
-    exclude: ["tests/e2e/**"],
+    exclude: ["tests/e2e/**", "**/node_modules/**"],
   },
   resolve: {
     alias: {
