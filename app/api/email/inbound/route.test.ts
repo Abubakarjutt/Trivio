@@ -7,9 +7,10 @@ import { NextRequest } from "next/server";
 
 vi.mock("@/lib/db", () => ({
   db: {
-    organisation: { findFirst: vi.fn() },
+    organisation: { findFirst: vi.fn(), findUnique: vi.fn() },
     statementImportBatch: { create: vi.fn() },
-    statementTransaction: { findMany: vi.fn(), createMany: vi.fn() },
+    statementTransaction: { findMany: vi.fn(), createMany: vi.fn(), deleteMany: vi.fn() },
+    $transaction: vi.fn().mockResolvedValue([]),
   },
 }));
 
@@ -101,6 +102,7 @@ describe("POST /api/email/inbound", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(db.organisation.findFirst).mockResolvedValue(ORG as never);
+    vi.mocked(db.organisation.findUnique).mockResolvedValue({ hasSampleData: false } as never);
     vi.mocked(db.statementImportBatch.create).mockResolvedValue({ id: "batch-1" } as never);
     vi.mocked(db.statementTransaction.findMany).mockResolvedValue([]);
     vi.mocked(db.statementTransaction.createMany).mockResolvedValue({ count: 1 } as never);
