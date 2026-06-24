@@ -9,6 +9,13 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+// pii-redaction does real regex work on large strings — mock as passthrough so
+// tests that send 200k-char inputs don't spend 15-20s on regex execution.
+vi.mock("@/server/services/pii-redaction.service", () => ({
+  redactPii: (t: string) => ({ redacted: t, stats: { totalRedactions: 0 } }),
+  redactPiiText: (t: string) => t,
+}));
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 function geminiResponse(text: string, opts: { thought?: boolean; httpStatus?: number } = {}) {
@@ -221,7 +228,7 @@ describe("parseTransactionsFromText", () => {
 
   it("truncates text to 200,000 chars and redacts PII before sending to Gemini", async () => {
     process.env.GEMINI_API_KEY = "test-key";
-    vi.mocked(fetch).mockResolvedValue(geminiResponse("[]") as unknown as Response);
+    vi.mocked(fetch).mockResolvedValue(geminiResponse(VALID_TRANSACTIONS_JSON) as unknown as Response);
 
     const { parseTransactionsFromText } = await import("@/server/services/pdf-statement.service");
     const longText = "x".repeat(201_000);
@@ -232,5 +239,5 @@ describe("parseTransactionsFromText", () => {
     // The 201 000th char must be absent; prompt + 200k 'x' chars are present
     expect(sentText).not.toContain("x".repeat(201_000));
     expect(sentText.length).toBeGreaterThan(200_000);
-  }, 30_000);
+  });
 });
