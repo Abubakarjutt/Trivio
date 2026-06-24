@@ -101,7 +101,7 @@ export function CategoryPicker({ value, onChange, triggerClassName }: Props) {
           <div className={cn(
             "flex items-center gap-2 rounded-full px-3 py-2 transition-all duration-150",
             "bg-muted border border-border/40",
-            "focus-within:bg-background focus-within:border-border focus-within:ring-2 focus-within:ring-primary/15"
+            "focus-within:bg-background focus-within:border-border/80"
           )}>
             <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             <input
