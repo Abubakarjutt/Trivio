@@ -1,9 +1,12 @@
 "use client";
 
-import { Trash2 } from "lucide-react";
+import { useState } from "react";
+import { Check, ChevronDown, Trash2 } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
+  Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
+} from "@/components/ui/command";
+import { cn } from "@/lib/utils";
 import { CATEGORY_DEFINITIONS } from "@/server/services/statement-categorization.service";
 
 const CATEGORIES = CATEGORY_DEFINITIONS.map((c) => c.name);
@@ -44,6 +47,7 @@ interface Props {
 }
 
 export function TransactionCard({ txn, onCategoryChange, onDelete, fmt }: Props) {
+  const [open, setOpen] = useState(false);
   const avatarClasses = AVATAR_BG[txn.category] ?? AVATAR_BG["Other"];
   const initial = txn.merchantName.charAt(0).toUpperCase();
   const dateStr = new Date(txn.date).toLocaleDateString("en-US", {
@@ -59,16 +63,38 @@ export function TransactionCard({ txn, onCategoryChange, onDelete, fmt }: Props)
         <p className="text-sm font-medium text-foreground truncate">{txn.merchantName}</p>
         <div className="flex items-center gap-2 mt-0.5">
           <span className="text-xs text-muted-foreground">{dateStr}</span>
-          <Select value={txn.category} onValueChange={(cat) => onCategoryChange(txn.id, cat)}>
-            <SelectTrigger className="h-auto border-0 p-0 text-xs text-muted-foreground hover:text-foreground focus:ring-0 w-auto bg-transparent shadow-none">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {CATEGORIES.map((c) => (
-                <SelectItem key={c} value={c}>{c}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+
+          <Popover open={open} onOpenChange={setOpen}>
+            <PopoverTrigger asChild>
+              <button className="flex items-center gap-0.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
+                {txn.category}
+                <ChevronDown className="h-3 w-3 opacity-50" />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-52 p-0">
+              <Command>
+                <CommandInput placeholder="Search category..." className="h-9" />
+                <CommandList>
+                  <CommandEmpty>No category found.</CommandEmpty>
+                  <CommandGroup>
+                    {CATEGORIES.map((c) => (
+                      <CommandItem
+                        key={c}
+                        value={c}
+                        onSelect={(val) => {
+                          onCategoryChange(txn.id, val);
+                          setOpen(false);
+                        }}
+                      >
+                        <Check className={cn("mr-2 h-4 w-4", txn.category === c ? "opacity-100" : "opacity-0")} />
+                        {c}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
       <div className="flex flex-col items-end gap-1 shrink-0">
