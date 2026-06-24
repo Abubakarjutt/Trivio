@@ -11,6 +11,7 @@ import { Loader2, CreditCard, TrendingDown, TrendingUp, RefreshCw, Trash2 } from
 import { toast } from "sonner";
 import { ImportDialog } from "./_components/import-dialog";
 import { TransactionCard } from "./_components/transaction-card";
+import { CategoryPicker } from "./_components/category-picker";
 import { CATEGORY_DEFINITIONS } from "@/server/services/statement-categorization.service";
 import { MonthPicker, currentMonth } from "@/app/(app)/pf/_components/month-picker";
 import { formatCurrency } from "@/lib/utils";
@@ -227,17 +228,11 @@ export default function PfTransactionsPage() {
                     <div className="text-xs text-muted-foreground/60 truncate max-w-xs">{txn.description}</div>
                   </td>
                   <td className="px-4 py-3">
-                    <Select
+                    <CategoryPicker
                       value={txn.category}
-                      onValueChange={(newCat) => updateCategory.mutate({ id: txn.id, category: newCat })}
-                    >
-                      <SelectTrigger className={`h-6 px-2 text-xs border-0 rounded-full w-auto ${CATEGORY_COLORS[txn.category] ?? CATEGORY_COLORS["Other"]}`}>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {categories.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
+                      onChange={(newCat) => updateCategory.mutate({ id: txn.id, category: newCat })}
+                      triggerClassName={`h-6 px-2 text-xs rounded-full ${CATEGORY_COLORS[txn.category] ?? CATEGORY_COLORS["Other"]}`}
+                    />
                   </td>
                   <td className={`px-4 py-3 text-right font-medium tabular-nums ${txn.type === "DEBIT" ? "text-red-500" : "text-emerald-500"}`}>
                     {txn.type === "DEBIT" ? "−" : "+"}{fmt(Number(txn.amount))}
