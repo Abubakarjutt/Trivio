@@ -93,26 +93,28 @@ export function CategoryPicker({ value, onChange, triggerClassName }: Props) {
         </button>
       </PopoverTrigger>
 
-      <PopoverContent className="w-56 p-0 shadow-lg border-border/60 rounded-xl overflow-hidden">
-        {/* Search bar */}
-        <div className="p-2">
+      <PopoverContent className="w-56 p-0 shadow-xl border-border/50 rounded-xl overflow-hidden">
+        {/* Header */}
+        <div className="px-3 pt-3 pb-2">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50 mb-2">Category</p>
+          {/* Search bar */}
           <div className={cn(
-            "flex items-center gap-2 rounded-lg px-2.5 py-1.5 transition-all duration-150",
-            "bg-muted/60 border border-transparent",
-            "focus-within:bg-background focus-within:border-border focus-within:shadow-sm"
+            "flex items-center gap-2 rounded-full px-3 py-2 transition-all duration-150",
+            "bg-muted border border-border/40",
+            "focus-within:bg-background focus-within:border-border focus-within:ring-2 focus-within:ring-primary/15"
           )}>
-            <Search className="h-3.5 w-3.5 text-muted-foreground/60 shrink-0 transition-colors duration-150 group-focus-within:text-foreground" />
+            <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             <input
               ref={inputRef}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search categories…"
-              className="flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground/50 min-w-0"
+              placeholder="Search…"
+              className="flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground/60 min-w-0"
             />
             {search && (
               <button
                 onClick={() => { setSearch(""); inputRef.current?.focus(); }}
-                className="text-muted-foreground/40 hover:text-muted-foreground transition-colors shrink-0"
+                className="text-muted-foreground/50 hover:text-foreground transition-colors shrink-0"
               >
                 <X className="h-3 w-3" />
               </button>
@@ -121,10 +123,10 @@ export function CategoryPicker({ value, onChange, triggerClassName }: Props) {
         </div>
 
         {/* Divider + count */}
-        <div className="flex items-center gap-2 px-3 pb-1">
-          <div className="flex-1 h-px bg-border/50" />
+        <div className="flex items-center gap-2 px-3 pb-1.5">
+          <div className="flex-1 h-px bg-border/40" />
           <span className="text-[10px] text-muted-foreground/40 tabular-nums shrink-0">
-            {filtered.length}/{CATEGORIES.length}
+            {filtered.length} of {CATEGORIES.length}
           </span>
         </div>
 
