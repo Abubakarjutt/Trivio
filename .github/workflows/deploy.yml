@@ -73,4 +73,7 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
             cd /app/trivio
+            git remote set-url origin git@github.com:Abubakarjutt/Trivio.git
+            export GIT_SSH_COMMAND="ssh -i ~/.ssh/trivio_deploy -o StrictHostKeyChecking=no"
+            git pull origin main
             bash github-deploy.sh
