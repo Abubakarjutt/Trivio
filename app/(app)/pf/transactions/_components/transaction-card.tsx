@@ -1,11 +1,8 @@
 "use client";
 
-import { useState } from "react";
-import { Check, ChevronDown, Trash2 } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+import { Check, ChevronDown, Search, Trash2 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import {
-  Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
-} from "@/components/ui/command";
 import { cn } from "@/lib/utils";
 import { CATEGORY_DEFINITIONS } from "@/server/services/statement-categorization.service";
 
@@ -48,6 +45,20 @@ interface Props {
 
 export function TransactionCard({ txn, onCategoryChange, onDelete, fmt }: Props) {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const filtered = search.trim()
+    ? CATEGORIES.filter((c) => c.toLowerCase().includes(search.toLowerCase()))
+    : CATEGORIES;
+
+  useEffect(() => {
+    if (open) {
+      setSearch("");
+      setTimeout(() => inputRef.current?.focus(), 0);
+    }
+  }, [open]);
+
   const avatarClasses = AVATAR_BG[txn.category] ?? AVATAR_BG["Other"];
   const initial = txn.merchantName.charAt(0).toUpperCase();
   const dateStr = new Date(txn.date).toLocaleDateString("en-US", {
@@ -72,27 +83,37 @@ export function TransactionCard({ txn, onCategoryChange, onDelete, fmt }: Props)
               </button>
             </PopoverTrigger>
             <PopoverContent className="w-52 p-0">
-              <Command>
-                <CommandInput placeholder="Search category..." className="h-9" />
-                <CommandList>
-                  <CommandEmpty>No category found.</CommandEmpty>
-                  <CommandGroup>
-                    {CATEGORIES.map((c) => (
-                      <CommandItem
-                        key={c}
-                        value={c}
-                        onSelect={(val) => {
-                          onCategoryChange(txn.id, val);
-                          setOpen(false);
-                        }}
-                      >
-                        <Check className={cn("mr-2 h-4 w-4", txn.category === c ? "opacity-100" : "opacity-0")} />
-                        {c}
-                      </CommandItem>
-                    ))}
-                  </CommandGroup>
-                </CommandList>
-              </Command>
+              {/* Search input */}
+              <div className="flex items-center border-b px-2 py-1.5">
+                <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0 mr-1.5" />
+                <input
+                  ref={inputRef}
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search…"
+                  className="flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground"
+                />
+              </div>
+              {/* Category list */}
+              <div className="max-h-56 overflow-y-auto p-1">
+                {filtered.length === 0 ? (
+                  <p className="py-4 text-center text-xs text-muted-foreground">No category found.</p>
+                ) : (
+                  filtered.map((c) => (
+                    <button
+                      key={c}
+                      onClick={() => { onCategoryChange(txn.id, c); setOpen(false); }}
+                      className={cn(
+                        "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground transition-colors",
+                        txn.category === c && "font-medium"
+                      )}
+                    >
+                      <Check className={cn("h-3.5 w-3.5 shrink-0", txn.category === c ? "opacity-100" : "opacity-0")} />
+                      {c}
+                    </button>
+                  ))
+                )}
+              </div>
             </PopoverContent>
           </Popover>
         </div>
