@@ -15,10 +15,10 @@ jobs:
           script: |
             cd /app/trivio
             echo "=== Container status ==="
-            docker compose -f docker-compose.prod.yml ps
+            docker compose -f docker-compose.prod.yml --env-file .env.prod ps
             echo ""
             echo "=== App logs (last 60 lines) ==="
-            docker compose -f docker-compose.prod.yml logs --tail=60 app
+            docker compose -f docker-compose.prod.yml --env-file .env.prod logs --tail=60 app
             echo ""
             echo "=== Caddy logs (last 20 lines) ==="
-            docker compose -f docker-compose.prod.yml logs --tail=20 caddy
+            docker compose -f docker-compose.prod.yml --env-file .env.prod logs --tail=20 caddy
