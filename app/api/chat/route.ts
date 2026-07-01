@@ -105,7 +105,7 @@ function buildToolSummary(toolResults: ToolResult[]): string {
 export const maxDuration = 120;
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? "";
-const GEMINI_MODEL   = process.env.CHAT_MODEL ?? "gemini-2.5-flash";
+const GEMINI_MODEL   = process.env.CHAT_MODEL ?? "gemma-4-26b-a4b-it";
 
 export async function POST(req: NextRequest) {
   const session = await auth();
