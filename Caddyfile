@@ -5,6 +5,13 @@ app.trivio-ai.com {
 }
 
 trivio-ai.com, www.trivio-ai.com {
+    @noTrailingSlash {
+        not path /
+        not path *.*
+        not path */
+    }
+    redir @noTrailingSlash {uri}/ 301
+
     root * /var/www/trivio-landing
     file_server
     try_files {path} {path}.html {path}/index.html /index.html
