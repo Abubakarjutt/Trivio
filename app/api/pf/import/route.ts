@@ -314,7 +314,9 @@ async function handlePdfImport(buffer: Buffer, filename: string, organisationId:
       batchId = batch.id;
 
       emit("progress", { step: "extracting", pct: 10 });
+      console.log("[import] calling extractPdfPages, batchId:", batchId, "bufferSize:", buffer.length);
       const pages = await extractPdfPages(buffer);
+      console.log("[import] extractPdfPages returned", pages.length, "pages");
 
       const allRawTransactions: import("@/server/services/statement-parser.service").RawTransaction[] = [];
       for (let i = 0; i < pages.length; i++) {

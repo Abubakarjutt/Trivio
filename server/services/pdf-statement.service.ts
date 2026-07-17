@@ -31,14 +31,12 @@ async function initPdfJs() {
   const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs" as string);
   const { join } = await import("path");
 
-  // pdfjs v5 requires a truthy workerSrc even in Node.js.
+  // Always set workerSrc unconditionally so the correct absolute file:// path
+  // is used regardless of what pdfjs defaults to at module load time.
+  const workerPath = join(process.cwd(), "node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs");
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  if (!(pdfjsLib as any).GlobalWorkerOptions.workerSrc ||
-      (pdfjsLib as any).GlobalWorkerOptions.workerSrc === "./pdf.worker.mjs") {
-    const workerPath = join(process.cwd(), "node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs");
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (pdfjsLib as any).GlobalWorkerOptions.workerSrc = `file://${workerPath}`;
-  }
+  (pdfjsLib as any).GlobalWorkerOptions.workerSrc = `file://${workerPath}`;
+  console.log("[pdf] workerSrc set to", `file://${workerPath}`);
 
   const cmapDir = join(process.cwd(), "node_modules/pdfjs-dist/cmaps");
   return { pdfjsLib, cmapDir };
@@ -48,20 +46,42 @@ async function initPdfJs() {
  * Extracts text from each page of a PDF, returning one string per page.
  * Use this for per-page processing to keep SSE alive during long PDFs.
  */
+const PDF_LOAD_TIMEOUT_MS = 90_000;
+
 export async function extractPdfPages(buffer: Buffer): Promise<string[]> {
+  console.log("[pdf] extractPdfPages start, buffer size:", buffer.length);
   const { pdfjsLib, cmapDir } = await initPdfJs();
 
   const loadingTask = pdfjsLib.getDocument({
     data: new Uint8Array(buffer),
     disableFontFace: true,
     useSystemFonts: false,
+    isEvalSupported: false,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     CMapReaderFactory: LocalCMapReaderFactory as any,
     cMapUrl: cmapDir + "/",
     cMapPacked: true,
     verbosity: 0,
   });
-  const pdf = await loadingTask.promise;
+
+  console.log("[pdf] loadingTask created, awaiting promise...");
+  let timedOut = false;
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    console.error("[pdf] loadingTask.promise timed out after", PDF_LOAD_TIMEOUT_MS / 1000, "seconds — destroying task");
+    try { loadingTask.destroy(); } catch { /* ignore */ }
+  }, PDF_LOAD_TIMEOUT_MS);
+
+  let pdf: Awaited<typeof loadingTask.promise>;
+  try {
+    pdf = await loadingTask.promise;
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (timedOut) throw new Error(`PDF processing timed out after ${PDF_LOAD_TIMEOUT_MS / 1000}s. The file may be corrupted or too complex.`);
+    throw err;
+  }
+  clearTimeout(timeoutId);
+  console.log("[pdf] PDF loaded, numPages:", pdf.numPages);
 
   const pages: string[] = [];
   for (let i = 1; i <= pdf.numPages; i++) {
@@ -70,8 +90,10 @@ export async function extractPdfPages(buffer: Buffer): Promise<string[]> {
     const text = content.items
       .map((item: { str?: string }) => item.str ?? "")
       .join(" ");
+    console.log(`[pdf] page ${i}/${pdf.numPages} extracted, chars: ${text.length}`);
     pages.push(text);
   }
+  console.log("[pdf] extractPdfPages done, pages:", pages.length);
   return pages;
 }
 
