@@ -6,7 +6,6 @@
  * MCC codes.
  */
 
-import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import {
   CATEGORY_DEFINITIONS,
@@ -14,7 +13,9 @@ import {
   CATEGORY_GROUPS,
 } from "@/lib/categories"
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? "";
+const GEMINI_MODEL   = process.env.GEMINI_MODEL   ?? "gemini-2.0-flash-lite";
+const GEMINI_URL     = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 export interface CategorizationResult {
   description: string;
@@ -85,15 +86,31 @@ ${JSON.stringify(descriptions)}`;
 export async function categorizeBatch(descriptions: string[]): Promise<CategorizationResult[]> {
   if (descriptions.length === 0) return [];
 
+  if (!GEMINI_API_KEY) {
+    console.warn("[statement-categorization.service] GEMINI_API_KEY not set — using fallback categories.");
+    return descriptions.map(fallback);
+  }
+
   try {
-    const message = await anthropic.messages.create({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 8192,
-      temperature: 1,
-      messages: [{ role: "user", content: buildCategorizationPrompt(descriptions) }],
+    const response = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: buildCategorizationPrompt(descriptions) }] }],
+        generationConfig: { temperature: 0.1, maxOutputTokens: 8192 },
+      }),
+      signal: AbortSignal.timeout(30_000),
     });
 
-    const content = message.content.find((b) => b.type === "text")?.text ?? "";
+    if (!response.ok) {
+      console.warn(`[statement-categorization.service] Gemini failed (${response.status}) — using fallback.`);
+      return descriptions.map(fallback);
+    }
+
+    const data = await response.json();
+    const candidates = (data as { candidates?: Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean }> } }> })?.candidates ?? [];
+    const parts = candidates[0]?.content?.parts ?? [];
+    const content = parts.filter((p) => !p.thought).map((p) => p.text ?? "").join("");
     const raw = content.replace(/^```(?:json)?\n?/m, "").replace(/```\s*$/m, "").trim();
     const jsonMatch = raw.match(/\[[\s\S]*\]/);
     if (!jsonMatch) return descriptions.map(fallback);
@@ -119,7 +136,7 @@ export async function categorizeBatch(descriptions: string[]): Promise<Categoriz
       };
     });
   } catch (err) {
-    console.warn("[statement-categorization.service] Claude request failed — using fallback.", err);
+    console.warn("[statement-categorization.service] Gemini request failed — using fallback.", err);
     return descriptions.map(fallback);
   }
 }

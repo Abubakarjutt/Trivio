@@ -1,13 +1,16 @@
 /**
  * PdfStatementService
- * Extracts text from PDF files using pdfjs-dist, then uses the Claude API
+ * Extracts text from PDF files using pdfjs-dist, then uses the Gemini API
  * to parse transaction rows from the extracted text.
  */
-import Anthropic from "@anthropic-ai/sdk";
 import type { RawTransaction } from "./statement-parser.service";
 import { redactPii } from "./pii-redaction.service";
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? "";
+// Default to gemini-2.0-flash-lite: generous free tier (1500 RPD, 15 RPM),
+// much better than the old gemma-4-26b-a4b-it which had very low limits.
+const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-2.0-flash-lite";
+const GEMINI_URL   = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 // pdfjs-dist v5 doesn't export NodeCMapReaderFactory, so we provide one that
 // reads from the bundled cmaps/ directory using the local filesystem. This
@@ -136,15 +139,32 @@ const PARSE_PROMPT_SUFFIX = `
 
 JSON array:`;
 
-async function callClaude(prompt: string): Promise<RawTransaction[]> {
-  const message = await anthropic.messages.create({
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 8192,
-    temperature: 0,
-    messages: [{ role: "user", content: prompt }],
+async function callGemini(prompt: string): Promise<RawTransaction[]> {
+  if (!GEMINI_API_KEY) {
+    console.warn("[pdf-statement.service] GEMINI_API_KEY not set — returning empty list.");
+    return [];
+  }
+
+  const response = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0, maxOutputTokens: 8192 },
+    }),
+    signal: AbortSignal.timeout(30_000),
   });
 
-  const content = message.content.find((b) => b.type === "text")?.text ?? "";
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`Gemini API error ${response.status}: ${body}`);
+  }
+
+  const data = await response.json() as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean }> } }>;
+  };
+  const parts = data.candidates?.[0]?.content?.parts ?? [];
+  const content = parts.filter((p) => !p.thought).map((p) => p.text ?? "").join("");
   const raw = content.replace(/^```(?:json)?\n?/m, "").replace(/```\s*$/m, "").trim();
   const match = raw.match(/\[[\s\S]*\]/);
   if (!match) return [];
@@ -175,13 +195,13 @@ export async function parsePageTransactions(pageText: string): Promise<RawTransa
 
   const { redacted, stats } = redactPii(pageText);
   if (Object.values(stats).some((n) => n > 0)) {
-    console.info("[pdf-statement.service] PII redacted before Claude call:", stats);
+    console.info("[pdf-statement.service] PII redacted before Gemini call:", stats);
   }
 
   const prompt = `${PARSE_PROMPT}${redacted}${PARSE_PROMPT_SUFFIX}`;
 
   try {
-    return await callClaude(prompt);
+    return await callGemini(prompt);
   } catch (err) {
     console.warn("[pdf-statement.service] Page parse failed, skipping:", err);
     return [];
@@ -191,7 +211,7 @@ export async function parsePageTransactions(pageText: string): Promise<RawTransa
 export async function parseTransactionsFromText(text: string): Promise<RawTransaction[]> {
   const { redacted, stats } = redactPii(text.slice(0, 200_000));
   if (Object.values(stats).some((n) => n > 0)) {
-    console.info("[pdf-statement.service] PII redacted before Claude call:", stats);
+    console.info("[pdf-statement.service] PII redacted before Gemini call:", stats);
   }
 
   const prompt = `${PARSE_PROMPT}${redacted}${PARSE_PROMPT_SUFFIX}`;
@@ -199,17 +219,17 @@ export async function parseTransactionsFromText(text: string): Promise<RawTransa
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      const results = await callClaude(prompt);
+      const results = await callGemini(prompt);
       if (results.length > 0) return results;
       if (attempt < MAX_ATTEMPTS) {
-        console.warn(`[pdf-statement.service] Claude returned 0 transactions on attempt ${attempt}, retrying…`);
+        console.warn(`[pdf-statement.service] Gemini returned 0 transactions on attempt ${attempt}, retrying…`);
         await new Promise((r) => setTimeout(r, 1000));
         continue;
       }
       return results;
     } catch (err) {
       if (attempt < MAX_ATTEMPTS) {
-        console.warn(`[pdf-statement.service] Claude attempt ${attempt} failed, retrying…`, err);
+        console.warn(`[pdf-statement.service] Gemini attempt ${attempt} failed, retrying…`, err);
         await new Promise((r) => setTimeout(r, 1000));
         continue;
       }
