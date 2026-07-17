@@ -226,17 +226,23 @@ async function runStreamingImport(
   batchId: string,
 ) {
   const rawTransactions = deduplicateIncoming(rawTxnsBeforeDedup);
+  console.log(`[import] runStreamingImport start: ${rawTransactions.length} txns, batchId: ${batchId}`);
 
   emit("progress", { step: "categorizing", pct: 50, count: rawTransactions.length, extracted: rawTxnsBeforeDedup.length });
+  console.log("[import] calling categorizeBatch...");
   const categorized = await categorizeBatch(rawTransactions.map((t) => t.description));
+  console.log("[import] categorizeBatch done, results:", categorized.length);
 
   emit("progress", { step: "deduplicating", pct: 75, count: rawTransactions.length });
+  console.log("[import] fetching existing transactions for dedup...");
   const existingRaw = await db.statementTransaction.findMany({
     where: { organisationId, importBatch: { status: "DONE" } },
     select: { id: true, date: true, description: true, amount: true },
   });
+  console.log("[import] existing txns fetched:", existingRaw.length);
   const existing = existingRaw.map((e) => ({ ...e, amount: Number(e.amount) }));
   const { safe, duplicates } = detectDuplicates(rawTransactions, existing);
+  console.log(`[import] dedup done: ${safe.length} safe, ${duplicates.length} duplicates`);
 
   const pendingDuplicatesData = duplicates.map((d) => {
     const idx = rawTransactions.indexOf(d.incoming);
@@ -255,15 +261,20 @@ async function runStreamingImport(
   emit("progress", { step: "saving", pct: 90 });
 
   // Clear demo data before saving real transactions
+  console.log("[import] checking hasSampleData...");
   const org = await db.organisation.findUnique({ where: { id: organisationId }, select: { hasSampleData: true } });
+  console.log("[import] hasSampleData:", org?.hasSampleData);
   if (org?.hasSampleData) {
+    console.log("[import] deleting sample data...");
     await db.$transaction([
       db.statementTransaction.deleteMany({ where: { organisationId, isSampleData: true } }),
       db.organisation.update({ where: { id: organisationId }, data: { hasSampleData: false } }),
     ]);
+    console.log("[import] sample data deleted");
   }
 
   if (safe.length > 0) {
+    console.log("[import] inserting", safe.length, "transactions...");
     await db.statementTransaction.createMany({
       data: safe.map((txn) => {
         const idx = rawTransactions.indexOf(txn);
@@ -281,8 +292,10 @@ async function runStreamingImport(
         };
       }),
     });
+    console.log("[import] transactions inserted");
   }
 
+  console.log("[import] updating batch record...");
   await db.statementImportBatch.update({
     where: { id: batchId },
     data: {
@@ -290,6 +303,7 @@ async function runStreamingImport(
       pendingDuplicatesJson: pendingDuplicatesData.length > 0 ? pendingDuplicatesData : undefined,
     },
   });
+  console.log("[import] batch record updated");
 
   if (duplicates.length > 0) {
     emit("duplicates", {
@@ -300,7 +314,9 @@ async function runStreamingImport(
     return;
   }
 
+  console.log("[import] marking batch DONE...");
   await db.statementImportBatch.update({ where: { id: batchId }, data: { status: "DONE" } });
+  console.log("[import] batch DONE, emitting done event");
   emit("done", { batchId, count: safe.length, skipped: 0 });
 }
 

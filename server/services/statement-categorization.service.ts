@@ -107,7 +107,7 @@ export async function categorizeBatch(descriptions: string[]): Promise<Categoriz
         contents: [{ parts: [{ text: buildCategorizationPrompt(descriptions) }] }],
         generationConfig: { temperature: 0.1, maxOutputTokens: 8192 },
       }),
-      signal: AbortSignal.timeout(120_000),
+      signal: AbortSignal.timeout(30_000),
     });
 
     if (!response.ok) {
