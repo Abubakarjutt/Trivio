@@ -157,6 +157,13 @@ export const orgRouter = createTRPCRouter({
       return { success: true };
     }),
 
+  setTaxRegime: orgProcedure
+    .input(z.object({ taxRegimeId: z.string().nullable() }))
+    .mutation(async ({ ctx, input }) => {
+      await ctx.db.organisation.update({ where: { id: ctx.organisationId }, data: { taxRegimeId: input.taxRegimeId } });
+      return { success: true };
+    }),
+
   setTaxJurisdiction: orgProcedure
     .input(z.object({ jurisdiction: z.string().nullable() }))
     .mutation(async ({ ctx, input }) => {

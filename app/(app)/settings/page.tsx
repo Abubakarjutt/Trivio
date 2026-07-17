@@ -7,6 +7,7 @@ import { EmailImportCard } from "./_components/email-import-card";
 import { PrivacyTab } from "./_components/privacy-tab";
 import { JurisdictionPicker } from "./_components/jurisdiction-picker";
 import { CurrencyPicker } from "./_components/currency-picker";
+import { TaxRegimePicker } from "./_components/tax-regime-picker";
 
 export default async function SettingsPage() {
   const session = await auth();
@@ -74,6 +75,10 @@ export default async function SettingsPage() {
               <div>
                 <dt className="text-[10px] font-bold uppercase tracking-[0.08em] text-muted-foreground mb-1.5">Currency</dt>
                 <CurrencyPicker />
+              </div>
+              <div>
+                <dt className="text-[10px] font-bold uppercase tracking-[0.08em] text-muted-foreground mb-1.5">Tax Regime</dt>
+                <TaxRegimePicker />
               </div>
             </div>
           </div>
