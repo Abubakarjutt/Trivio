@@ -13,17 +13,25 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
-            echo "=== UPDATING GEMINI_MODEL in .env ==="
-            cd /app/trivio
-            if grep -q "^GEMINI_MODEL=" .env; then
-              sed -i 's/^GEMINI_MODEL=.*/GEMINI_MODEL=gemini-2.0-flash-lite/' .env
-              echo "Updated existing GEMINI_MODEL"
-            else
-              echo "GEMINI_MODEL=gemini-2.0-flash-lite" >> .env
-              echo "Added GEMINI_MODEL"
-            fi
-            grep "GEMINI_MODEL" .env
-            echo "=== RESTARTING APP ==="
-            docker compose restart app
-            sleep 5
-            docker logs trivio-app-1 --tail 10 2>&1
+            echo "=== DEPLOYED GIT HASH ==="
+            docker exec trivio-app-1 cat /app/.git-hash 2>/dev/null || docker exec trivio-app-1 node -e "try{require('fs').readFileSync('/app/.git-hash','utf8')}catch(e){console.log('no hash file')}" 2>/dev/null || echo "unknown"
+            echo "=== GEMINI MODEL IN CODE ==="
+            docker exec trivio-app-1 grep -r "gemini-2.0-flash-lite\|gemma-4" /app/.next/server/chunks/ 2>/dev/null | head -3 || echo "grep done"
+            echo "=== TEST gemini-2.0-flash-lite WITH REAL PROMPT ==="
+            docker exec trivio-app-1 node -e "
+            const key = process.env.GEMINI_API_KEY;
+            const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=' + key;
+            const prompt = 'Extract ALL financial transactions from the text below and return a JSON array.\nEach transaction MUST have: date (YYYY-MM-DD), description, amount (positive number), type (DEBIT or CREDIT).\nIf no transaction, return [].\n\nText:\n15-May-2026 ACME STORE 1,500.00 2,500.00\n20-May-2026 SALARY CREDIT 5,000.00 7,500.00\n\nJSON array:';
+            fetch(url, {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0, maxOutputTokens: 1024 } }),
+              signal: AbortSignal.timeout(15000)
+            }).then(r => { console.log('Status:', r.status); return r.json(); })
+            .then(d => {
+              const parts = d.candidates?.[0]?.content?.parts ?? [];
+              const text = parts.filter(p=>!p.thought).map(p=>p.text??'').join('');
+              console.log('Response:', text.slice(0, 500));
+            })
+            .catch(e => console.error('Error:', e.message));
+            " 2>&1
