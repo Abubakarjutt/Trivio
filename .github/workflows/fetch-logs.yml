@@ -8,20 +8,24 @@ jobs:
     name: Tail container logs
     runs-on: ubuntu-latest
     steps:
-      - name: Get logs via SSH
+      - name: Get logs + config via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
-            echo "=== LAST 200 LOG LINES ==="
-            docker logs trivio-app-1 --tail 200 2>&1
+            echo "=== CADDY CONFIG ==="
+            cat /app/trivio/Caddyfile 2>/dev/null || cat /etc/caddy/Caddyfile 2>/dev/null || docker exec $(docker ps --filter name=caddy --format '{{.Names}}') cat /etc/caddy/Caddyfile 2>/dev/null || echo "caddy config not found"
+            echo "=== CADDY CONTAINER NAME ==="
+            docker ps --format '{{.Names}}'
+            echo "=== LAST 300 APP LOGS ==="
+            docker logs trivio-app-1 --tail 300 2>&1
             echo "=== BATCH STATUS ==="
             docker exec trivio-app-1 node -e "
             const { PrismaClient } = require('/app/node_modules/@prisma/client');
             const db = new PrismaClient();
-            db.statementImportBatch.findMany({ orderBy: { createdAt: 'desc' }, take: 5, select: { id: true, filename: true, status: true, errorMessage: true, transactionCount: true, createdAt: true } })
+            db.statementImportBatch.findMany({ orderBy: { createdAt: 'desc' }, take: 3, select: { id: true, filename: true, status: true, errorMessage: true, transactionCount: true, createdAt: true } })
             .then(r => { console.log(JSON.stringify(r, null, 2)); db.\$disconnect(); })
             .catch(e => { console.error(e); db.\$disconnect(); });
             " 2>&1
