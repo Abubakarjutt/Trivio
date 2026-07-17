@@ -13,26 +13,22 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
-            echo "=== LIST AVAILABLE FREE TIER MODELS ==="
             docker exec trivio-app-1 node -e "
             const key = process.env.GEMINI_API_KEY;
-            fetch('https://generativelanguage.googleapis.com/v1beta/models?key=' + key + '&pageSize=100')
-              .then(r => r.json())
-              .then(d => {
-                const models = (d.models || []).map(m => m.name).filter(n => n.includes('flash') || n.includes('gemma'));
-                console.log(JSON.stringify(models, null, 2));
-              }).catch(e => console.error(e.message));
-            " 2>&1
-            echo "=== TEST gemini-2.0-flash (non-lite) ==="
-            docker exec trivio-app-1 node -e "
-            const key = process.env.GEMINI_API_KEY;
-            const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' + key;
-            fetch(url, {
-              method: 'POST',
-              headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({ contents: [{ parts: [{ text: 'Say OK' }] }], generationConfig: { temperature: 0, maxOutputTokens: 10 } }),
-              signal: AbortSignal.timeout(15000)
-            }).then(r => { console.log('Status:', r.status); return r.json(); })
-            .then(d => { const t = d.candidates?.[0]?.content?.parts?.filter(p=>!p.thought)?.map(p=>p.text)?.join('') || ''; console.log('Response:', t); })
-            .catch(e => console.error('Error:', e.message));
+            const models = ['gemini-2.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'];
+            async function test(model) {
+              const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + key;
+              try {
+                const r = await fetch(url, {
+                  method: 'POST',
+                  headers: {'Content-Type': 'application/json'},
+                  body: JSON.stringify({ contents: [{ parts: [{ text: 'Reply with just: OK' }] }], generationConfig: { temperature: 0, maxOutputTokens: 10 } }),
+                  signal: AbortSignal.timeout(20000)
+                });
+                const d = await r.json();
+                const t = (d.candidates?.[0]?.content?.parts ?? []).filter(p=>!p.thought).map(p=>p.text??'').join('');
+                console.log(model + ': status=' + r.status + ' text=' + t.trim());
+              } catch(e) { console.log(model + ': ERROR ' + e.message); }
+            }
+            (async()=>{ for(const m of models) await test(m); })();
             " 2>&1
