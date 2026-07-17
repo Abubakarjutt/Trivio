@@ -7,10 +7,11 @@ import type { RawTransaction } from "./statement-parser.service";
 import { redactPii } from "./pii-redaction.service";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? "";
-// Default to gemini-2.0-flash-lite: generous free tier (1500 RPD, 15 RPM),
-// much better than the old gemma-4-26b-a4b-it which had very low limits.
-const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-2.0-flash-lite";
-const GEMINI_URL   = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+// gemini-2.0-flash-lite: fast, non-thinking, 1500 RPD free tier.
+// Hardcoded — env var GEMINI_MODEL is intentionally NOT used here because
+// the old default (gemma-4-26b-a4b-it) is a slow thinking model that times
+// out on complex bank-statement prompts.
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent`;
 
 // pdfjs-dist v5 doesn't export NodeCMapReaderFactory, so we provide one that
 // reads from the bundled cmaps/ directory using the local filesystem. This
