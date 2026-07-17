@@ -7,10 +7,15 @@ function getResend(): Resend | null {
   return new Resend(process.env.RESEND_API_KEY);
 }
 
-export async function sendPasswordResetEmail(email: string, resetUrl: string) {
+async function send(payload: Parameters<Resend["emails"]["send"]>[0]): Promise<void> {
   const resend = getResend();
-  if (!resend) { console.warn("[resend] RESEND_API_KEY not set — skipping password reset email"); return; }
-  await resend.emails.send({
+  if (!resend) { console.error("[resend] RESEND_API_KEY not set — email not sent", { to: payload.to, subject: payload.subject }); return; }
+  const { error } = await resend.emails.send(payload);
+  if (error) console.error("[resend] send failed", { to: payload.to, subject: payload.subject, error });
+}
+
+export async function sendPasswordResetEmail(email: string, resetUrl: string) {
+  await send({
     from: FROM(),
     to: email,
     subject: "Reset your Trivio password",
@@ -27,12 +32,7 @@ export async function sendPasswordResetEmail(email: string, resetUrl: string) {
 }
 
 export async function sendVerificationEmail(email: string, verifyUrl: string) {
-  const resend = getResend();
-  if (!resend) {
-    console.warn("[resend] RESEND_API_KEY not set — verification URL: " + verifyUrl);
-    return;
-  }
-  await resend.emails.send({
+  await send({
     from: FROM(),
     to: email,
     subject: "Verify your Trivio email address",
@@ -49,10 +49,8 @@ export async function sendVerificationEmail(email: string, verifyUrl: string) {
 }
 
 export async function sendAlreadyRegisteredEmail(email: string) {
-  const resend = getResend();
-  if (!resend) { return; }
   const loginUrl = `${process.env.NEXTAUTH_URL ?? ""}/login`;
-  await resend.emails.send({
+  await send({
     from: FROM(),
     to: email,
     subject: "Trivio: sign-in attempt on your account",
