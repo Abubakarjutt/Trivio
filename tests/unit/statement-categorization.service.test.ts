@@ -1,30 +1,26 @@
 /**
  * Unit tests for statement-categorization.service.ts
  *
- * Migrated from MCC-based to category-name-based AI prompt (Gemini).
- * All tests mock global `fetch` so no real HTTP calls are made.
+ * Migrated to use the Anthropic Claude SDK (claude-haiku-4-5-20251001).
+ * All tests mock @anthropic-ai/sdk so no real HTTP calls are made.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   mapMccToCategory,
   buildCategorizationPrompt,
 } from "@/server/services/statement-categorization.service";
 
+const mockCreate = vi.hoisted(() => vi.fn());
+vi.mock("@anthropic-ai/sdk", () => ({
+  default: vi.fn().mockImplementation(() => ({
+    messages: { create: mockCreate },
+  })),
+}));
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-function geminiResponse(text: string, opts: { thought?: boolean; httpStatus?: number } = {}) {
-  const parts = opts.thought
-    ? [
-        { text: "Let me think about this...", thought: true },
-        { text, thought: false },
-      ]
-    : [{ text }];
-  return {
-    status: opts.httpStatus ?? 200,
-    ok: (opts.httpStatus ?? 200) < 400,
-    json: async () => ({ candidates: [{ content: { parts } }] }),
-    text: async () => "error",
-  };
+function claudeResponse(text: string) {
+  return { content: [{ type: "text" as const, text }] };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -98,44 +94,22 @@ describe("buildCategorizationPrompt", () => {
 // categorizeBatch
 // ─────────────────────────────────────────────────────────────────────────────
 describe("categorizeBatch", () => {
-  const OLD_ENV = process.env;
-
   beforeEach(() => {
-    vi.resetModules();
-    process.env = { ...OLD_ENV };
-    vi.stubGlobal("fetch", vi.fn());
+    mockCreate.mockReset();
   });
 
-  afterEach(() => {
-    process.env = OLD_ENV;
-    vi.unstubAllGlobals();
-  });
-
-  it("returns empty array for empty input (no fetch call)", async () => {
-    process.env.GEMINI_API_KEY = "test-key";
+  it("returns empty array for empty input (no API call)", async () => {
     const { categorizeBatch } = await import("@/server/services/statement-categorization.service");
     const result = await categorizeBatch([]);
     expect(result).toHaveLength(0);
-    expect(fetch).not.toHaveBeenCalled();
+    expect(mockCreate).not.toHaveBeenCalled();
   });
 
-  it("returns fallback results when GEMINI_API_KEY is not set", async () => {
-    delete process.env.GEMINI_API_KEY;
-    const { categorizeBatch } = await import("@/server/services/statement-categorization.service");
-    const result = await categorizeBatch(["Starbucks", "Netflix"]);
-    expect(result).toHaveLength(2);
-    expect(result[0].category).toBe("Other");
-    expect(result[0].merchantName).toBe("Starbucks");
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
-  it("parses a successful Gemini response (category-name shape)", async () => {
-    process.env.GEMINI_API_KEY = "test-key";
+  it("parses a successful Claude response", async () => {
     const apiPayload = JSON.stringify([
       { description: "STARBUCKS", merchantName: "Starbucks", category: "Restaurants & Cafes" },
     ]);
-    vi.mocked(fetch).mockResolvedValue(geminiResponse(apiPayload) as unknown as Response);
-
+    mockCreate.mockResolvedValue(claudeResponse(apiPayload));
     const { categorizeBatch } = await import("@/server/services/statement-categorization.service");
     const result = await categorizeBatch(["STARBUCKS"]);
     expect(result).toHaveLength(1);
@@ -144,93 +118,55 @@ describe("categorizeBatch", () => {
     expect(result[0].mccCode).toBe("0000");
   });
 
-  it("filters thought parts from thinking-model responses", async () => {
-    process.env.GEMINI_API_KEY = "test-key";
-    const apiPayload = JSON.stringify([
-      { description: "NETFLIX.COM", merchantName: "Netflix", category: "Movies & Streaming" },
-    ]);
-    vi.mocked(fetch).mockResolvedValue(
-      geminiResponse(apiPayload, { thought: true }) as unknown as Response
-    );
-
-    const { categorizeBatch } = await import("@/server/services/statement-categorization.service");
-    const result = await categorizeBatch(["NETFLIX.COM"]);
-    expect(result[0].merchantName).toBe("Netflix");
-    expect(result[0].category).toBe("Movies & Streaming");
-  });
-
   it("handles JSON wrapped in markdown fences", async () => {
-    process.env.GEMINI_API_KEY = "test-key";
     const wrapped = "```json\n" + JSON.stringify([
       { description: "UBER", merchantName: "Uber", category: "Ride-sharing & Taxis" },
     ]) + "\n```";
-    vi.mocked(fetch).mockResolvedValue(geminiResponse(wrapped) as unknown as Response);
-
+    mockCreate.mockResolvedValue(claudeResponse(wrapped));
     const { categorizeBatch } = await import("@/server/services/statement-categorization.service");
     const result = await categorizeBatch(["UBER"]);
     expect(result[0].category).toBe("Ride-sharing & Taxis");
   });
 
-  it("falls back to Other when Gemini returns malformed JSON", async () => {
-    process.env.GEMINI_API_KEY = "test-key";
-    vi.mocked(fetch).mockResolvedValue(geminiResponse("not valid json at all") as unknown as Response);
-
+  it("falls back to Other when Claude returns malformed JSON", async () => {
+    mockCreate.mockResolvedValue(claudeResponse("not valid json at all"));
     const { categorizeBatch } = await import("@/server/services/statement-categorization.service");
     const result = await categorizeBatch(["Amazon"]);
     expect(result[0].category).toBe("Other");
     expect(result[0].merchantName).toBe("Amazon");
   });
 
-  it("falls back when Gemini returns non-array JSON", async () => {
-    process.env.GEMINI_API_KEY = "test-key";
-    vi.mocked(fetch).mockResolvedValue(geminiResponse('{"error":"oops"}') as unknown as Response);
-
+  it("falls back when Claude returns non-array JSON", async () => {
+    mockCreate.mockResolvedValue(claudeResponse('{"error":"oops"}'));
     const { categorizeBatch } = await import("@/server/services/statement-categorization.service");
     const result = await categorizeBatch(["Spotify"]);
     expect(result[0].category).toBe("Other");
   });
 
-  it("falls back for items with invalid category in Gemini response", async () => {
-    process.env.GEMINI_API_KEY = "test-key";
+  it("falls back for items with invalid category", async () => {
     const apiPayload = JSON.stringify([
       { description: "Mystery Store", merchantName: "Mystery", category: "Not A Real Category" },
     ]);
-    vi.mocked(fetch).mockResolvedValue(geminiResponse(apiPayload) as unknown as Response);
-
+    mockCreate.mockResolvedValue(claudeResponse(apiPayload));
     const { categorizeBatch } = await import("@/server/services/statement-categorization.service");
     const result = await categorizeBatch(["Mystery Store"]);
     expect(result[0].category).toBe("Other");
     expect(result[0].merchantName).toBe("Mystery Store");
   });
 
-  it("falls back on HTTP error from Gemini API", async () => {
-    process.env.GEMINI_API_KEY = "test-key";
-    vi.mocked(fetch).mockResolvedValue({
-      status: 429, ok: false, text: async () => "Too Many Requests",
-    } as unknown as Response);
-
-    const { categorizeBatch } = await import("@/server/services/statement-categorization.service");
-    const result = await categorizeBatch(["Tesco"]);
-    expect(result[0].category).toBe("Other");
-  });
-
-  it("falls back when fetch throws (network error)", async () => {
-    process.env.GEMINI_API_KEY = "test-key";
-    vi.mocked(fetch).mockRejectedValue(new Error("Network error"));
-
+  it("falls back when Claude API throws", async () => {
+    mockCreate.mockRejectedValue(new Error("Network error"));
     const { categorizeBatch } = await import("@/server/services/statement-categorization.service");
     const result = await categorizeBatch(["Waitrose"]);
     expect(result[0].category).toBe("Other");
   });
 
   it("categorizes multiple items correctly in one batch", async () => {
-    process.env.GEMINI_API_KEY = "test-key";
     const apiPayload = JSON.stringify([
       { description: "STARBUCKS", merchantName: "Starbucks", category: "Restaurants & Cafes" },
       { description: "DELTA AIR", merchantName: "Delta Air",  category: "Flights" },
     ]);
-    vi.mocked(fetch).mockResolvedValue(geminiResponse(apiPayload) as unknown as Response);
-
+    mockCreate.mockResolvedValue(claudeResponse(apiPayload));
     const { categorizeBatch } = await import("@/server/services/statement-categorization.service");
     const result = await categorizeBatch(["STARBUCKS", "DELTA AIR"]);
     expect(result[0].category).toBe("Restaurants & Cafes");
