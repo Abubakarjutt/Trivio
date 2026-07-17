@@ -339,10 +339,11 @@ async function handlePdfImport(buffer: Buffer, filename: string, organisationId:
 
       const allRawTransactions: import("@/server/services/statement-parser.service").RawTransaction[] = [];
       for (let i = 0; i < pages.length; i++) {
-        // Emit before each page so the SSE stream stays alive while Gemini processes
         const pct = 15 + Math.round(((i + 1) / pages.length) * 25);
         emit("progress", { step: "parsing", pct, page: i + 1, totalPages: pages.length });
-        const pageTxns = await parsePageTransactions(pages[i]);
+        // Keep SSE alive during Gemini page-parse call (up to 30s per page when rate-limited).
+        const pageKeepaliveId = setInterval(() => emit("progress", { step: "parsing", pct, page: i + 1, totalPages: pages.length }), 5_000);
+        const pageTxns = await parsePageTransactions(pages[i]).finally(() => clearInterval(pageKeepaliveId));
         allRawTransactions.push(...pageTxns);
         console.log(`[import] Page ${i + 1}/${pages.length}: extracted ${pageTxns.length} transactions`);
       }
