@@ -9,9 +9,12 @@ import { redactPii } from "./pii-redaction.service";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? "";
 // Model fallback chain — each model has its own 1,500 RPD free-tier quota.
 // On 429 we try the next model so a single exhausted quota doesn't break imports.
+// Each model has its own independent daily quota.
+// On 429 we try the next model automatically.
 const GEMINI_MODELS = [
-  "gemini-2.0-flash-lite", // fastest, 1500 RPD
-  "gemini-1.5-flash",      // fallback, separate 1500 RPD quota
+  "gemini-2.0-flash-lite",  // primary: fastest, 1500 RPD
+  "gemini-2.5-flash-lite",  // fallback 1: separate quota
+  "gemini-3.1-flash-lite",  // fallback 2: separate quota
 ];
 
 // pdfjs-dist v5 doesn't export NodeCMapReaderFactory, so we provide one that
