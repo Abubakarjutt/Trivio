@@ -230,7 +230,10 @@ async function runStreamingImport(
 
   emit("progress", { step: "categorizing", pct: 50, count: rawTransactions.length, extracted: rawTxnsBeforeDedup.length });
   console.log("[import] calling categorizeBatch...");
-  const categorized = await categorizeBatch(rawTransactions.map((t) => t.description));
+  // Gemini can take up to 30s when rate-limited. Ping the SSE stream every 5s so
+  // Caddy / browser proxies don't close the idle connection before we emit results.
+  const keepaliveId = setInterval(() => emit("progress", { step: "categorizing", pct: 50, count: rawTransactions.length }), 5_000);
+  const categorized = await categorizeBatch(rawTransactions.map((t) => t.description)).finally(() => clearInterval(keepaliveId));
   console.log("[import] categorizeBatch done, results:", categorized.length);
 
   emit("progress", { step: "deduplicating", pct: 75, count: rawTransactions.length });
