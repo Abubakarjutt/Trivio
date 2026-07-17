@@ -12,7 +12,7 @@ export default defineConfig({
     include: [
       "tests/unit/**/*.test.ts",
       "tests/unit/**/*.test.tsx",
-      "tests/integration/**/*.test.ts",
+      // tests/integration/** requires `docker compose up -d` — run via `npm run test:integration`
       "app/api/email/**/*.test.ts",
       "app/api/chat/**/*.test.ts",
       "app/api/cron/**/*.test.ts",
@@ -23,7 +23,7 @@ export default defineConfig({
       // cloudflare/email-worker tests require a Cloudflare Workers runtime (postal-mime uses `self`)
       // and cannot run under Vitest's Node.js environment. Run them with wrangler test instead.
     ],
-    exclude: ["tests/e2e/**", "**/node_modules/**"],
+    exclude: ["tests/e2e/**", "tests/integration/**", "**/node_modules/**"],
   },
   resolve: {
     alias: {
