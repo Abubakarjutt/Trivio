@@ -9,7 +9,8 @@ GIT_SSH_COMMAND='ssh -i ~/.ssh/trivio_deploy' git fetch origin main
 git reset --hard origin/main
 
 # ── 2. Build new image (runs alongside live container — zero downtime) ─────────
-$COMPOSE build app
+# Build both services so app-next uses the same new code as app
+$COMPOSE build app app-next
 
 # ── 3. Start standby container with new image ──────────────────────────────────
 $COMPOSE --profile blue-green up -d --no-deps --force-recreate app-next
