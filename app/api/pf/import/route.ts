@@ -180,16 +180,30 @@ function createSseStream(
   handler: (emit: EmitFn) => Promise<void>
 ): Response {
   const encoder = new TextEncoder();
+  let closed = false;
   const stream = new ReadableStream({
     async start(controller) {
       const emit: EmitFn = (event: string, data: Record<string, unknown>) => {
-        controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+        if (closed) return;
+        try {
+          controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+        } catch {
+          closed = true;
+        }
       };
       try {
         await handler(emit);
       } finally {
-        controller.close();
+        if (!closed) {
+          try { controller.close(); } catch { /* already closed */ }
+          closed = true;
+        }
       }
+    },
+    cancel() {
+      // Client disconnected — mark closed so emit() becomes a no-op.
+      // The handler keeps running to completion so the DB batch is updated correctly.
+      closed = true;
     },
   });
   return new Response(stream, {
