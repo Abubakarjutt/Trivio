@@ -1,0 +1,28 @@
+name: Fix stuck import batches
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fix:
+    name: Mark stuck PROCESSING batches as FAILED
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run cleanup via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            docker exec trivio-app-1 node -e "
+            const { PrismaClient } = require('/app/node_modules/@prisma/client');
+            const db = new PrismaClient();
+            db.statementImportBatch.updateMany({
+              where: { status: 'PROCESSING' },
+              data: { status: 'FAILED', errorMessage: 'Batch interrupted by server restart' }
+            }).then(r => {
+              console.log('Cleared', r.count, 'stuck batches');
+              db.\$disconnect();
+            }).catch(e => { console.error(e); process.exit(1); });
+            "
