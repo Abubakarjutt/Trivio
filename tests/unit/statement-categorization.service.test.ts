@@ -174,6 +174,32 @@ describe("categorizeBatch", () => {
   it("falls back on HTTP error from Gemini API", async () => {
     process.env.GEMINI_API_KEY = "test-key";
     vi.mocked(fetch).mockResolvedValue({
+      status: 500, ok: false, text: async () => "Internal Server Error",
+    } as unknown as Response);
+
+    const { categorizeBatch } = await import("@/server/services/statement-categorization.service");
+    const result = await categorizeBatch(["Tesco"]);
+    expect(result[0].category).toBe("Other");
+  });
+
+  it("falls back to next model on 429 and succeeds", async () => {
+    process.env.GEMINI_API_KEY = "test-key";
+    const apiPayload = JSON.stringify([
+      { description: "STARBUCKS", merchantName: "Starbucks", category: "Restaurants & Cafes" },
+    ]);
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ status: 429, ok: false, text: async () => "Too Many Requests" } as unknown as Response)
+      .mockResolvedValueOnce(geminiResponse(apiPayload) as unknown as Response);
+
+    const { categorizeBatch } = await import("@/server/services/statement-categorization.service");
+    const result = await categorizeBatch(["STARBUCKS"]);
+    expect(result[0].category).toBe("Restaurants & Cafes");
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
+  });
+
+  it("falls back to Other when all models return 429", async () => {
+    process.env.GEMINI_API_KEY = "test-key";
+    vi.mocked(fetch).mockResolvedValue({
       status: 429, ok: false, text: async () => "Too Many Requests",
     } as unknown as Response);
 

@@ -122,6 +122,28 @@ describe("parseTransactionsFromText", () => {
     expect(result[0].type).toBe("DEBIT");
   });
 
+  it("falls back to next model on 429 and succeeds", async () => {
+    process.env.GEMINI_API_KEY = "test-key";
+    vi.mocked(fetch)
+      .mockResolvedValueOnce({ status: 429, ok: false, text: async () => "Too Many Requests" } as unknown as Response)
+      .mockResolvedValueOnce(geminiResponse(VALID_TRANSACTIONS_JSON) as unknown as Response);
+
+    const { parseTransactionsFromText } = await import("@/server/services/pdf-statement.service");
+    const result = await parseTransactionsFromText("text");
+    expect(result).toHaveLength(3);
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
+  });
+
+  it("throws after all models return 429", async () => {
+    process.env.GEMINI_API_KEY = "test-key";
+    vi.mocked(fetch).mockResolvedValue({
+      status: 429, ok: false, text: async () => "Too Many Requests",
+    } as unknown as Response);
+
+    const { parseTransactionsFromText } = await import("@/server/services/pdf-statement.service");
+    await expect(parseTransactionsFromText("text")).rejects.toThrow("AI parsing service unavailable");
+  });
+
   it("retries when Gemini returns 0 transactions and succeeds on the second attempt", async () => {
     process.env.GEMINI_API_KEY = "test-key";
     vi.useFakeTimers();

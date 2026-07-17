@@ -14,7 +14,10 @@ import {
 } from "@/lib/categories"
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? "";
-const GEMINI_URL     = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent`;
+const GEMINI_MODELS = [
+  "gemini-2.0-flash-lite",
+  "gemini-1.5-flash",
+];
 
 export interface CategorizationResult {
   description: string;
@@ -91,22 +94,40 @@ export async function categorizeBatch(descriptions: string[]): Promise<Categoriz
   }
 
   try {
-    const response = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: buildCategorizationPrompt(descriptions) }] }],
-        generationConfig: { temperature: 0.1, maxOutputTokens: 8192 },
-      }),
-      signal: AbortSignal.timeout(30_000),
-    });
+    let data: ReturnType<typeof JSON.parse> | undefined;
+    for (const model of GEMINI_MODELS) {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: buildCategorizationPrompt(descriptions) }] }],
+            generationConfig: { temperature: 0.1, maxOutputTokens: 8192 },
+          }),
+          signal: AbortSignal.timeout(30_000),
+        }
+      );
 
-    if (!response.ok) {
-      console.warn(`[statement-categorization.service] Gemini failed (${response.status}) — using fallback.`);
+      if (response.status === 429) {
+        console.warn(`[statement-categorization.service] ${model} quota exhausted (429), trying next model…`);
+        continue;
+      }
+
+      if (!response.ok) {
+        console.warn(`[statement-categorization.service] Gemini failed (${response.status}) — using fallback.`);
+        return descriptions.map(fallback);
+      }
+
+      data = await response.json();
+      break;
+    }
+
+    if (!data) {
+      console.warn("[statement-categorization.service] All Gemini models quota exhausted — using fallback.");
       return descriptions.map(fallback);
     }
 
-    const data = await response.json();
     const candidates = (data as { candidates?: Array<{ content?: { parts?: Array<{ text?: string; thought?: boolean }> } }> })?.candidates ?? [];
     const parts = candidates[0]?.content?.parts ?? [];
     const content = parts.filter((p) => !p.thought).map((p) => p.text ?? "").join("");

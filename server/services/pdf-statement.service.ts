@@ -7,11 +7,12 @@ import type { RawTransaction } from "./statement-parser.service";
 import { redactPii } from "./pii-redaction.service";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? "";
-// gemini-2.0-flash-lite: fast, non-thinking, 1500 RPD free tier.
-// Hardcoded — env var GEMINI_MODEL is intentionally NOT used here because
-// the old default (gemma-4-26b-a4b-it) is a slow thinking model that times
-// out on complex bank-statement prompts.
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent`;
+// Model fallback chain — each model has its own 1,500 RPD free-tier quota.
+// On 429 we try the next model so a single exhausted quota doesn't break imports.
+const GEMINI_MODELS = [
+  "gemini-2.0-flash-lite", // fastest, 1500 RPD
+  "gemini-1.5-flash",      // fallback, separate 1500 RPD quota
+];
 
 // pdfjs-dist v5 doesn't export NodeCMapReaderFactory, so we provide one that
 // reads from the bundled cmaps/ directory using the local filesystem. This
@@ -140,13 +141,9 @@ const PARSE_PROMPT_SUFFIX = `
 
 JSON array:`;
 
-async function callGemini(prompt: string): Promise<RawTransaction[]> {
-  if (!GEMINI_API_KEY) {
-    console.warn("[pdf-statement.service] GEMINI_API_KEY not set — returning empty list.");
-    return [];
-  }
-
-  const response = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
+async function callGeminiModel(prompt: string, model: string): Promise<RawTransaction[] | 429> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+  const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -155,6 +152,11 @@ async function callGemini(prompt: string): Promise<RawTransaction[]> {
     }),
     signal: AbortSignal.timeout(30_000),
   });
+
+  if (response.status === 429) {
+    console.warn(`[pdf-statement.service] ${model} quota exhausted (429), trying next model…`);
+    return 429;
+  }
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
@@ -185,6 +187,19 @@ async function callGemini(prompt: string): Promise<RawTransaction[]> {
       amount: Number(item.amount),
       type: String(item.type).toUpperCase() as "DEBIT" | "CREDIT",
     }));
+}
+
+async function callGemini(prompt: string): Promise<RawTransaction[]> {
+  if (!GEMINI_API_KEY) {
+    console.warn("[pdf-statement.service] GEMINI_API_KEY not set — returning empty list.");
+    return [];
+  }
+
+  for (const model of GEMINI_MODELS) {
+    const result = await callGeminiModel(prompt, model);
+    if (result !== 429) return result;
+  }
+  throw new Error("All Gemini models quota exhausted. Please try again later or create a new API key at aistudio.google.com.");
 }
 
 /**
