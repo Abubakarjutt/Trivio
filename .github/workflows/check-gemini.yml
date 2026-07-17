@@ -1,0 +1,34 @@
+name: Check Gemini env + API
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            echo "=== ENV VARS ==="
+            docker exec trivio-app-1 sh -c 'echo "GEMINI_MODEL=$GEMINI_MODEL"; echo "GEMINI_API_KEY prefix=${GEMINI_API_KEY:0:8}..."'
+            echo "=== GEMINI API TEST ==="
+            docker exec trivio-app-1 node -e "
+            const key = process.env.GEMINI_API_KEY;
+            const model = process.env.GEMINI_MODEL || 'gemini-2.0-flash-lite';
+            const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + key;
+            console.log('Testing model:', model);
+            fetch(url, {
+              method: 'POST',
+              headers: {'Content-Type': 'application/json'},
+              body: JSON.stringify({ contents: [{ parts: [{ text: 'Say OK' }] }] }),
+              signal: AbortSignal.timeout(15000)
+            }).then(r => {
+              console.log('Status:', r.status);
+              return r.text();
+            }).then(b => console.log('Body (first 300):', b.slice(0,300)))
+            .catch(e => console.error('Error:', e.message));
+            " 2>&1
