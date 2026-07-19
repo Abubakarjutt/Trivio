@@ -11,7 +11,7 @@ app.trivio-ai.com {
 
 trivio-ai.com, www.trivio-ai.com {
     # Proxy /blog and all article pages to the Next.js app
-    @blog path /blog /blog/*
+    @blog path_regexp ^/blog
     handle @blog {
         reverse_proxy app:3000 app-next:3000 {
             lb_policy first
