@@ -109,4 +109,4 @@ Irregular income is a feature of freelancing, not a bug. You just need a system 
 
 ---
 
-*Trivio shows you your income trends over time so you always know your real average — not just this month's number. [Try it free →](/register)*
+*Trivio shows you your income trends over time so you always know your real average — not just this month's number. [Try it free →](https://app.trivio-ai.com/register)*

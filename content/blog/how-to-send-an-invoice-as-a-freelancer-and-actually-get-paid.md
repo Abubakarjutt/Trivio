@@ -89,4 +89,4 @@ The freelancers who get paid fastest aren't the ones who are most persistent —
 
 ---
 
-*Trivio lets you send professional invoices in seconds and tracks when they've been viewed and paid. [Try it free →](/register)*
+*Trivio lets you send professional invoices in seconds and tracks when they've been viewed and paid. [Try it free →](https://app.trivio-ai.com/register)*

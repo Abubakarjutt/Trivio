@@ -97,4 +97,4 @@ You don't need to love bookkeeping. You just need a system small enough that you
 
 ---
 
-*Trivio is a free accounting app built specifically for freelancers. Import your bank statement, categorize your transactions with AI, and send invoices — all in one place. [Try it free →](/register)*
+*Trivio is a free accounting app built specifically for freelancers. Import your bank statement, categorize your transactions with AI, and send invoices — all in one place. [Try it free →](https://app.trivio-ai.com/register)*

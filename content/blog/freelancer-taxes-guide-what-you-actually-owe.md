@@ -73,4 +73,4 @@ That's it. You don't need to understand every corner of the tax code to stay out
 
 ---
 
-*Trivio tracks your income and expenses automatically so you always know what you owe and when. [Try it free →](/register)*
+*Trivio tracks your income and expenses automatically so you always know what you owe and when. [Try it free →](https://app.trivio-ai.com/register)*

@@ -117,4 +117,4 @@ Track everything. Let your tax professional make the call on what's deductible. 
 
 ---
 
-*Trivio automatically categorizes your transactions so you never miss a deductible expense. [Try it free →](/register)*
+*Trivio automatically categorizes your transactions so you never miss a deductible expense. [Try it free →](https://app.trivio-ai.com/register)*
