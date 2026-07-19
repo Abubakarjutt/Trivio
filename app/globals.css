@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/forms";
 @plugin "tailwindcss-animate";
+@plugin "@tailwindcss/typography";
 
 /* Map Tailwind color utilities to our CSS variables */
 @theme inline {
