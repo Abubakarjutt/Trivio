@@ -1,0 +1,19 @@
+name: Reload Caddy
+
+on:
+  workflow_dispatch:
+
+jobs:
+  reload:
+    name: Reload Caddy config
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reload via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            docker exec trivio-caddy-1 caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+            echo "Caddy reloaded successfully"

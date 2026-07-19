@@ -8,6 +8,9 @@ COMPOSE="docker compose -f docker-compose.prod.yml --env-file .env.prod"
 GIT_SSH_COMMAND='ssh -i ~/.ssh/trivio_deploy' git fetch origin main
 git reset --hard origin/main
 
+# ── 1a. Reload Caddy if config changed ────────────────────────────────────────
+docker exec trivio-caddy-1 caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile && echo "[deploy] Caddy config reloaded" || echo "[deploy] Caddy reload failed (non-fatal)"
+
 # ── 2. Build new image (runs alongside live container — zero downtime) ─────────
 # Build both services so app-next uses the same new code as app
 $COMPOSE build app app-next
