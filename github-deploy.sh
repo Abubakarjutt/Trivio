@@ -12,7 +12,6 @@ git reset --hard origin/main
 docker exec trivio-caddy-1 caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile && echo "[deploy] Caddy config reloaded" || echo "[deploy] Caddy reload failed (non-fatal)"
 
 # ── 2. Build new image (runs alongside live container — zero downtime) ─────────
-# Build both services so app-next uses the same new code as app
 $COMPOSE build app app-next
 
 # ── 3. Start standby container with new image ──────────────────────────────────
@@ -33,8 +32,12 @@ for i in $(seq 1 40); do
   sleep 3
 done
 
-# Give Caddy time to detect app-next as healthy via its health checks
-sleep 8
+# ── 4a. Add app-next to Caddy upstream pool ───────────────────────────────────
+echo "[deploy] Adding app-next to Caddy upstream pool..."
+cp /app/trivio/Caddyfile /tmp/Caddyfile.primary
+cp /app/trivio/Caddyfile.bgdeploy /app/trivio/Caddyfile
+docker exec trivio-caddy-1 caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile && echo "[deploy] Caddy updated to blue-green config" || echo "[deploy] Caddy reload failed (non-fatal)"
+sleep 8  # Give Caddy time to detect app-next as healthy via active health checks
 
 # ── 5. Stop primary — Caddy automatically fails over to app-next ───────────────
 echo "[deploy] Cutting over — stopping primary app..."
@@ -52,16 +55,23 @@ for i in $(seq 1 40); do
   fi
   if [ "$i" -eq 40 ]; then
     echo "[deploy] WARNING: app health check timed out — app-next is still serving"
+    # Restore primary Caddyfile before exit so normal-op state is preserved
+    cp /tmp/Caddyfile.primary /app/trivio/Caddyfile 2>/dev/null || true
+    docker exec trivio-caddy-1 caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile 2>/dev/null || true
     exit 1
   fi
   sleep 3
 done
 
-# Give Caddy time to switch back to primary
-sleep 8
+sleep 6  # Give Caddy time to switch back to primary via health checks
 
 # ── 8. Tear down standby ──────────────────────────────────────────────────────
 echo "[deploy] Stopping app-next standby..."
 $COMPOSE --profile blue-green stop app-next
+
+# ── 8a. Restore Caddy to single-upstream config ───────────────────────────────
+echo "[deploy] Restoring Caddy to primary-only config..."
+cp /tmp/Caddyfile.primary /app/trivio/Caddyfile
+docker exec trivio-caddy-1 caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile && echo "[deploy] Caddy restored to primary-only config" || echo "[deploy] Caddy reload failed (non-fatal)"
 
 echo "[deploy] Zero-downtime deploy complete"

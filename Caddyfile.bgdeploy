@@ -1,7 +1,8 @@
 app.trivio-ai.com {
-    reverse_proxy app:3000 {
+    reverse_proxy app:3000 app-next:3000 {
+        lb_policy first
         health_uri /api/health
-        health_interval 10s
+        health_interval 5s
         health_timeout 5s
         fail_duration 10s
         flush_interval -1
