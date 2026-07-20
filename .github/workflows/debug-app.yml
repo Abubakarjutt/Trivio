@@ -1,0 +1,36 @@
+name: Debug App
+
+on:
+  workflow_dispatch:
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Debug via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            echo "=== DOCKER CONTAINER STATUS ==="
+            docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.RestartCount}}" 2>/dev/null || docker ps -a
+            echo ""
+            echo "=== VPS MEMORY ==="
+            free -m
+            echo ""
+            echo "=== DISK USAGE ==="
+            df -h /
+            echo ""
+            echo "=== APP CONTAINER LOGS (last 50 lines) ==="
+            docker logs trivio-app-1 --tail 50 2>&1 || echo "Container not found or no logs"
+            echo ""
+            echo "=== APP CONTAINER RESTART COUNT ==="
+            docker inspect trivio-app-1 --format '{{.RestartCount}} restarts, State: {{.State.Status}}, OOMKilled: {{.State.OOMKilled}}' 2>/dev/null || echo "Container not found"
+            echo ""
+            echo "=== CADDY LOGS (last 20 lines) ==="
+            docker logs trivio-caddy-1 --tail 20 2>&1 || echo "No caddy logs"
+            echo ""
+            echo "=== HEALTH CHECK FROM INSIDE VPS ==="
+            curl -sf http://localhost:3003/api/health && echo "HEALTH OK" || echo "HEALTH FAILED"
