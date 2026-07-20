@@ -15,5 +15,8 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
-            docker exec trivio-caddy-1 caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
-            echo "Caddy reloaded successfully"
+            cd /app/trivio
+            docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --no-deps --force-recreate caddy
+            echo "Caddy container restarted"
+            sleep 3
+            curl -sI -H "Host: trivio-ai.com" http://localhost/blog/ | head -5
