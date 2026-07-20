@@ -17,8 +17,17 @@ jobs:
             echo "=== CADDYFILE ON DISK ==="
             cat /app/trivio/Caddyfile
             echo ""
-            echo "=== CURL /blog/ FROM INSIDE VPS ==="
-            curl -sI -H "Host: trivio-ai.com" http://localhost/blog/ | head -15
+            echo "=== CADDY RUNNING CONFIG (admin API) ==="
+            docker exec trivio-caddy-1 wget -qO- http://localhost:2019/config/ 2>/dev/null | head -c 2000 || echo "Admin API not available"
             echo ""
-            echo "=== CURL / FROM INSIDE VPS ==="
-            curl -sI -H "Host: trivio-ai.com" http://localhost/ | head -5
+            echo "=== CURL /blog (no slash) FROM INSIDE VPS via HTTP ==="
+            curl -sI -H "Host: trivio-ai.com" http://localhost/blog | head -10
+            echo ""
+            echo "=== CURL /blog/ FROM INSIDE VPS via HTTP ==="
+            curl -sI -H "Host: trivio-ai.com" http://localhost/blog/ | head -10
+            echo ""
+            echo "=== CURL /blog/ via HTTPS FROM INSIDE VPS (skip TLS verify) ==="
+            curl -sIk -H "Host: trivio-ai.com" https://localhost/blog/ 2>/dev/null | head -15 || echo "HTTPS curl failed"
+            echo ""
+            echo "=== FILES IN /var/www/trivio-landing/blog/ ==="
+            ls /var/www/trivio-landing/blog/ 2>/dev/null || echo "Directory does not exist"
