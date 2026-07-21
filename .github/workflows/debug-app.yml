@@ -23,8 +23,8 @@ jobs:
             echo "=== APP RESTART COUNT ==="
             docker inspect trivio-app-1 --format '{{.RestartCount}} restarts | State: {{.State.Status}} | OOMKilled: {{.State.OOMKilled}}' 2>/dev/null || echo "Container not found"
             echo ""
-            echo "=== APP LOGS (last 30 lines) ==="
-            docker logs trivio-app-1 --tail 30 2>&1
+            echo "=== APP LOGS (last 100 lines) ==="
+            docker logs trivio-app-1 --tail 100 2>&1
             echo ""
             echo "=== CADDY ERROR LOGS (errors only, last 30 lines) ==="
             docker logs trivio-caddy-1 --tail 200 2>&1 | grep -v "health_checker" | tail -30

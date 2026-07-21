@@ -26,3 +26,7 @@ export const extractionQueue = new Queue<ExtractionJob>("ai-extraction", {
     removeOnFail: { count: 50 },
   },
 });
+
+extractionQueue.on("error", (err) => {
+  console.error("[queue] BullMQ error:", err.message);
+});
