@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 // Exact match for "/" and prefix match for everything else
 // /api/chat is intentionally excluded — the route handler enforces auth itself,
 // but keeping it public at middleware level creates a redundant bypass opportunity.
-const PUBLIC_PREFIXES = ["/login", "/register", "/forgot-password", "/reset-password", "/privacy", "/api/auth", "/api/trpc", "/pricing", "/blog", "/api/webhooks", "/api/email", "/api/health"];
+const PUBLIC_PREFIXES = ["/login", "/register", "/forgot-password", "/reset-password", "/privacy", "/api/auth", "/api/trpc", "/api/mobile", "/pricing", "/blog", "/api/webhooks", "/api/email", "/api/health"];
 const ONBOARDING_ROUTE = "/onboarding";
 const DASHBOARD_ROUTE = "/dashboard";
 
