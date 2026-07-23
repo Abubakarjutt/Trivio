@@ -2,6 +2,7 @@
 import { timingSafeEqual } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { createRateLimiter } from "@/server/middleware/rateLimit";
 import {
   deduplicateIncoming,
   detectDuplicates,
@@ -13,6 +14,21 @@ import {
 } from "@/server/services/pdf-statement.service";
 import { parseTransactionsFromImage } from "@/server/services/image-statement.service";
 import { redactPiiText } from "@/server/services/pii-redaction.service";
+
+const emailInboundRateLimiter = createRateLimiter(10, 60_000);
+
+function validateAttachmentMagicBytes(buf: Buffer, mimeType: string): boolean {
+  if (buf.length < 4) return false;
+  if (mimeType === "application/pdf") {
+    return buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46;
+  }
+  const isJpeg = buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+  const isPng  = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+  const isWebp = buf.length >= 12 && buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46
+                 && buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50;
+  const isHeic = buf.length >= 12 && buf[4] === 0x66 && buf[5] === 0x74 && buf[6] === 0x79 && buf[7] === 0x70;
+  return isJpeg || isPng || isWebp || isHeic;
+}
 
 export const maxDuration = 180;
 
@@ -72,6 +88,13 @@ export async function POST(request: NextRequest) {
     }
 
     const organisationId = org.id;
+
+    try {
+      await emailInboundRateLimiter(`email-inbound:${organisationId}`);
+    } catch {
+      return NextResponse.json({ error: "Too many email imports. Please try again later." }, { status: 429 });
+    }
+
     console.info("[email-inbound] processing email for org:", organisationId, "| subject:", payload.subject);
 
     let rawTransactions;
@@ -86,11 +109,19 @@ export async function POST(request: NextRequest) {
     if (pdfAttachment) {
       console.info("[email-inbound] processing PDF attachment:", pdfAttachment.filename);
       const buffer = Buffer.from(pdfAttachment.content);
+      if (!validateAttachmentMagicBytes(buffer, "application/pdf")) {
+        console.warn("[email-inbound] PDF magic byte mismatch — skipping");
+        return NextResponse.json({ ok: true });
+      }
       const text = await extractTextFromPdf(buffer);
       rawTransactions = await parseTransactionsFromText(redactPiiText(text));
     } else if (imageAttachment) {
       console.info("[email-inbound] processing image attachment:", imageAttachment.filename);
       const buffer = Buffer.from(imageAttachment.content);
+      if (!validateAttachmentMagicBytes(buffer, imageAttachment.mimeType)) {
+        console.warn("[email-inbound] image magic byte mismatch — skipping");
+        return NextResponse.json({ ok: true });
+      }
       rawTransactions = await parseTransactionsFromImage(buffer, imageAttachment.mimeType);
     } else {
       console.info("[email-inbound] processing email body text, length:", (payload.text || payload.html).length);

@@ -6,6 +6,7 @@ import { autoDetectColumns, parseCsvBuffer, detectDuplicates, deduplicateIncomin
 import { categorizeBatch } from "@/server/services/statement-categorization.service";
 import { extractPdfPages, parsePageTransactions } from "@/server/services/pdf-statement.service";
 import { parseTransactionsFromImage } from "@/server/services/image-statement.service";
+import { createRateLimiter } from "@/server/middleware/rateLimit";
 
 // Allow up to 5 minutes — per-page Gemini calls on long PDFs can add up
 export const maxDuration = 300;
@@ -13,6 +14,26 @@ export const maxDuration = 300;
 const MAX_SIZE_BYTES = 20 * 1024 * 1024; // 20 MB
 
 const IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"];
+
+// 5 imports per minute per user — protects against AI cost amplification attacks
+const importRateLimiter = createRateLimiter(5, 60_000);
+
+// Magic byte signatures for accepted file types
+function validateFileMagicBytes(buf: Buffer, declaredType: "pdf" | "image" | "csv"): boolean {
+  if (buf.length < 4) return false;
+  if (declaredType === "csv") return true; // CSV is plain text; no magic bytes to check
+  if (declaredType === "pdf") {
+    return buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46;
+  }
+  // Image: JPEG, PNG, WebP (HEIC/HEIF have varied signatures — allow if first bytes match any known image format)
+  const isJpeg = buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+  const isPng  = buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
+  const isWebp = buf.length >= 12 && buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46
+                 && buf[8] === 0x57 && buf[9] === 0x45 && buf[10] === 0x42 && buf[11] === 0x50;
+  // HEIC/HEIF: ftyp box at offset 4 containing 'heic', 'heix', 'mif1', or 'msf1'
+  const isHeic = buf.length >= 12 && buf[4] === 0x66 && buf[5] === 0x74 && buf[6] === 0x79 && buf[7] === 0x70;
+  return isJpeg || isPng || isWebp || isHeic;
+}
 
 export async function POST(request: NextRequest) {
   const session = await auth();
@@ -27,6 +48,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "No organisation" }, { status: 403 });
   }
   const organisationId = user.organisationId;
+
+  // Rate limit: 5 imports per minute per user to prevent AI cost amplification
+  try {
+    await importRateLimiter(`pf-import:${session.user.id}`);
+  } catch {
+    return NextResponse.json({ error: "Too many import requests. Please wait a moment and try again." }, { status: 429 });
+  }
 
   let formData: FormData;
   try {
@@ -90,6 +118,12 @@ export async function POST(request: NextRequest) {
   // ─────────────────────────────────────────────────────────────────────────
 
   const buffer = Buffer.from(await file.arrayBuffer());
+
+  // Validate magic bytes — reject files whose content doesn't match their declared type
+  const declaredKind = isCsv ? "csv" : isPdf ? "pdf" : "image";
+  if (!validateFileMagicBytes(buffer, declaredKind)) {
+    return NextResponse.json({ error: "File content does not match the declared file type." }, { status: 422 });
+  }
 
   if (isCsv) return handleCsvImport(buffer, file.name, organisationId);
   if (isPdf)  return handlePdfImport(buffer, file.name, organisationId);

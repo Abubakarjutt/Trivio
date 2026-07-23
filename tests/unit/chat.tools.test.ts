@@ -460,6 +460,10 @@ describe("Chat Tool Execution", () => {
     });
 
     it("records full payment and sets status to PAID", async () => {
+      // recordInvoicePayment now wraps in a Serializable $transaction — mock it to run the callback
+      (mockDb.$transaction as ReturnType<typeof vi.fn>).mockImplementation(
+        (fn: (tx: unknown) => Promise<unknown>) => fn(mockDb),
+      );
       (mockDb.invoice.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({
         id: "inv-1",
         number: "INV-0001",

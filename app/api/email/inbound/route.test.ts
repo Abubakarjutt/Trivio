@@ -87,12 +87,15 @@ const PDF_EMAIL = {
   }],
 };
 
+// JPEG magic bytes: ff d8 ff + padding
+const JPEG_MAGIC = [0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10];
+
 const IMAGE_EMAIL = {
   ...TEXT_EMAIL,
   attachments: [{
     filename: "statement.jpg",
     mimeType: "image/jpeg",
-    content: Array.from(new TextEncoder().encode("fake-jpeg")),
+    content: JPEG_MAGIC,
   }],
 };
 

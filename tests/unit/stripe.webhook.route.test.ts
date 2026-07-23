@@ -238,8 +238,8 @@ describe("POST /api/webhooks/stripe", () => {
 
     const req = makeRequest();
     const res = await POST(req);
-    // Still returns 200 to prevent Stripe retry loops
-    expect(res.status).toBe(200);
+    // Returns 500 so Stripe retries the event on transient failures
+    expect(res.status).toBe(500);
     expect(db.webhookEvent.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: "wh-record-err" },
@@ -252,6 +252,8 @@ describe("POST /api/webhooks/stripe", () => {
     const event = makeSubscriptionEvent("customer.subscription.created", "cus-1");
     mockConstructEvent.mockReturnValue(event);
     vi.mocked(db.webhookEvent.findUnique).mockResolvedValue(null);
+    vi.mocked(db.webhookEvent.upsert).mockResolvedValue({ id: "wh-record-ok" } as never);
+    vi.mocked(handleWebhookEvent).mockResolvedValue(undefined);
     const req = makeRequest();
     const res = await POST(req);
     const json = await res.json();

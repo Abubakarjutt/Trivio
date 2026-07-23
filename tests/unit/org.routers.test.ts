@@ -146,6 +146,7 @@ function seedOrgMiddleware(orgId = ORG_ID) {
   mockUserFindUnique.mockResolvedValue({
     id: USER_ID,
     organisationId: orgId,
+    role: "OWNER",
     organisation: { ...baseOrg, id: orgId },
   });
 }

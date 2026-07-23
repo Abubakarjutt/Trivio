@@ -43,7 +43,9 @@ function makeFileReq(file: File) {
 
 const VALID_SESSION = { user: { id: "user-1" } };
 const VALID_USER = { organisationId: "org-1" };
-const VALID_FILE = new File(["hello"], "test.jpg", { type: "image/jpeg" });
+// JPEG magic bytes: ff d8 ff + padding so validateMagicBytes passes
+const JPEG_CONTENT = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
+const VALID_FILE = new File([JPEG_CONTENT], "test.jpg", { type: "image/jpeg" });
 
 beforeEach(() => {
   vi.clearAllMocks();

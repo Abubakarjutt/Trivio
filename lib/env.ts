@@ -4,6 +4,7 @@ const envSchema = z.object({
   DATABASE_URL: z.string().url(),
   NEXTAUTH_URL: z.string().url(),
   NEXTAUTH_SECRET: z.string().min(32),
+  AUTH_SECRET: z.string().min(32).optional(),
   REDIS_URL: z.string(),
   AWS_S3_BUCKET: z.string(),
   AWS_ACCESS_KEY_ID: z.string(),
