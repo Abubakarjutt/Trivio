@@ -4,12 +4,13 @@ import { SignJWT } from "jose";
 import { db } from "@/lib/db";
 import { registerRateLimiter } from "@/server/middleware/rateLimit";
 
-const _secret = process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET;
-if (!_secret) throw new Error("AUTH_SECRET env var is required");
-const JWT_SECRET = new TextEncoder().encode(_secret);
 const JWT_EXPIRY = "30d";
 
 export async function POST(req: NextRequest) {
+  const _secret = process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET;
+  if (!_secret) throw new Error("AUTH_SECRET env var is required");
+  const JWT_SECRET = new TextEncoder().encode(_secret);
+
   try {
     const body = await req.json() as { name?: string; email?: string; password?: string; currency?: string };
     const { name, email, password, currency = "USD" } = body;
