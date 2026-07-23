@@ -6,10 +6,6 @@ import { createTRPCContext } from "@/server/trpc";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 
-const _secret = process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET;
-if (!_secret) throw new Error("AUTH_SECRET env var is required");
-const JWT_SECRET = new TextEncoder().encode(_secret);
-
 async function buildSession(req: NextRequest) {
   // Web: use NextAuth cookie session
   const session = await auth();
@@ -21,6 +17,9 @@ async function buildSession(req: NextRequest) {
 
   try {
     const token = authHeader.slice(7);
+    const _secret = process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET;
+    if (!_secret) return null;
+    const JWT_SECRET = new TextEncoder().encode(_secret);
     const { payload } = await jwtVerify(token, JWT_SECRET);
     const userId = payload.sub as string;
     if (!userId) return null;
