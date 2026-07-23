@@ -9,7 +9,11 @@ function toCsv(rows: Record<string, unknown>[]): string {
   if (!rows.length) return "";
   const headers = Object.keys(rows[0]);
   const escape = (v: unknown): string => {
-    const s = v == null ? "" : String(v);
+    let s = v == null ? "" : String(v);
+    // Formula-injection guard: a cell that a spreadsheet would interpret as a
+    // formula (leading = + - @ or tab/CR) gets a leading apostrophe so Excel /
+    // Sheets render it as text instead of executing it.
+    if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
     return s.includes(",") || s.includes('"') || s.includes("\n")
       ? `"${s.replace(/"/g, '""')}"`
       : s;

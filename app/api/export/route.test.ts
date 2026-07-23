@@ -242,6 +242,39 @@ describe("GET /api/export", () => {
     expect(csvContent).toContain("110.00");
   });
 
+  it("neutralises spreadsheet formula injection in CSV cells", async () => {
+    const mockInvoice = {
+      id: "inv-2",
+      number: "INV-002",
+      date: new Date("2024-01-15"),
+      dueDate: new Date("2024-02-15"),
+      // Attacker-controlled contact name that a spreadsheet would execute
+      contact: { name: "=cmd|'/c calc'!A1" },
+      status: "PAID",
+      subtotal: { toFixed: () => "100.00" },
+      taxAmount: { toFixed: () => "10.00" },
+      totalAmount: { toFixed: () => "110.00" },
+      amountPaid: { toFixed: () => "110.00" },
+      notes: "@SUM(A1:A9)",
+    };
+    vi.mocked(db.invoice.findMany).mockResolvedValue([mockInvoice] as any);
+
+    const { default: JSZip } = await import("jszip");
+    await GET(makeReq());
+
+    const mockZipInstance = vi.mocked(JSZip).mock.results[0]?.value;
+    const csvContent = vi.mocked(mockZipInstance.file).mock.calls.find(
+      (call: unknown[]) => call[0] === "invoices.csv"
+    )?.[1] as string;
+
+    // Dangerous cells are prefixed with a leading apostrophe (then CSV-quoted
+    // because they contain a comma / quote), so Excel renders them as text.
+    expect(csvContent).toContain("'=cmd");
+    expect(csvContent).toContain("'@SUM(A1:A9)");
+    // The raw formula must NOT appear at a cell boundary unprefixed.
+    expect(csvContent).not.toMatch(/(^|,)=cmd/);
+  });
+
   // ── CSV generation with bills ────────────────────────────────────────────
 
   it("generates bill CSV with correct headers", async () => {

@@ -34,7 +34,10 @@ COPY --from=builder /app/tsconfig.json ./tsconfig.json
 COPY --from=builder /app/server ./server
 COPY --from=builder /app/lib ./lib
 
-RUN mkdir -p /app/storage
+# Run as the built-in non-root `node` user (uid 1000). Storage is written at
+# runtime (attachments), so it must be owned by that user.
+RUN mkdir -p /app/storage && chown -R node:node /app/storage
+USER node
 
 EXPOSE 3000
 ENV PORT=3000
