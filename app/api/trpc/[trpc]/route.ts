@@ -6,9 +6,9 @@ import { createTRPCContext } from "@/server/trpc";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET ?? "fallback-secret"
-);
+const _secret = process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET;
+if (!_secret) throw new Error("AUTH_SECRET env var is required");
+const JWT_SECRET = new TextEncoder().encode(_secret);
 
 async function buildSession(req: NextRequest) {
   // Web: use NextAuth cookie session

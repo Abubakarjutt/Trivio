@@ -57,7 +57,8 @@ export async function POST(request: NextRequest) {
       where: { id: record.id },
       data: { status: "ERROR", error: message },
     }).catch(() => {});
-    // Still return 200 to prevent Stripe from retrying for non-recoverable errors
+    // Return 500 so Stripe retries the event on transient failures
+    return NextResponse.json({ error: "Webhook handler failed" }, { status: 500 });
   }
 
   return NextResponse.json({ received: true });

@@ -144,6 +144,9 @@ export const orgRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      if (ctx.user.role !== "OWNER") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Only the organisation owner can update these settings." });
+      }
       return ctx.db.organisation.update({
         where: { id: ctx.organisationId },
         data: input,
@@ -153,6 +156,9 @@ export const orgRouter = createTRPCRouter({
   setCurrency: orgProcedure
     .input(z.object({ currency: z.string().min(3).max(3) }))
     .mutation(async ({ ctx, input }) => {
+      if (ctx.user.role !== "OWNER") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Only the organisation owner can change the currency." });
+      }
       await ctx.db.organisation.update({ where: { id: ctx.organisationId }, data: { currency: input.currency } });
       return { success: true };
     }),
@@ -160,6 +166,9 @@ export const orgRouter = createTRPCRouter({
   setTaxRegime: orgProcedure
     .input(z.object({ taxRegimeId: z.string().nullable() }))
     .mutation(async ({ ctx, input }) => {
+      if (ctx.user.role !== "OWNER") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Only the organisation owner can change the tax regime." });
+      }
       await ctx.db.organisation.update({ where: { id: ctx.organisationId }, data: { taxRegimeId: input.taxRegimeId } });
       return { success: true };
     }),
@@ -167,6 +176,9 @@ export const orgRouter = createTRPCRouter({
   setTaxJurisdiction: orgProcedure
     .input(z.object({ jurisdiction: z.string().nullable() }))
     .mutation(async ({ ctx, input }) => {
+      if (ctx.user.role !== "OWNER") {
+        throw new TRPCError({ code: "FORBIDDEN", message: "Only the organisation owner can change the tax jurisdiction." });
+      }
       await ctx.db.organisation.update({
         where: { id: ctx.organisationId },
         data: { taxJurisdiction: input.jurisdiction },

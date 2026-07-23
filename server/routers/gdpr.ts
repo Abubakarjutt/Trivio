@@ -4,6 +4,8 @@ import { TRPCError } from "@trpc/server";
 import { headers } from "next/headers";
 import { exportRateLimiter, deletionRateLimiter } from "@/server/middleware/rateLimit";
 import { writeAuditLog } from "@/lib/audit-log";
+import fs from "fs/promises";
+import path from "path";
 export { writeAuditLog } from "@/lib/audit-log";
 
 export const gdprRouter = createTRPCRouter({
@@ -62,7 +64,7 @@ export const gdprRouter = createTRPCRouter({
           select: { id: true, name: true, category: true, limitAmount: true, period: true, createdAt: true },
         }),
         ctx.db.chatMessage.findMany({
-          where: { conversation: { organisationId: ctx.organisationId } },
+          where: { conversation: { organisationId: ctx.organisationId, userId } },
           select: { id: true, role: true, content: true, createdAt: true },
           orderBy: { createdAt: "asc" },
           take: 1000,
@@ -118,6 +120,7 @@ export const gdprRouter = createTRPCRouter({
         });
       }
 
+      let isOnlyUser = false;
       await ctx.db.$transaction(async (tx) => {
         // Anonymise user PII
         await tx.user.update({
@@ -136,7 +139,7 @@ export const gdprRouter = createTRPCRouter({
             where: { id: user.organisationId },
             select: { users: { select: { id: true } } },
           });
-          const isOnlyUser = (org?.users ?? []).length === 1;
+          isOnlyUser = (org?.users ?? []).length === 1;
           if (isOnlyUser) {
             await tx.organisation.delete({ where: { id: user.organisationId } });
           }
@@ -145,6 +148,12 @@ export const gdprRouter = createTRPCRouter({
         // Delete sessions
         await tx.session.deleteMany({ where: { userId } });
       });
+
+      // Delete org attachment files from disk after DB records are gone
+      if (isOnlyUser && user.organisationId) {
+        const orgDir = path.join(process.cwd(), "storage", "attachments", user.organisationId);
+        await fs.rm(orgDir, { recursive: true, force: true }).catch(() => {});
+      }
 
       return { success: true };
     }),

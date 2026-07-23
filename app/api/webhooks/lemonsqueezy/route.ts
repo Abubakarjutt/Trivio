@@ -56,7 +56,30 @@ export async function POST(req: NextRequest) {
   try {
     let org: { id: string } | null = null;
     if (orgId) {
-      org = await db.organisation.findFirst({ where: { id: orgId }, select: { id: true } });
+      // Cross-validate: the paying user's email must belong to the org in custom_data.
+      // This prevents an attacker from tampering the org_id in the checkout URL
+      // to upgrade a different organisation on someone else's payment.
+      if (userEmail) {
+        const orgUser = await db.user.findFirst({
+          where: { email: userEmail, organisationId: orgId },
+          select: { organisationId: true },
+        });
+        if (orgUser) {
+          org = { id: orgId };
+        }
+        // Fallback: if cross-check fails, resolve by email only
+        if (!org) {
+          const user = await db.user.findUnique({
+            where: { email: userEmail },
+            select: { organisationId: true },
+          });
+          if (user?.organisationId) {
+            org = { id: user.organisationId };
+          }
+        }
+      } else {
+        org = await db.organisation.findFirst({ where: { id: orgId }, select: { id: true } });
+      }
     } else if (userEmail) {
       const user = await db.user.findUnique({
         where: { email: userEmail },

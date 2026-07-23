@@ -140,44 +140,48 @@ export async function recordBillPayment(
     reference?: string;
   }
 ) {
-  const bill = await db.bill.findFirst({
-    where: { id: params.billId, organisationId: params.organisationId },
-  });
-  if (!bill) throw new TRPCError({ code: "NOT_FOUND" });
-  if (bill.status === "VOID") throw new TRPCError({ code: "BAD_REQUEST", message: "Cannot pay a voided bill" });
+  // Wrap in a serializable transaction to prevent concurrent payments
+  // from double-counting amountPaid (same race condition as invoice payment).
+  return db.$transaction(async (tx) => {
+    const bill = await tx.bill.findFirst({
+      where: { id: params.billId, organisationId: params.organisationId },
+    });
+    if (!bill) throw new TRPCError({ code: "NOT_FOUND" });
+    if (bill.status === "VOID") throw new TRPCError({ code: "BAD_REQUEST", message: "Cannot pay a voided bill" });
 
-  const apAccount = await db.chartAccount.findFirst({
-    where: { organisationId: params.organisationId, code: "2100" },
-  });
-  if (!apAccount) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "AP account (2100) not found" });
+    const apAccount = await tx.chartAccount.findFirst({
+      where: { organisationId: params.organisationId, code: "2100" },
+    });
+    if (!apAccount) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "AP account (2100) not found" });
 
-  const entry = await createJournalEntry(db, {
-    organisationId: params.organisationId,
-    userId: params.userId,
-    date: params.date,
-    description: `Payment: ${bill.number}`,
-    reference: params.reference ?? bill.number ?? bill.id,
-    source: "BILL",
-    sourceId: bill.id,
-    lines: [
-      { accountId: apAccount.id, debit: params.amount, description: `AP cleared: ${bill.number}` },
-      { accountId: params.cashAccountId, credit: params.amount, description: `Payment made: ${bill.number}` },
-    ],
-  });
+    const entry = await createJournalEntry(tx as unknown as PrismaClient, {
+      organisationId: params.organisationId,
+      userId: params.userId,
+      date: params.date,
+      description: `Payment: ${bill.number}`,
+      reference: params.reference ?? bill.number ?? bill.id,
+      source: "BILL",
+      sourceId: bill.id,
+      lines: [
+        { accountId: apAccount.id, debit: params.amount, description: `AP cleared: ${bill.number}` },
+        { accountId: params.cashAccountId, credit: params.amount, description: `Payment made: ${bill.number}` },
+      ],
+    });
 
-  const newAmountPaid = Number(bill.amountPaid) + params.amount;
-  const total = Number(bill.totalAmount);
-  const newStatus: InvoiceStatus =
-    newAmountPaid >= total - 0.001 ? "PAID"
-    : newAmountPaid > 0 ? "PARTIAL"
-    : bill.status;
+    const newAmountPaid = Number(bill.amountPaid) + params.amount;
+    const total = Number(bill.totalAmount);
+    const newStatus: InvoiceStatus =
+      newAmountPaid >= total - 0.001 ? "PAID"
+      : newAmountPaid > 0 ? "PARTIAL"
+      : bill.status;
 
-  await db.bill.update({
-    where: { id: params.billId },
-    data: { amountPaid: new Prisma.Decimal(newAmountPaid), status: newStatus },
-  });
+    await tx.bill.update({
+      where: { id: params.billId },
+      data: { amountPaid: new Prisma.Decimal(newAmountPaid), status: newStatus },
+    });
 
-  return entry;
+    return entry;
+  }, { isolationLevel: "Serializable" });
 }
 
 export async function voidBill(

@@ -2,7 +2,9 @@ import fs from "fs";
 import path from "path";
 import matter from "gray-matter";
 import { remark } from "remark";
-import html from "remark-html";
+import remarkRehype from "remark-rehype";
+import rehypeSanitize from "rehype-sanitize";
+import rehypeStringify from "rehype-stringify";
 
 const BLOG_DIR = path.join(process.cwd(), "content/blog");
 
@@ -46,13 +48,19 @@ export function getAllPosts(): BlogPost[] {
 }
 
 export async function getPost(slug: string): Promise<BlogPost | null> {
-  const filePath = path.join(BLOG_DIR, `${slug}.md`);
+  // Prevent path traversal: resolve and confirm the path stays within BLOG_DIR
+  const filePath = path.resolve(BLOG_DIR, `${slug}.md`);
+  if (!filePath.startsWith(path.resolve(BLOG_DIR) + path.sep)) return null;
   if (!fs.existsSync(filePath)) return null;
 
   const raw = fs.readFileSync(filePath, "utf-8");
   const { data, content } = matter(raw);
 
-  const processed = await remark().use(html, { sanitize: false }).process(content);
+  const processed = await remark()
+    .use(remarkRehype)
+    .use(rehypeSanitize)
+    .use(rehypeStringify)
+    .process(content);
 
   return {
     slug,

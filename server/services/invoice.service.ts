@@ -148,47 +148,51 @@ export async function recordInvoicePayment(
     reference?: string;
   }
 ) {
-  const invoice = await db.invoice.findFirst({
-    where: { id: params.invoiceId, organisationId: params.organisationId },
-  });
-  if (!invoice) throw new TRPCError({ code: "NOT_FOUND" });
-  if (invoice.status === "VOID") throw new TRPCError({ code: "BAD_REQUEST", message: "Cannot pay a voided invoice" });
+  // Wrap the read-modify-write in a serializable transaction to prevent
+  // concurrent payments from double-counting amountPaid.
+  return db.$transaction(async (tx) => {
+    const invoice = await tx.invoice.findFirst({
+      where: { id: params.invoiceId, organisationId: params.organisationId },
+    });
+    if (!invoice) throw new TRPCError({ code: "NOT_FOUND" });
+    if (invoice.status === "VOID") throw new TRPCError({ code: "BAD_REQUEST", message: "Cannot pay a voided invoice" });
 
-  const arAccount = await db.chartAccount.findFirst({
-    where: { organisationId: params.organisationId, code: "1200" },
-  });
-  if (!arAccount) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "AR account not found" });
+    const arAccount = await tx.chartAccount.findFirst({
+      where: { organisationId: params.organisationId, code: "1200" },
+    });
+    if (!arAccount) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "AR account not found" });
 
-  const entry = await createJournalEntry(db, {
-    organisationId: params.organisationId,
-    userId: params.userId,
-    date: params.date,
-    description: `Payment: ${invoice.number}`,
-    reference: params.reference ?? invoice.number,
-    source: "INVOICE",
-    sourceId: invoice.id,
-    lines: [
-      { accountId: params.cashAccountId, debit: params.amount, description: `Payment received: ${invoice.number}` },
-      { accountId: arAccount.id, credit: params.amount, description: `AR cleared: ${invoice.number}` },
-    ],
-  });
+    const entry = await createJournalEntry(tx as unknown as PrismaClient, {
+      organisationId: params.organisationId,
+      userId: params.userId,
+      date: params.date,
+      description: `Payment: ${invoice.number}`,
+      reference: params.reference ?? invoice.number,
+      source: "INVOICE",
+      sourceId: invoice.id,
+      lines: [
+        { accountId: params.cashAccountId, debit: params.amount, description: `Payment received: ${invoice.number}` },
+        { accountId: arAccount.id, credit: params.amount, description: `AR cleared: ${invoice.number}` },
+      ],
+    });
 
-  const newAmountPaid = Number(invoice.amountPaid) + params.amount;
-  const totalAmount = Number(invoice.totalAmount);
-  const newStatus: InvoiceStatus =
-    newAmountPaid >= totalAmount - 0.001 ? "PAID"
-    : newAmountPaid > 0 ? "PARTIAL"
-    : invoice.status;
+    const newAmountPaid = Number(invoice.amountPaid) + params.amount;
+    const totalAmount = Number(invoice.totalAmount);
+    const newStatus: InvoiceStatus =
+      newAmountPaid >= totalAmount - 0.001 ? "PAID"
+      : newAmountPaid > 0 ? "PARTIAL"
+      : invoice.status;
 
-  await db.invoice.update({
-    where: { id: params.invoiceId },
-    data: {
-      amountPaid: new Prisma.Decimal(newAmountPaid),
-      status: newStatus,
-    },
-  });
+    await tx.invoice.update({
+      where: { id: params.invoiceId },
+      data: {
+        amountPaid: new Prisma.Decimal(newAmountPaid),
+        status: newStatus,
+      },
+    });
 
-  return entry;
+    return entry;
+  }, { isolationLevel: "Serializable" });
 }
 
 // Void invoice: reverse the posting entry plus all payment entries, then mark as void

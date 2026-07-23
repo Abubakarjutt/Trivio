@@ -232,16 +232,18 @@ export async function POST(req: NextRequest) {
         const parts = json.candidates?.[0]?.content?.parts ?? [];
         const finishReason = json.candidates?.[0]?.finishReason;
 
-        // gemini-2.5-flash-lite sometimes emits native function calls even when
-        // toolConfig mode=NONE. When it does, parts contain a functionCall object
-        // instead of text. Extract it and synthesise a TOOL_CALL text line so the
-        // rest of the pipeline can execute it normally.
-        let nativeFnText = "";
+        // Reject native function calls — mode=NONE is set, so any native function
+        // call is unexpected and could be a prompt-injection attempt bypassing
+        // the nonce-based tool-call guard. Drop the native call and respond with
+        // a safe fallback instead of synthesising a TOOL_CALL text line.
         if (finishReason === "UNEXPECTED_TOOL_CALL") {
-          const fnParts = parts.filter((p) => p.functionCall);
-          nativeFnText = fnParts
-            .map((p) => `TOOL_CALL_${nonce}: ${JSON.stringify({ tool: p.functionCall!.name, args: p.functionCall!.args ?? {} })}`)
-            .join("\n");
+          sendEvent("token", { content: "I'm sorry, I wasn't able to generate a response. Please try again." });
+          sendEvent("done", { conversationId, content: "I'm sorry, I wasn't able to generate a response. Please try again.", toolCalls: [], toolResults: [] });
+          await db.chatMessage.create({
+            data: { conversationId, role: "assistant", content: "I'm sorry, I wasn't able to generate a response. Please try again." },
+          });
+          controller.close();
+          return;
         }
 
         const fullContent = parts
@@ -250,7 +252,7 @@ export async function POST(req: NextRequest) {
           .join("")
           .trim();
 
-        const responseText = (nativeFnText || fullContent) ||
+        const responseText = fullContent ||
           (finishReason === "MAX_TOKENS"
             ? "I'm sorry, I ran out of space to form a reply. Please try asking a shorter or simpler question."
             : "I'm sorry, I wasn't able to generate a response. Please try again.");

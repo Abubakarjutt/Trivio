@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { SignJWT } from "jose";
 import { db } from "@/lib/db";
+import { registerRateLimiter } from "@/server/middleware/rateLimit";
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET ?? "fallback-secret"
-);
+const _secret = process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET;
+if (!_secret) throw new Error("AUTH_SECRET env var is required");
+const JWT_SECRET = new TextEncoder().encode(_secret);
 const JWT_EXPIRY = "30d";
 
 export async function POST(req: NextRequest) {
@@ -18,6 +19,15 @@ export async function POST(req: NextRequest) {
     }
     if (password.length < 8) {
       return NextResponse.json({ error: "Password must be at least 8 characters." }, { status: 400 });
+    }
+
+    const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+    const { allowed, retryAfterSec } = await registerRateLimiter(`mobile-register:${ip}`);
+    if (!allowed) {
+      return NextResponse.json(
+        { error: `Too many registration attempts. Try again in ${retryAfterSec}s.` },
+        { status: 429 }
+      );
     }
 
     const normalised = email.toLowerCase().trim();

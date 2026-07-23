@@ -54,7 +54,10 @@ export async function readFile(filePath: string): Promise<Buffer> {
  * Deletes a file from disk. filePath is the relative path (as stored in s3Key).
  */
 export async function deleteFile(filePath: string): Promise<void> {
-  const absolutePath = path.join(STORAGE_ROOT, filePath);
+  const absolutePath = path.resolve(STORAGE_ROOT, filePath);
+  if (!absolutePath.startsWith(STORAGE_ROOT + path.sep)) {
+    throw new Error("Path traversal detected");
+  }
   try {
     await fs.unlink(absolutePath);
   } catch (err: unknown) {
