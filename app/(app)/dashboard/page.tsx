@@ -40,7 +40,7 @@ type KpiCardProps = {
 function KpiCard({ label, value, icon: Icon, iconBg, iconColor, sub, href, delay = 0 }: KpiCardProps) {
   const inner = (
     <div
-      className="rise group relative rounded-2xl bg-white p-5 cursor-default hover:translate-y-[-2px] transition-all duration-200"
+      className="rise group relative rounded-2xl bg-card p-5 cursor-default hover:translate-y-[-2px] transition-all duration-200"
       style={{
         boxShadow: "0 0 0 1px rgba(15,17,23,0.04), 0 1px 2px rgba(15,17,23,0.04), 0 8px 24px -8px rgba(15,17,23,0.08)",
         animationDelay: `${delay}ms`,
@@ -75,10 +75,10 @@ function Skeleton({ className = "" }: { className?: string }) {
 const TOOLTIP_STYLE = {
   fontSize: 12,
   borderRadius: 8,
-  border: "1px solid rgba(228,225,216,1)",
-  background: "#fff",
+  border: "1px solid hsl(var(--border))",
+  background: "hsl(var(--card))",
   boxShadow: "0 4px 16px rgba(15,17,23,0.08)",
-  color: "#0F1117",
+  color: "hsl(var(--card-foreground))",
 };
 
 export default function DashboardPage() {
@@ -101,10 +101,7 @@ export default function DashboardPage() {
     <div className="min-h-full">
 
       {/* Header */}
-      <div
-        className="sticky top-0 z-10 border-b border-border/40 px-8 py-4 flex items-center justify-between backdrop-blur-sm"
-        style={{ background: "rgba(244,243,239,0.95)" }}
-      >
+      <div className="sticky top-0 z-10 border-b border-border/40 px-8 py-4 flex items-center justify-between backdrop-blur-sm bg-background/95">
         <div>
           <h1 className="font-serif text-2xl font-medium text-foreground leading-tight">Dashboard</h1>
           <p className="text-xs text-muted-foreground mt-0.5" style={{ color: "rgba(201,168,106,0.8)" }}>{today}</p>
@@ -165,7 +162,7 @@ export default function DashboardPage() {
 
           {/* Income vs Expense Bar Chart */}
           <div
-            className="lg:col-span-2 rounded-2xl bg-white p-6"
+            className="lg:col-span-2 rounded-2xl bg-card p-6"
             style={{ boxShadow: "0 0 0 1px rgba(15,17,23,0.04), 0 1px 2px rgba(15,17,23,0.04), 0 8px 24px -8px rgba(15,17,23,0.08)" }}
           >
             <div className="flex items-center justify-between mb-5">
@@ -193,7 +190,7 @@ export default function DashboardPage() {
 
           {/* Expense Breakdown Donut */}
           <div
-            className="rounded-2xl bg-white p-6"
+            className="rounded-2xl bg-card p-6"
             style={{ boxShadow: "0 0 0 1px rgba(15,17,23,0.04), 0 1px 2px rgba(15,17,23,0.04), 0 8px 24px -8px rgba(15,17,23,0.08)" }}
           >
             <h2 className="font-serif text-base font-medium text-foreground mb-5">Expense Breakdown</h2>
@@ -225,7 +222,7 @@ export default function DashboardPage() {
 
           {/* Recent Transactions */}
           <div
-            className="rounded-2xl bg-white overflow-hidden"
+            className="rounded-2xl bg-card overflow-hidden"
             style={{ boxShadow: "0 0 0 1px rgba(15,17,23,0.04), 0 1px 2px rgba(15,17,23,0.04), 0 8px 24px -8px rgba(15,17,23,0.08)" }}
           >
             <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: "1px solid rgba(228,225,216,0.6)" }}>
@@ -247,7 +244,7 @@ export default function DashboardPage() {
             ) : (
               <div>
                 {recent.data.map((tx) => (
-                  <div key={tx.id} className="flex items-center justify-between px-6 py-3 hover:bg-[#F4F3EF]/60 transition-colors" style={{ borderBottom: "1px solid rgba(228,225,216,0.4)" }}>
+                  <div key={tx.id} className="flex items-center justify-between px-6 py-3 hover:bg-muted/60 transition-colors" style={{ borderBottom: "1px solid rgba(228,225,216,0.4)" }}>
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-foreground truncate">{tx.description}</p>
                       <p className="text-xs text-muted-foreground">
@@ -265,7 +262,7 @@ export default function DashboardPage() {
 
           {/* Outstanding Invoices */}
           <div
-            className="rounded-2xl bg-white overflow-hidden"
+            className="rounded-2xl bg-card overflow-hidden"
             style={{ boxShadow: "0 0 0 1px rgba(15,17,23,0.04), 0 1px 2px rgba(15,17,23,0.04), 0 8px 24px -8px rgba(15,17,23,0.08)" }}
           >
             <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: "1px solid rgba(228,225,216,0.6)" }}>
@@ -296,7 +293,7 @@ export default function DashboardPage() {
                     <Link
                       key={inv.id}
                       href={`/invoices/${inv.id}`}
-                      className="flex items-center justify-between px-6 py-3 hover:bg-[#F4F3EF]/60 transition-colors group"
+                      className="flex items-center justify-between px-6 py-3 hover:bg-muted/60 transition-colors group"
                       style={{ borderBottom: "1px solid rgba(228,225,216,0.4)" }}
                     >
                       <div className="min-w-0 flex-1">
@@ -324,10 +321,10 @@ export default function DashboardPage() {
 
         {/* Quick Actions */}
         <div
-          className="rounded-2xl bg-white overflow-hidden"
+          className="rounded-2xl bg-card overflow-hidden"
           style={{ boxShadow: "0 0 0 1px rgba(15,17,23,0.04), 0 1px 2px rgba(15,17,23,0.04), 0 8px 24px -8px rgba(15,17,23,0.08)" }}
         >
-          <div className="px-6 py-3.5" style={{ borderBottom: "1px solid rgba(228,225,216,0.6)" }}>
+          <div className="px-6 py-3.5 border-b border-border/60">
             <h2 className="text-[10px] font-bold uppercase tracking-[0.12em]" style={{ color: "rgba(201,168,106,0.8)" }}>Quick Actions</h2>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 divide-x divide-y lg:divide-y-0" style={{ borderColor: "rgba(228,225,216,0.5)" }}>
@@ -341,7 +338,7 @@ export default function DashboardPage() {
               <Link
                 key={action.href}
                 href={action.href}
-                className="flex flex-col items-center gap-2.5 py-6 transition-all hover:bg-[#F4F3EF]/70 active:scale-95"
+                className="flex flex-col items-center gap-2.5 py-6 transition-all hover:bg-muted/70 active:scale-95"
               >
                 <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: action.iconBg }}>
                   <action.icon className="h-4 w-4" style={{ color: action.iconColor }} />

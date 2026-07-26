@@ -10,16 +10,12 @@ interface Props {
 export function MobileHeader({ orgName, onMenuClick }: Props) {
   return (
     <header
-      className="sticky top-0 z-40 flex md:hidden items-center justify-between px-4 py-3 backdrop-blur-sm"
-      style={{ background: "rgba(244,243,239,0.97)", borderBottom: "1px solid rgba(228,225,216,0.8)" }}
+      className="sticky top-0 z-40 flex md:hidden items-center justify-between px-4 py-3 backdrop-blur-sm bg-background/95 border-b border-border/60"
     >
       <button
         aria-label="Open menu"
         onClick={onMenuClick}
-        className="flex items-center justify-center rounded-lg p-1.5 transition-colors"
-        style={{ color: "#1A6644" }}
-        onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(26,102,68,0.07)")}
-        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+        className="flex items-center justify-center rounded-lg p-1.5 text-primary transition-colors hover:bg-primary/8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
       >
         <Menu className="h-5 w-5" />
       </button>

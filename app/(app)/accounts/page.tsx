@@ -163,7 +163,7 @@ export default function AccountsPage() {
 
   return (
     <div className="min-h-full">
-      <div className="sticky top-0 z-10 border-b border-border/40 backdrop-blur-sm px-8 py-4" style={{ background: "rgba(244,243,239,0.95)" }}>
+      <div className="sticky top-0 z-10 border-b border-border/40 backdrop-blur-sm bg-background/95 px-8 py-4">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="font-serif text-2xl font-medium text-foreground leading-tight">Chart of Accounts</h1>

@@ -18,7 +18,7 @@ export function AppShell({ orgName, children }: Props) {
   const hasSampleData = org?.hasSampleData ?? false;
 
   return (
-    <div className="flex h-screen overflow-hidden paper-grain" style={{ background: "#F4F3EF" }}>
+    <div className="flex h-screen overflow-hidden paper-grain bg-background">
       {/* Desktop sidebar */}
       <aside className="hidden md:flex md:shrink-0" style={{ boxShadow: "4px 0 24px -8px rgba(8,27,18,0.35)" }}>
         <Sidebar orgName={orgName} hasSampleData={hasSampleData} />
@@ -32,7 +32,7 @@ export function AppShell({ orgName, children }: Props) {
         </SheetContent>
       </Sheet>
 
-      <main className="flex flex-1 flex-col overflow-hidden">
+      <main id="main-content" className="flex flex-1 flex-col overflow-hidden">
         <MobileHeader orgName={orgName} onMenuClick={() => setDrawerOpen(true)} />
         <div className="flex-1 overflow-y-auto">
           {children}

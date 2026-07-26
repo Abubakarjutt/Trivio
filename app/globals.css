@@ -198,7 +198,10 @@
 .hero-animate-6  { animation-delay: 480ms; }
 
 @media (prefers-reduced-motion: reduce) {
-  .rise, .rise-0, .rise-1, .rise-2, .rise-3, .rise-4, .rise-5, .rise-6 {
+  .rise, .rise-0, .rise-1, .rise-2, .rise-3, .rise-4, .rise-5, .rise-6,
+  .hero-animate, .hero-animate-1, .hero-animate-2, .hero-animate-3,
+  .hero-animate-4, .hero-animate-5, .hero-animate-6,
+  .toast-in, .toast-in-1, .toast-in-2, .toast-in-3 {
     animation: none;
   }
 }
@@ -222,6 +225,31 @@
   z-index: 0;
   opacity: 0.35;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncA type='table' tableValues='0 0.03'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ── Skip navigation link ── */
+.skip-link {
+  position: absolute;
+  top: -100%;
+  left: 1rem;
+  z-index: 9999;
+  padding: 0.5rem 1rem;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  border-radius: 0 0 0.5rem 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: top 0.15s;
+}
+.skip-link:focus {
+  top: 0;
+}
+
+/* ── Focus-visible ring — consistent across all interactive elements ── */
+:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
 }
 
 @layer utilities {

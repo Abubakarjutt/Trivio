@@ -7,7 +7,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/lib/hooks/use-toast";
-import { Loader2 } from "lucide-react";
+import { Loader2, Eye, EyeOff } from "lucide-react";
 
 const FEATURES = [
   "Import bank statements & receipts",
@@ -22,6 +22,7 @@ function LoginPageInner() {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({ email: "", password: "" });
+  const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
     if (searchParams.get("verified") === "1") {
@@ -143,7 +144,7 @@ function LoginPageInner() {
                     className="h-px w-4 shrink-0"
                     style={{ background: `rgba(201,168,106,${0.3 + i * 0.08})` }}
                   />
-                  <span className="text-sm" style={{ color: "rgba(244,243,239,0.4)", lineHeight: 1.5 }}>{f}</span>
+                  <span className="text-sm" style={{ color: "rgba(244,243,239,0.72)", lineHeight: 1.5 }}>{f}</span>
                 </div>
               ))}
             </div>
@@ -257,17 +258,28 @@ function LoginPageInner() {
                     Forgot password?
                   </Link>
                 </div>
-                <Input
-                  id="password"
-                  type="password"
-                  placeholder="••••••••"
-                  value={form.password}
-                  onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
-                  required
-                  autoComplete="current-password"
-                  className="h-11 text-sm bg-white"
-                  style={{ borderColor: "#E4E1D8" }}
-                />
+                <div className="relative">
+                  <Input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    placeholder="••••••••"
+                    value={form.password}
+                    onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
+                    required
+                    autoComplete="current-password"
+                    className="h-11 text-sm bg-white pr-10"
+                    style={{ borderColor: "#E4E1D8" }}
+                  />
+                  <button
+                    type="button"
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    onClick={() => setShowPassword((v) => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/60 hover:text-muted-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
+                    tabIndex={0}
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
 
               <div className="pt-1.5">

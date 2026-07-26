@@ -11,9 +11,9 @@ export function PageHeader({ title, description, action, className }: PageHeader
   return (
     <div className={cn(
       "sticky top-0 z-10 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between",
-      "border-b border-border/40 px-8 py-4 backdrop-blur-sm",
+      "border-b border-border/40 px-8 py-4 backdrop-blur-sm bg-background/95",
       className
-    )} style={{ background: "rgba(244,243,239,0.95)" }}>
+    )}>
       <div>
         <h1 className="font-serif text-2xl font-medium text-foreground leading-tight">{title}</h1>
         {description && (

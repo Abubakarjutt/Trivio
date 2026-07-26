@@ -41,7 +41,7 @@ const REPORTS = [
 export default function ReportsPage() {
   return (
     <div className="min-h-full">
-      <div className="sticky top-0 z-10 border-b border-border/40 backdrop-blur-sm px-8 py-4" style={{ background: "rgba(244,243,239,0.95)" }}>
+      <div className="sticky top-0 z-10 border-b border-border/40 backdrop-blur-sm bg-background/95 px-8 py-4">
         <h1 className="font-serif text-2xl font-medium text-foreground leading-tight">Reports</h1>
         <p className="text-xs text-muted-foreground mt-0.5">Financial reports and statements</p>
       </div>
