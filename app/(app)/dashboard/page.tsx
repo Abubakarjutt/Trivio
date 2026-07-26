@@ -32,37 +32,53 @@ type KpiCardProps = {
   icon: React.ElementType;
   iconBg: string;
   iconColor: string;
+  accentColor: string;
   sub?: string;
   href?: string;
   delay?: number;
 };
 
-function KpiCard({ label, value, icon: Icon, iconBg, iconColor, sub, href, delay = 0 }: KpiCardProps) {
+function KpiCard({ label, value, icon: Icon, iconBg, iconColor, accentColor, sub, href, delay = 0 }: KpiCardProps) {
   const inner = (
     <div
-      className="rise group relative rounded-2xl bg-card p-5 cursor-default hover:translate-y-[-2px] transition-all duration-200"
+      className="rise group relative rounded-2xl bg-card p-5 overflow-hidden"
       style={{
         boxShadow: "0 0 0 1px rgba(15,17,23,0.04), 0 1px 2px rgba(15,17,23,0.04), 0 8px 24px -8px rgba(15,17,23,0.08)",
         animationDelay: `${delay}ms`,
+        transition: "box-shadow 0.18s ease, transform 0.18s cubic-bezier(0.22,1,0.36,1)",
+        ...(href ? { cursor: "pointer" } : {}),
       }}
+      onMouseEnter={href ? (e) => { (e.currentTarget as HTMLElement).style.transform = "translateY(-2px)"; (e.currentTarget as HTMLElement).style.boxShadow = "0 0 0 1px rgba(15,17,23,0.05),0 2px 6px rgba(15,17,23,0.06),0 12px 32px -8px rgba(15,17,23,0.14)"; } : undefined}
+      onMouseLeave={href ? (e) => { (e.currentTarget as HTMLElement).style.transform = ""; (e.currentTarget as HTMLElement).style.boxShadow = "0 0 0 1px rgba(15,17,23,0.04), 0 1px 2px rgba(15,17,23,0.04), 0 8px 24px -8px rgba(15,17,23,0.08)"; } : undefined}
     >
-      <div className="flex items-center justify-between mb-3">
+      {/* Top accent bar */}
+      <div className="absolute top-0 left-0 right-0 h-[3px]" style={{ background: accentColor, opacity: 0.7 }} />
+
+      <div className="flex items-start justify-between mb-4">
         <div
-          className="flex h-8 w-8 items-center justify-center rounded-xl"
+          className="flex h-9 w-9 items-center justify-center rounded-xl"
           style={{ background: iconBg }}
         >
-          <Icon className="h-4 w-4" style={{ color: iconColor }} />
+          <Icon className="h-[18px] w-[18px]" style={{ color: iconColor }} strokeWidth={1.75} />
         </div>
-        {sub && <span className="text-[10px] font-medium text-muted-foreground/60 uppercase tracking-[0.1em]">{sub}</span>}
+        {sub && (
+          <span
+            className="text-[10px] font-semibold uppercase tracking-[0.12em] px-2 py-0.5 rounded-full"
+            style={{ background: iconBg, color: iconColor }}
+          >
+            {sub}
+          </span>
+        )}
       </div>
-      <p className="font-serif text-[1.75rem] font-medium text-foreground leading-none tracking-tight" title={value}>{value}</p>
-      <p className="text-[11px] font-bold uppercase tracking-[0.1em] mt-2" style={{ color: iconColor, opacity: 0.7 }}>{label}</p>
 
-      {/* gilt hairline accent on hover */}
-      <div
-        className="absolute bottom-0 left-4 right-4 h-[2px] rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-        style={{ background: "linear-gradient(90deg, transparent, #C9A86A, transparent)" }}
-      />
+      <p
+        className="num font-serif leading-none tracking-tight text-foreground"
+        style={{ fontSize: "1.875rem", fontWeight: 500 }}
+        title={value}
+      >
+        {value}
+      </p>
+      <p className="text-[11px] font-semibold uppercase tracking-[0.1em] mt-2 text-muted-foreground/70">{label}</p>
     </div>
   );
   return href ? <Link href={href} className="block">{inner}</Link> : inner;
@@ -129,16 +145,17 @@ export default function DashboardPage() {
               Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-[120px]" />)
             ) : (
               <>
-                <KpiCard label="Income"    value={fmt(kpis.data?.monthlyIncome)}   icon={TrendingUp}   iconBg="rgba(26,102,68,0.08)"  iconColor="#1A6644" sub={periodLabel} delay={0}  />
-                <KpiCard label="Expenses"  value={fmt(kpis.data?.monthlyExpenses)} icon={TrendingDown} iconBg="rgba(192,81,81,0.08)"   iconColor="#C05151" sub={periodLabel} delay={50} />
+                <KpiCard label="Income"    value={fmt(kpis.data?.monthlyIncome)}   icon={TrendingUp}   iconBg="rgba(26,102,68,0.08)"  iconColor="#1A6644" accentColor="#1A6644" sub={periodLabel} delay={0}  />
+                <KpiCard label="Expenses"  value={fmt(kpis.data?.monthlyExpenses)} icon={TrendingDown} iconBg="rgba(192,81,81,0.08)"   iconColor="#C05151" accentColor="#C05151" sub={periodLabel} delay={55} />
                 <KpiCard
                   label="Net Profit"
                   value={fmt(kpis.data?.netProfit)}
                   icon={DollarSign}
                   iconBg={Number(kpis.data?.netProfit ?? 0) >= 0 ? "rgba(26,102,68,0.08)" : "rgba(192,81,81,0.08)"}
                   iconColor={Number(kpis.data?.netProfit ?? 0) >= 0 ? "#1A6644" : "#C05151"}
+                  accentColor={Number(kpis.data?.netProfit ?? 0) >= 0 ? "#1A6644" : "#C05151"}
                   sub={periodLabel}
-                  delay={100}
+                  delay={110}
                 />
               </>
             )}
@@ -149,9 +166,9 @@ export default function DashboardPage() {
               Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-[120px]" />)
             ) : (
               <>
-                <KpiCard label="Receivables" value={fmt(kpis.data?.outstandingAR)} icon={FileText} iconBg="rgba(201,168,106,0.10)" iconColor="#B8860B" sub="Outstanding" href="/invoices" delay={150} />
-                <KpiCard label="Payables"    value={fmt(kpis.data?.outstandingAP)} icon={Receipt}  iconBg="rgba(201,168,106,0.10)" iconColor="#B8860B" sub="Outstanding" href="/bills"    delay={200} />
-                <KpiCard label="Cash"        value={fmt(kpis.data?.cashPosition)}  icon={Landmark} iconBg="rgba(147,196,174,0.15)" iconColor="#2E7D52" sub="Position"                      delay={250} />
+                <KpiCard label="Receivables" value={fmt(kpis.data?.outstandingAR)} icon={FileText} iconBg="rgba(201,168,106,0.10)" iconColor="#B8860B" accentColor="#C9A86A" sub="Outstanding" href="/invoices" delay={165} />
+                <KpiCard label="Payables"    value={fmt(kpis.data?.outstandingAP)} icon={Receipt}  iconBg="rgba(201,168,106,0.10)" iconColor="#B8860B" accentColor="#C9A86A" sub="Outstanding" href="/bills"    delay={220} />
+                <KpiCard label="Cash"        value={fmt(kpis.data?.cashPosition)}  icon={Landmark} iconBg="rgba(147,196,174,0.15)" iconColor="#2E7D52" accentColor="#93C4AE" sub="Position"                      delay={275} />
               </>
             )}
           </div>
@@ -166,8 +183,20 @@ export default function DashboardPage() {
             style={{ boxShadow: "0 0 0 1px rgba(15,17,23,0.04), 0 1px 2px rgba(15,17,23,0.04), 0 8px 24px -8px rgba(15,17,23,0.08)" }}
           >
             <div className="flex items-center justify-between mb-5">
-              <h2 className="font-serif text-base font-medium text-foreground">Income vs Expenses</h2>
-              <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-muted-foreground/50">Last 12 months</span>
+              <div>
+                <h2 className="font-serif text-base font-medium text-foreground">Income vs Expenses</h2>
+                <p className="text-[11px] text-muted-foreground/60 mt-0.5">12-month comparison</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-1.5">
+                  <span className="inline-block h-2 w-2 rounded-full" style={{ background: "#1A6644" }} />
+                  <span className="text-[11px] text-muted-foreground">Income</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="inline-block h-2 w-2 rounded-full" style={{ background: "#C05151" }} />
+                  <span className="text-[11px] text-muted-foreground">Expenses</span>
+                </div>
+              </div>
             </div>
             {trend.isLoading ? (
               <Skeleton className="h-52 w-full" />
@@ -193,7 +222,10 @@ export default function DashboardPage() {
             className="rounded-2xl bg-card p-6"
             style={{ boxShadow: "0 0 0 1px rgba(15,17,23,0.04), 0 1px 2px rgba(15,17,23,0.04), 0 8px 24px -8px rgba(15,17,23,0.08)" }}
           >
-            <h2 className="font-serif text-base font-medium text-foreground mb-5">Expense Breakdown</h2>
+            <div className="mb-5">
+              <h2 className="font-serif text-base font-medium text-foreground">Expense Breakdown</h2>
+              <p className="text-[11px] text-muted-foreground/60 mt-0.5">{periodLabel}</p>
+            </div>
             {breakdown.isLoading ? (
               <Skeleton className="h-52 w-full" />
             ) : !breakdown.data?.length ? (
@@ -225,9 +257,11 @@ export default function DashboardPage() {
             className="rounded-2xl bg-card overflow-hidden"
             style={{ boxShadow: "0 0 0 1px rgba(15,17,23,0.04), 0 1px 2px rgba(15,17,23,0.04), 0 8px 24px -8px rgba(15,17,23,0.08)" }}
           >
-            <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: "1px solid rgba(228,225,216,0.6)" }}>
-              <div className="flex items-center gap-2">
-                <ArrowUpDown className="h-3.5 w-3.5" style={{ color: "#93C4AE" }} />
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border/50">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-7 w-7 items-center justify-center rounded-lg" style={{ background: "rgba(147,196,174,0.12)" }}>
+                  <ArrowUpDown className="h-3.5 w-3.5" style={{ color: "#93C4AE" }} strokeWidth={1.75} />
+                </div>
                 <h2 className="font-serif text-base font-medium text-foreground">Recent Transactions</h2>
               </div>
               <Link href="/transactions" className="flex items-center gap-1 text-xs font-medium transition-colors" style={{ color: "#1A6644" }}>
@@ -244,7 +278,7 @@ export default function DashboardPage() {
             ) : (
               <div>
                 {recent.data.map((tx) => (
-                  <div key={tx.id} className="flex items-center justify-between px-6 py-3 hover:bg-muted/60 transition-colors" style={{ borderBottom: "1px solid rgba(228,225,216,0.4)" }}>
+                  <div key={tx.id} className="tr-hover flex items-center justify-between px-6 py-3 border-b border-border/30 last:border-0">
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-foreground truncate">{tx.description}</p>
                       <p className="text-xs text-muted-foreground">
@@ -265,9 +299,11 @@ export default function DashboardPage() {
             className="rounded-2xl bg-card overflow-hidden"
             style={{ boxShadow: "0 0 0 1px rgba(15,17,23,0.04), 0 1px 2px rgba(15,17,23,0.04), 0 8px 24px -8px rgba(15,17,23,0.08)" }}
           >
-            <div className="flex items-center justify-between px-6 py-4" style={{ borderBottom: "1px solid rgba(228,225,216,0.6)" }}>
-              <div className="flex items-center gap-2">
-                <Clock className="h-3.5 w-3.5" style={{ color: "#C9A86A" }} />
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border/50">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-7 w-7 items-center justify-center rounded-lg" style={{ background: "rgba(201,168,106,0.12)" }}>
+                  <Clock className="h-3.5 w-3.5" style={{ color: "#C9A86A" }} strokeWidth={1.75} />
+                </div>
                 <h2 className="font-serif text-base font-medium text-foreground">Outstanding Invoices</h2>
               </div>
               <Link href="/invoices" className="flex items-center gap-1 text-xs font-medium transition-colors" style={{ color: "#1A6644" }}>
@@ -293,8 +329,7 @@ export default function DashboardPage() {
                     <Link
                       key={inv.id}
                       href={`/invoices/${inv.id}`}
-                      className="flex items-center justify-between px-6 py-3 hover:bg-muted/60 transition-colors group"
-                      style={{ borderBottom: "1px solid rgba(228,225,216,0.4)" }}
+                      className="tr-hover flex items-center justify-between px-6 py-3 border-b border-border/30 last:border-0 group"
                     >
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
@@ -324,26 +359,31 @@ export default function DashboardPage() {
           className="rounded-2xl bg-card overflow-hidden"
           style={{ boxShadow: "0 0 0 1px rgba(15,17,23,0.04), 0 1px 2px rgba(15,17,23,0.04), 0 8px 24px -8px rgba(15,17,23,0.08)" }}
         >
-          <div className="px-6 py-3.5 border-b border-border/60">
-            <h2 className="text-[10px] font-bold uppercase tracking-[0.12em]" style={{ color: "rgba(201,168,106,0.8)" }}>Quick Actions</h2>
+          <div className="px-6 py-3.5 border-b border-border/60 flex items-center gap-2">
+            <div className="h-1.5 w-1.5 rounded-full" style={{ background: "#C9A86A" }} />
+            <h2 className="text-[10px] font-bold uppercase tracking-[0.14em]" style={{ color: "rgba(201,168,106,0.8)" }}>Quick Actions</h2>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 divide-x divide-y lg:divide-y-0" style={{ borderColor: "rgba(228,225,216,0.5)" }}>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5" style={{ borderColor: "rgba(228,225,216,0.5)" }}>
             {[
               { label: "New Invoice",      href: "/invoices/new",      icon: FileText,   iconBg: "rgba(26,102,68,0.08)",   iconColor: "#1A6644"  },
               { label: "New Bill",         href: "/bills/new",         icon: Receipt,    iconBg: "rgba(201,168,106,0.10)", iconColor: "#B8860B"  },
               { label: "New Transaction",  href: "/transactions/new",  icon: ArrowUpDown,iconBg: "rgba(147,196,174,0.15)", iconColor: "#2E7D52"  },
               { label: "Add Contact",      href: "/contacts",          icon: Users,      iconBg: "rgba(26,102,68,0.08)",   iconColor: "#1A6644"  },
               { label: "View Reports",     href: "/reports",           icon: BarChart3,  iconBg: "rgba(192,81,81,0.08)",   iconColor: "#C05151"  },
-            ].map((action) => (
+            ].map((action, idx) => (
               <Link
                 key={action.href}
                 href={action.href}
-                className="flex flex-col items-center gap-2.5 py-6 transition-all hover:bg-muted/70 active:scale-95"
+                className="group flex flex-col items-center gap-3 py-7 transition-all duration-150 hover:bg-muted/50 active:scale-[0.97] active:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                style={{ borderRight: idx < 4 ? "1px solid rgba(228,225,216,0.5)" : undefined }}
               >
-                <div className="flex h-9 w-9 items-center justify-center rounded-xl" style={{ background: action.iconBg }}>
-                  <action.icon className="h-4 w-4" style={{ color: action.iconColor }} />
+                <div
+                  className="flex h-10 w-10 items-center justify-center rounded-xl transition-transform duration-150 group-hover:scale-110"
+                  style={{ background: action.iconBg }}
+                >
+                  <action.icon className="h-[18px] w-[18px]" style={{ color: action.iconColor }} strokeWidth={1.75} />
                 </div>
-                <span className="text-xs font-medium" style={{ color: "#6B7180" }}>{action.label}</span>
+                <span className="text-[11px] font-semibold text-muted-foreground/80 group-hover:text-foreground transition-colors">{action.label}</span>
               </Link>
             ))}
           </div>

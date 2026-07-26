@@ -139,8 +139,8 @@ export function Sidebar({ orgName, hasSampleData, onNavigate }: { orgName: strin
         }
         .sb-signout:hover { background: rgba(235,245,240,0.06); color: rgba(235,245,240,0.85); }
         .sb-section {
-          font-size: 9px; font-weight: 700; text-transform: uppercase;
-          letter-spacing: 0.18em; color: rgba(235,245,240,0.28);
+          font-size: 10px; font-weight: 700; text-transform: uppercase;
+          letter-spacing: 0.15em; color: rgba(235,245,240,0.32);
           padding: 0 12px; margin-bottom: 4px;
         }
       `}</style>

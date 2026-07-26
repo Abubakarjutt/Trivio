@@ -17,7 +17,7 @@ export function PageHeader({ title, description, action, className }: PageHeader
       <div>
         <h1 className="font-serif text-2xl font-medium text-foreground leading-tight">{title}</h1>
         {description && (
-          <p className="text-xs text-muted-foreground mt-0.5 tracking-wide">{description}</p>
+          <p className="text-xs mt-1 tracking-wide" style={{ color: "rgba(201,168,106,0.75)" }}>{description}</p>
         )}
       </div>
       {action && <div className="shrink-0">{action}</div>}
