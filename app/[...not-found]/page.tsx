@@ -1,12 +1,5 @@
-import { auth } from "@/lib/auth";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 
-export default async function CatchAllNotFoundPage() {
-  const session = await auth();
-
-  if (!session?.user) {
-    redirect("/login");
-  }
-
+export default function CatchAllNotFoundPage() {
   notFound();
 }
