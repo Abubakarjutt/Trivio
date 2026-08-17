@@ -1,0 +1,442 @@
+// Trivio — macOS desktop shell (Electron main process)
+//
+// A thin native wrapper around the Next.js web app. The main process either
+// boots the bundled Next.js "standalone" server on a private loopback port
+// (local mode), loads the `next dev` server (dev mode), or loads an
+// already-hosted web URL (remote / thin-client mode). The UI itself is
+// unchanged — we only add a native window, menu bar, document-style
+// behaviour, and an installable .app/.dmg.
+//
+// A packaged Electron app ships no standalone `node` binary, so when we need
+// to run the bundled server.js we launch the Electron executable itself with
+// ELECTRON_RUN_AS_NODE=1, which makes it behave as a plain Node runtime.
+//
+// Run modes (env DESKTOP_MODE, default "auto"):
+//   dev    load http://127.0.0.1:3000          (pair with `next dev`)
+//   local  boot the assembled server dir on a free port, then load it
+//   remote load ELECTRON_REMOTE_URL / TARGET_URL — no local server
+//   auto   local if an assembled server dir exists, else dev
+
+import {
+  app,
+  BrowserWindow,
+  Menu,
+  shell,
+  dialog,
+  ipcMain,
+  type MenuItemConstructorOptions,
+} from "electron";
+import { spawn, type ChildProcess } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
+import net from "node:net";
+
+// ── Paths & mode ─────────────────────────────────────────────────────────────
+
+type Mode = "dev" | "local" | "remote" | "auto";
+
+function resolveMode(): Mode {
+  return (process.env.DESKTOP_MODE || "auto").toLowerCase() as Mode;
+}
+
+// Directory that holds the Next.js build. In dev it is the project root
+// (compiled main lives in desktop/dist, so two levels up); when packaged it is
+// the electron-builder resources dir.
+function appRoot(): string {
+  if (process.env.APP_DIR) return process.env.APP_DIR;
+  if (app.isPackaged) return process.resourcesPath;
+  return resolve(__dirname, "..", "..");
+}
+
+// Where the assembled runnable server lives (server.js + static/ + public/).
+function serverDir(): string {
+  if (process.env.APP_SERVER_DIR) return process.env.APP_SERVER_DIR;
+  // Assembled by electron-builder into the app's resources, or by our assemble
+  // step into desktop/dist-server for local runs.
+  if (app.isPackaged) return join(process.resourcesPath, "app-server");
+  return join(appRoot(), "desktop", "dist-server");
+}
+
+// ── Local server lifecycle ───────────────────────────────────────────────────
+
+let server: ChildProcess | null = null;
+
+function getFreePort(): Promise<number> {
+  return new Promise((res, rej) => {
+    const srv = net.createServer();
+    srv.once("error", rej);
+    srv.listen(0, "127.0.0.1", () => {
+      const addr = srv.address();
+      srv.close(() => res(typeof addr === "object" && addr ? addr.port : 0));
+    });
+  });
+}
+
+// Poll the app's health route until the server answers.
+async function waitForServer(url: string, timeoutMs = 60000): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const res = await fetch(`${url}/api/health`, {
+        signal: AbortSignal.timeout(2000),
+      });
+      if (res && res.ok) return;
+    } catch {
+      // not ready yet
+    }
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  throw new Error(`Timed out waiting for the app server at ${url}`);
+}
+
+// Load the user's env so the embedded server has DB/Redis/AI credentials.
+// Later sources win over earlier: TRIVIO_ENV_FILE → ~/.trivio/.env → the
+// server dir → the app root. The real process env always wins for PORT/HOSTNAME.
+function buildServerEnv(base: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  const paths = [
+    process.env.TRIVIO_ENV_FILE,
+    join(homedir(), ".trivio", ".env"),
+    join(base, ".env"),
+    join(appRoot(), ".env"),
+  ];
+  for (const p of paths) {
+    if (!p || !existsSync(p)) continue;
+    let raw: string;
+    try {
+      raw = readFileSync(p, "utf8");
+    } catch {
+      continue;
+    }
+    for (const line of raw.split(/\r?\n/)) {
+      const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
+      if (!m) continue;
+      const [, key, unquoted] = m;
+      // Preserve explicit shell overrides for everything except the two we
+      // deliberately re-point (PORT/HOSTNAME) below.
+      if (key in env && key !== "PORT" && key !== "HOSTNAME") continue;
+      let value = unquoted.trim();
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+      env[key] = value;
+    }
+    console.log(`[desktop] loaded env from ${p}`);
+  }
+  return env as NodeJS.ProcessEnv;
+}
+
+// Boot the assembled Next.js standalone server on a private loopback port and
+// point NextAuth at it so session callbacks validate correctly.
+async function startLocalServer(): Promise<string> {
+  const dir = serverDir();
+  const serverJs = join(dir, "server.js");
+  if (!existsSync(serverJs)) {
+    throw new Error(
+      `Embedded server not found at ${serverJs}.\n` +
+        "Run `npm run build:server` (assembles desktop/dist-server) or " +
+        "`npm run build:desktop`, or use DESKTOP_MODE=dev / DESKTOP_MODE=remote."
+    );
+  }
+
+  const port = await getFreePort();
+  const env = buildServerEnv(dir);
+  Object.assign(env, {
+    PORT: String(port),
+    HOSTNAME: "127.0.0.1",
+    NODE_ENV: "production",
+    NEXTAUTH_URL: `http://127.0.0.1:${port}`,
+    AUTH_TRUST_HOST: "true",
+  });
+
+  // A packaged Electron app ships no standalone `node` binary, so we launch the
+  // Electron executable itself as a Node runtime (ELECTRON_RUN_AS_NODE) to host
+  // server.js. In dev we use whatever `node` the dev loop is using.
+  const execArgv = app.isPackaged ? [serverJs, "--no-warnings=ExperimentalWarning"] : [serverJs];
+  const cmd = app.isPackaged ? process.execPath : "node";
+  const childEnv: NodeJS.ProcessEnv = { ...env };
+  if (app.isPackaged) childEnv.ELECTRON_RUN_AS_NODE = "1";
+
+  console.log(`[desktop] starting app server: ${cmd} ${execArgv.join(" ")} @127.0.0.1:${port}`);
+  server = spawn(cmd, execArgv, {
+    cwd: dir,
+    env: childEnv,
+    stdio: ["ignore", "pipe", "pipe", "ipc"],
+  });
+
+  server.stdout?.on("data", (d: Buffer) => {
+    const s = String(d).trimEnd();
+    if (s) console.log(`[next] ${s}`);
+  });
+  server.stderr?.on("data", (d: Buffer) => {
+    const s = String(d).trimEnd();
+    if (s) console.error(`[next:err] ${s}`);
+  });
+  server.on("exit", (code) => {
+    console.log(`[desktop] app server exited code=${code ?? 0}`);
+    server = null;
+  });
+
+  const url = `http://127.0.0.1:${port}`;
+  await waitForServer(url);
+  console.log(`[desktop] app server ready at ${url}`);
+  return url;
+}
+
+function stopServer(): void {
+  if (server && !server.killed) {
+    console.log("[desktop] stopping embedded app server");
+    server.kill("SIGTERM");
+    const kill = setTimeout(() => {
+      if (server && !server.killed) server.kill("SIGKILL");
+    }, 5000);
+    server.once("exit", () => clearTimeout(kill));
+    server = null;
+  }
+}
+
+// ── Window ───────────────────────────────────────────────────────────────────
+
+let mainWindow: BrowserWindow | null = null;
+
+function createWindow(): BrowserWindow {
+  const win = new BrowserWindow({
+    width: 1360,
+    height: 900,
+    minWidth: 1024,
+    minHeight: 720,
+    // Native macOS chrome with the traffic-light buttons inset over the app's
+    // top bar, which has safe top padding so they never overlap content.
+    titleBarStyle: "hiddenInset",
+    trafficLightPosition: { x: 18, y: 16 },
+    backgroundColor: "#0b0d10",
+    show: false,
+    title: "Trivio",
+    webPreferences: {
+      preload: join(__dirname, "preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false, // preload uses a small amount of node via contextBridge
+    },
+  });
+
+  // Reveal only after first paint to avoid a white flash.
+  win.once("ready-to-show", () => win.show());
+
+  // Open external http(s) links in the user's default browser, not in-app.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url) && !/^(http:\/\/127\.0\.0\.1|http:\/\/localhost)/.test(url)) {
+      void shell.openExternal(url);
+      return { action: "deny" };
+    }
+    return { action: "allow" };
+  });
+
+  win.webContents.on("will-navigate", (event, url) => {
+    const external =
+      /^https?:\/\//i.test(url) && !/^(http:\/\/127\.0\.0\.1|http:\/\/localhost)/.test(url);
+    if (external) {
+      event.preventDefault();
+      void shell.openExternal(url);
+    }
+  });
+
+  mainWindow = win;
+  return win;
+}
+
+// ── IPC bridge (from preload) ────────────────────────────────────────────────
+
+function registerIpc(): void {
+  ipcMain.handle("shell:openExternal", (_e, url: string) => {
+    if (/^https?:\/\//i.test(url)) return shell.openExternal(url);
+    return undefined;
+  });
+  ipcMain.handle("shell:openItem", (_e, path: string) => shell.openPath(path));
+  ipcMain.handle("dialog:showMessageBox", (event, opts) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    return dialog.showMessageBox(win ?? (undefined as unknown as BrowserWindow), opts);
+  });
+  // In-app navigation / deep-link from the renderer bridge.
+  ipcMain.on("window:navigate", (_e, target: string) => {
+    const url = target.startsWith("http")
+      ? target
+      : `${chosenUrlForNav()}${target.startsWith("/") ? target : "/" + target}`;
+    mainWindow?.webContents.loadURL(url);
+  });
+}
+
+function chosenUrlForNav(): string {
+  return mainWindow?.webContents.getURL() || "http://127.0.0.1:3000";
+}
+
+// ── Native menu ──────────────────────────────────────────────────────────────
+
+function buildMenu(): void {
+  if (process.platform !== "darwin") {
+    Menu.setApplicationMenu(null);
+    return;
+  }
+
+  const template: MenuItemConstructorOptions[] = [
+    {
+      label: app.name,
+      submenu: [
+        { role: "about" },
+        { type: "separator" },
+        {
+          label: "Open in Browser",
+          accelerator: "CmdOrCtrl+Shift+B",
+          click: () => {
+            const url = mainWindow?.webContents.getURL();
+            if (url) void shell.openExternal(url);
+          },
+        },
+        { type: "separator" },
+        { role: "services" },
+        { type: "separator" },
+        { role: "hide" },
+        { role: "hideOthers" },
+        { role: "unhide" },
+        { type: "separator" },
+        { role: "quit" },
+      ],
+    },
+    {
+      label: "File",
+      submenu: [{ role: "close" }],
+    },
+    {
+      label: "Edit",
+      submenu: [
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        { role: "pasteAndMatchStyle" },
+        { role: "delete" },
+        { role: "selectAll" },
+      ],
+    },
+    {
+      label: "View",
+      submenu: [
+        { role: "reload" },
+        { role: "forceReload" },
+        {
+          label: "Developer Tools",
+          accelerator: process.platform === "darwin" ? "Alt+CmdOrCtrl+I" : "Ctrl+Shift+I",
+          click: () => mainWindow?.webContents.toggleDevTools(),
+        },
+        { type: "separator" },
+        { role: "resetZoom" },
+        { role: "zoomIn" },
+        { role: "zoomOut" },
+        { type: "separator" },
+        { role: "togglefullscreen" },
+      ],
+    },
+    {
+      label: "Window",
+      submenu: [{ role: "minimize" }, { role: "zoom" }, { type: "separator" }, { role: "front" }],
+    },
+  ];
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+// ── App lifecycle ────────────────────────────────────────────────────────────
+
+const gotLock = app.requestSingleInstanceLock();
+
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+
+  app.whenReady().then(async () => {
+    buildMenu();
+    registerIpc();
+
+    const mode = resolveMode();
+    const assembledExists = existsSync(join(serverDir(), "server.js"));
+    const runMode: Mode =
+      mode === "dev"
+        ? "dev"
+        : mode === "remote"
+          ? "remote"
+          : mode === "local"
+            ? "local"
+            : assembledExists
+              ? "local"
+              : "dev";
+
+    let url =
+      runMode === "remote"
+        ? process.env.ELECTRON_REMOTE_URL || process.env.TARGET_URL || "https://app.trivio-ai.com"
+        : devUrl();
+
+    if (runMode === "local") {
+      try {
+        url = await startLocalServer();
+      } catch (err) {
+        console.error("[desktop] embedded server failed:", err);
+        dialog.showErrorBox(
+          "Trivio",
+          `Could not start the embedded app server.
+
+${err instanceof Error ? err.message : String(err)}
+
+You can also run Trivio in thin-client mode by setting DESKTOP_MODE=remote.`
+        );
+        app.quit();
+        return;
+      }
+    }
+
+    const win = createWindow();
+    win
+      .loadURL(url)
+      .catch((e) => dialog.showErrorBox("Trivio", `Failed to load ${url}:\n${String(e)}`));
+
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+      else mainWindow?.focus();
+    });
+  });
+}
+
+// Gracefully stop the embedded server when the app closes.
+app.on("window-all-closed", () => {
+  stopServer();
+  // Keep the app alive in the dock on macOS (standard behaviour).
+  if (process.platform !== "darwin") app.quit();
+});
+
+app.on("before-quit", () => stopServer());
+process.on("SIGINT", () => {
+  stopServer();
+  app.quit();
+});
+process.on("SIGTERM", () => {
+  stopServer();
+  app.exit(0);
+});
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+// dev server URL (ELECTRON_DEV_URL / DEV_SERVER_URL override, else 3000).
+function devUrl(): string {
+  return process.env.ELECTRON_DEV_URL || process.env.DEV_SERVER_URL || "http://127.0.0.1:3000";
+}

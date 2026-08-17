@@ -1,0 +1,9 @@
+{
+  "name": "trivio-desktop",
+  "version": "0.1.0",
+  "description": "Trivio — native macOS desktop shell for the accounting web app",
+  "main": "dist/main.cjs",
+  "author": "Trivio",
+  "license": "UNLICENSED",
+  "private": true
+}

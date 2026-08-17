@@ -41,3 +41,10 @@ prisma/*.db
 prisma/*.db-journal
 storage/
 .gstack/
+
+# desktop (Electron) build artifacts — large & reproducible
+/desktop/dist/
+/desktop/dist-server/
+/release/
+/desktop/build/icon-1024.png
+/desktop/build/*.log

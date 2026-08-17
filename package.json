@@ -19,7 +19,15 @@
     "db:migrate:prod": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
-    "worker": "tsx server/workers/extraction.worker.ts"
+    "worker": "tsx server/workers/extraction.worker.ts",
+    "build:electron": "node desktop/build-electron.mjs",
+    "gen:icon": "node desktop/build/icon-generator.mjs",
+    "build:server": "node desktop/assemble-server.mjs",
+    "typecheck:desktop": "tsc -p desktop/tsconfig.json --noEmit",
+    "dev:desktop": "node desktop/build-electron.mjs && node desktop/dev.mjs",
+    "dev:desktop:local": "node desktop/build-electron.mjs && npm run build:server && DESKTOP_MODE=local electron desktop/dist/main.cjs",
+    "build:desktop": "npm run build && npm run build:electron && npm run gen:icon && npm run build:server && electron-builder --config desktop/electron-builder.yml --mac",
+    "package:desktop": "node desktop/build-electron.mjs && npm run build:server && electron-builder --config desktop/electron-builder.yml --mac"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",
@@ -88,6 +96,10 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^4.4.1",
+    "cross-env": "^7.0.3",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.24.2",
     "eslint": "^9",
     "eslint-config-next": "15.3.2",
     "postal-mime": "^2.7.4",

@@ -20,6 +20,13 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Emit a minimal, self-contained server bundle (.next/standalone) so the
+  // macOS desktop app (Electron) can boot the app without a full node_modules
+  // tree. The Docker pipeline and `next start`/`next dev` are unaffected.
+  output: "standalone",
+  // The desktop shell loads the server on 127.0.0.1; disable the server-side
+  // compression stream buffering that can hang the Electron webview on first
+  // load, and let the host bind explicitly on all interfaces.
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "lh3.googleusercontent.com" },
