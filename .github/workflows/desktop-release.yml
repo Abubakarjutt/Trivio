@@ -1,0 +1,139 @@
+name: Desktop release
+
+# Build, sign, and notarize the macOS desktop app on a version tag, then
+# publish a GitHub Release containing exactly the artifacts electron-updater
+# needs (latest-mac.yml + .blockmap + .zip). Triggered by tags like `v1.2.3`
+# or manually from the Actions tab.
+#
+# Required repo secrets (Settings -> Secrets and variables -> Actions):
+#   CSC_LINK                     base64-encoded "Developer ID Application" .p12
+#   CSC_KEY_PASSWORD             password for that .p12
+#   APPLE_ID                     Apple Developer account email (notarytool)
+#   APPLE_APP_SPECIFIC_PASSWORD  app-specific password for the notary
+#   APPLE_TEAM_ID                 10-char Apple team id (e.g. R3B5NU8CVN)
+#
+# The cert in CSC_LINK MUST be a "Developer ID Application" identity -- NOT an
+# "Apple Development" cert. Only the former yields a .dmg Gatekeeper will open
+# on other machines. desktop/preflight.mjs (run first by build:desktop:ship)
+# hard-fails on a Development cert or missing notary creds.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+# GITHUB_TOKEN needs to create the release.
+permissions:
+  contents: write
+
+jobs:
+  desktop-macos:
+    # arm64 runner -- matches the app's current arm64-only target. Add an x64 /
+    # universal target later by regenerating the prisma engine for that arch.
+    runs-on: macos-15
+
+    env:
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+    steps:
+      # Pinned SHAs match deploy.yml's security posture (checkout + setup-node).
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The server tree is built from the Next.js standalone output, which needs
+      # the generated Prisma client. The arm64 engine matches this runner.
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      # electron-updater keys latest-mac.yml off the app's internal version, so a
+      # `v1.2.3` tag must produce 1.2.3 artifacts. On a tag push we sync the
+      # version (no git commit); on manual dispatch we keep it as-is.
+      - name: Align package.json version with the release tag
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] && [ -n "${GITHUB_REF_NAME:-}" ]; then
+            ver="${GITHUB_REF_NAME#v}"
+            echo "Syncing package.json version to $ver (tag $GITHUB_REF_NAME)"
+            npm version "$ver" --no-git-tag-version
+          else
+            echo "Manual dispatch -- keeping package.json version as-is."
+          fi
+
+      # SHIP=1 makes preflight hard-fail without a Developer ID identity + Apple
+      # notary creds; electron-builder then signs + auto-notarizes + staples the
+      # .zip and .dmg when APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD (+ APPLE_TEAM_ID)
+      # are present.
+      - name: Build, sign & auto-notarize
+        run: npm run build:desktop:ship
+
+      # electron-builder already notarized during the build; this makes the
+      # notarization explicit + inspectable in the log and guarantees a ticket
+      # even if auto-notarize is ever disabled.
+      - name: Explicit notarize (belt-and-suspenders)
+        run: npm run notarize
+
+      # Hard gates: codesign --verify --deep --strict and `stapler validate` (a
+      # stapled ticket is what makes the .dmg Gatekeeper-clean). spctl is
+      # informational only -- it is finicky in headless CI.
+      - name: Verify signature & notarization
+        run: |
+          app="release/mac-arm64/Trivio.app"
+          dmg="$(ls release/*.dmg | head -1)"
+          echo "=== codesign --verify --deep --strict ==="
+          codesign --verify --deep --strict --verbose=2 "$app"
+          echo "=== xcrun stapler validate (app) ==="
+          xcrun stapler validate "$app"
+          echo "=== xcrun stapler validate (dmg) ==="
+          xcrun stapler validate "$dmg"
+          echo "=== spctl -a (informational) ==="
+          spctl -a -t exec -vv "$app" || true
+
+      # Retains the artifacts even if the release step is skipped.
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivio-macos-${{ github.ref_name }}
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/*.blockmap
+            release/latest-mac.yml
+          if-no-files-found: error
+
+      # electron-updater needs a NON-draft release carrying latest-mac.yml +
+      # .blockmap + .zip. Re-runs use --clobber. Manual dispatch skips the
+      # publish (nothing to tag against yet).
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            tag="${GITHUB_REF_NAME}"
+            # A prerelease tag (e.g. v1.0.0-rc.1) must be published as prerelease.
+            prerelease_flag=""
+            case "$tag" in
+              *-rc*|*-alpha*|*-beta*|*rc.*|*alpha.*|*beta.*) prerelease_flag="--prerelease" ;;
+            esac
+            echo "Publishing GitHub Release $tag ${prerelease_flag:+(prerelease)}"
+            gh release create "$tag" \
+              release/*.dmg release/*.zip release/*.blockmap release/latest-mac.yml \
+              --clobber \
+              --title "Trivio $tag" \
+              --notes "Trivio desktop -- macOS (arm64), signed & notarized. Update feed: https://github.com/${{ github.repository }}/releases/latest" \
+              $prerelease_flag
+          else
+            echo "Manual dispatch -- skipping release publish (push a v* tag to publish)."
+          fi

@@ -192,6 +192,44 @@ APPLE_ID=you@example.com APPLE_APP_SPECIFIC_PASSWORD=xxxx-xxxx-xxxx-xxxx \
 
 ---
 
+## CI / GitHub release (macOS)
+
+A version tag builds, signs, notarizes, and publishes the app automatically.
+File: `.github/workflows/desktop-release.yml`.
+
+- **Trigger:** push a tag matching `v*` (e.g. `v1.2.3`), or run it manually
+  from the Actions tab (`workflow_dispatch`).
+- **Runner:** `macos-15` (arm64 — matches the current arm64-only target).
+- **Flow:** `npm ci` → `prisma generate` → sync the `package.json` version to
+  the tag → `npm run build:desktop:ship` (SHIP=1 preflight, then electron-builder
+  signs & auto-notarizes) → `npm run notarize` (belt-and-suspenders) → verify
+  (`codesign --verify --deep --strict` + `xcrun stapler validate`) → upload
+  artifacts → publish a **non-draft** GitHub Release.
+- **Why a real release:** electron-updater needs `latest-mac.yml` + `.blockmap`
+  + the `.zip` attached to a published (non-draft) release; that is what feeds
+  the in-app "Check for Updates…" / auto-download path.
+
+### Secrets to configure
+
+Add these in **Settings → Secrets and variables → Actions**:
+
+| Secret | Purpose |
+| --- | --- |
+| `CSC_LINK` | base64 of the **Developer ID Application** `.p12` |
+| `CSC_KEY_PASSWORD` | password for that `.p12` |
+| `APPLE_ID` | Apple Developer account email |
+| `APPLE_APP_SPECIFIC_PASSWORD` | app-specific password for notarytool |
+| `APPLE_TEAM_ID` | 10-char team id (e.g. `R3B5NU8CVN`) |
+
+> The cert in `CSC_LINK` must be **Developer ID Application** — not "Apple
+> Development" — or the `.dmg` will be blocked by Gatekeeper on other machines.
+> `preflight.mjs` (run first by `build:desktop:ship`) refuses a Development cert
+> or missing notary creds.
+
+Publish with: `git tag v1.2.3 && git push origin v1.2.3`.
+
+---
+
 ## Menu & window
 
 - **Traffic-light chrome** (`titleBarStyle: hiddenInset`) on a 1360×900 window
@@ -315,10 +353,13 @@ electron-builder also auto-writes `Resources/app-update.yml` (generic provider);
 - **Credentials are not shipped in the app.** `dist-server` (and thus the
    `.app`) contains only `.env.example`; the real `.env` lives in
    `~/.trivio/.env`, seeded from the template on first run.
-- **Notarization is wired but not run here.** `build:desktop:ship` refuses to
-   build without a Developer ID identity + `APPLE_*` notary creds, and
-   `npm run notarize` runs `notarytool` + `stapler`. A truly Gatekeeper-clean
-   `.dmg` still requires those credentials (unavailable in this environment).
+- **Notarization is wired; a CI job produces the signed .dmg.**
+   `build:desktop:ship` refuses to build without a Developer ID identity +
+   `APPLE_*` notary creds, and `npm run notarize` runs `notarytool` +
+   `stapler`. On this dev machine there is no cert/creds, so the shipped
+   `.dmg` is ad-hoc/unsigned and Gatekeeper-blocked — a truly Gatekeeper-clean
+   `.dmg` is produced by the `Desktop release` CI job on a version tag
+   (see "CI / GitHub release" below).
 - No tray / dock extras beyond the standard app menu.
 - Deep links + auto-updates are wired; the `trivio://` scheme is registered in
   `main.ts` and `electron-builder.yml`.
