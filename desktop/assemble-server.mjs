@@ -92,11 +92,21 @@ if (existsSync(join(root, "prisma"))) {
   cpSync(join(root, "prisma"), join(out, "prisma"), { recursive: true });
 }
 
-// 5. A ready-to-fill env slot for the user's credentials.
-const envDst = join(out, ".env");
-if (!existsSync(envDst)) {
-  cpSync(join(root, ".env.example"), envDst, { force: true }) || null;
-  console.log(`  · copied .env.example → dist-server/.env (fill in credentials)`);
+// 5. Ship a *template* (.env.example), never a real .env, so first-run can seed
+//    ~/.trivio/.env (see main.ts buildServerEnv). Real credentials must never be
+//    baked into the signed app bundle.
+const envExampleDst = join(out, ".env.example");
+if (existsSync(join(root, ".env.example"))) {
+  cpSync(join(root, ".env.example"), envExampleDst, { force: true });
+  console.log("   copied .env.example -> dist-server/.env.example (template only, no secrets)");
+} else {
+  console.warn("   no .env.example at project root; skipping env template");
+}
+// Defensive: never let a stray .env leak into the packaged server tree.
+const strayEnv = join(out, ".env");
+if (existsSync(strayEnv)) {
+  rmSync(strayEnv, { force: true });
+  console.warn("   removed stray .env from dist-server (do not bundle real credentials)");
 }
 
 console.log(`✓ assembled app server at ${out} (${serverJs})`);

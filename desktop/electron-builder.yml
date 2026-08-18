@@ -43,6 +43,10 @@ files:
 extraResources:
   - from: desktop/dist-server
     to: app-server
+    filter:
+      - "**/*"
+      - "!.env"
+      - "!**/.env"
 
 dmg:
   artifactName: "${productName}-${version}-${arch}.${ext}"

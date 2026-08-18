@@ -30,7 +30,7 @@ import {
   type MessageBoxReturnValue,
 } from "electron";
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import net from "node:net";
@@ -114,6 +114,21 @@ async function waitForServer(url: string, timeoutMs = 60000): Promise<void> {
 // server dir → the app root. The real process env always wins for PORT/HOSTNAME.
 function buildServerEnv(base: string): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env };
+
+  // First-run onboarding: seed ~/.trivio/.env from the bundled template so the
+  // user has a file to fill in. Real credentials stay in the user home dir,
+  // never inside the signed app bundle (assemble-server ships only .env.example).
+  const userEnv = join(homedir(), ".trivio", ".env");
+  if (!process.env.TRIVIO_ENV_FILE && !existsSync(userEnv) && existsSync(join(base, ".env.example"))) {
+    try {
+      mkdirSync(join(homedir(), ".trivio"), { recursive: true });
+      writeFileSync(userEnv, readFileSync(join(base, ".env.example"), "utf8"));
+      console.log("[desktop] seeded ~/.trivio/.env from template — fill in your credentials");
+    } catch (err) {
+      console.warn("[desktop] could not seed ~/.trivio/.env:", err);
+    }
+  }
+
   const paths = [
     process.env.TRIVIO_ENV_FILE,
     join(homedir(), ".trivio", ".env"),
@@ -175,10 +190,17 @@ async function startLocalServer(): Promise<string> {
   // A packaged Electron app ships no standalone `node` binary, so we launch the
   // Electron executable itself as a Node runtime (ELECTRON_RUN_AS_NODE) to host
   // server.js. In dev we use whatever `node` the dev loop is using.
-  const execArgv = app.isPackaged ? [serverJs, "--no-warnings=ExperimentalWarning"] : [serverJs];
+  const execArgv = [serverJs];
   const cmd = app.isPackaged ? process.execPath : "node";
   const childEnv: NodeJS.ProcessEnv = { ...env };
   if (app.isPackaged) childEnv.ELECTRON_RUN_AS_NODE = "1";
+  // Silence the noisy "localStorage not available" ExperimentalWarning from the
+  // embedded server. This must go through NODE_OPTIONS: a Node runtime flag placed
+  // after the script path (e.g. `[serverJs, "--no-warnings=..."]`) is ignored by
+  // Node and merely becomes an argv entry the server never reads.
+  childEnv.NODE_OPTIONS = [childEnv.NODE_OPTIONS, "--no-warnings=ExperimentalWarning"]
+    .filter(Boolean)
+    .join(" ");
 
   console.log(`[desktop] starting app server: ${cmd} ${execArgv.join(" ")} @127.0.0.1:${port}`);
   server = spawn(cmd, execArgv, {

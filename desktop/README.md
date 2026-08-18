@@ -76,14 +76,22 @@ npm run build:desktop
 ```
 
 `build:desktop` runs, in order:
-1. `next build` (standale output)
-2. `build:electron` (compile main + preload)
-3. `gen:icon` (rebuild `desktop/build/icon.icns`)
-4. `build:server` (assemble `desktop/dist-server/`)
-5. `electron-builder --config desktop/electron-builder.yml --mac`
+1. `preflight` — checks the server tree and, under `SHIP=1`, **hard-fails the
+    build without a Developer ID identity + notary credentials** (so a build can
+    never silently produce an undistributable artifact).
+2. `next build` (standalone output)
+3. `build:electron` (compile main + preload)
+4. `gen:icon` (rebuild `desktop/build/icon.icns`)
+5. `build:server` (assemble `desktop/dist-server/`)
+6. `electron-builder --config desktop/electron-builder.yml --mac`
 
 The result at `release/` is a real, installable macOS app: a `.dmg` you can
 double-click, an `.app` in your Dock, an arm64 binary.
+
+```bash
+npm run build:desktop:ship     # SHIP=1: refuse an undistributable build
+npm run notarize               # notarize + staple the newest .dmg/.app (needs APPLE_* creds)
+```
 
 ---
 
@@ -95,9 +103,12 @@ for `PORT`/`HOSTNAME`):
 1. the real process environment
 2. `TRIVIO_ENV_FILE` — an explicit path to a `.env`
 3. `~/.trivio/.env` — the user's per-machine credentials (**recommended**)
-4. `<app>/<server-dir>/.env` — a template copied from `.env.example`
+4. `<app>/<server-dir>/.env.example` — the shipped **template** (never a real
+   `.env`). On first run the shell seeds `~/.trivio/.env` from it, so you fill
+   in one file in your home dir instead of editing inside the signed app.
 
-For a production build, drop a `.env` at `~/.trivio/.env`:
+On first run the shell seeds `~/.trivio/.env` from the bundled template. Fill
+in that file (real credentials are **never** baked into the `.app`):
 
 ```ini
 DATABASE_URL=postgresql://...@host:5432/...
@@ -169,7 +180,15 @@ xcrun notarytool submit release/Trivio.app \
 ```
 
 electron-builder reads `CSC_*` and the `APPLE_*` vars automatically and will
-notarize for you when they are present.
+notarize for you when they are present. The `preflight` step in
+`build:desktop:ship` blocks the build if these are missing, and
+`npm run notarize` is an explicit `notarytool submit` + `stapler staple`
+step for a pre-built artifact:
+
+```bash
+APPLE_ID=you@example.com APPLE_APP_SPECIFIC_PASSWORD=xxxx-xxxx-xxxx-xxxx \
+  APPLE_TEAM_ID=ABCDE12345 npm run notarize
+```
 
 ---
 
@@ -293,6 +312,13 @@ electron-builder also auto-writes `Resources/app-update.yml` (generic provider);
   binary is out of scope).
 - The update **feed is not hosted yet** — the auto-updater is wired end-to-end but
    has no `UPDATE_FEED_URL` / hosted feed in this repo.
+- **Credentials are not shipped in the app.** `dist-server` (and thus the
+   `.app`) contains only `.env.example`; the real `.env` lives in
+   `~/.trivio/.env`, seeded from the template on first run.
+- **Notarization is wired but not run here.** `build:desktop:ship` refuses to
+   build without a Developer ID identity + `APPLE_*` notary creds, and
+   `npm run notarize` runs `notarytool` + `stapler`. A truly Gatekeeper-clean
+   `.dmg` still requires those credentials (unavailable in this environment).
 - No tray / dock extras beyond the standard app menu.
 - Deep links + auto-updates are wired; the `trivio://` scheme is registered in
   `main.ts` and `electron-builder.yml`.
