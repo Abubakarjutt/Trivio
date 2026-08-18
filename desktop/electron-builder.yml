@@ -18,6 +18,14 @@ appId: com.trivio.desk
 productName: Trivio
 copyright: Copyright © 2025 Trivio
 
+# Register the trivio:// deep-link scheme in the macOS app so the OS routes
+# trivio://... URLs (e.g. trivio://settings, trivio://update) to Trivio. main.ts
+# registers it as privileged and handles open-url / second-instance at runtime.
+protocols:
+  - name: Trivio
+    schemes:
+      - trivio
+
 directories:
   output: release
   buildResources: desktop/build

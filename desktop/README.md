@@ -177,14 +177,16 @@ notarize for you when they are present.
 
 - **Traffic-light chrome** (`titleBarStyle: hiddenInset`) on a 1360×900 window
   with a safe top inset so the native buttons never overlap content.
-- Application menu: About / Open in Browser / Hide-Quit; Edit; View
+- Application menu: About / Open in Browser / **Check for Updates…** / Hide-Quit; Edit; View
   (Reload, DevTools, zoom, fullscreen); Window.
-- **Single instance**: a second launch focuses the existing window.
+- **Single instance**: a second launch focuses the existing window; a
+   `trivio://` deep link delivered to a second instance is forwarded to the
+   running window.
 - **External links** (anything that is not the 127.0.0.1 loopback) open in the
   user's default browser, not in-app.
 - A small, explicit contextBridge API is exposed as `window.trivioDesktop`
   (`isDesktop`, `openExternal`, `openItem`, `navigate`, `showMessageBox`,
-  `platform`, `versions`) for any future native integrations.
+  `onDeepLink`, `platform`, `versions`) for native integrations.
 
 ---
 
@@ -236,11 +238,61 @@ produces smaller binaries but requires a Rust sidecar to run the Node server
 and would re-architect the launch path. The `DESKTOP_MODE` abstraction is the
 seam at which a Tauri port would slot in.
 
+## Deep links & auto-updates
+
+### Deep links (`trivio://`)
+
+`main.ts` registers `trivio` as a privileged scheme (`registerSchemesAsPrivileged`)
+and `desktop/electron-builder.yml` declares it under `protocols`, so the OS routes
+`trivio://…` URLs to the installed app:
+
+```
+trivio://settings/security   ->  in-app navigation to /settings/security
+trivio://update              ->  triggers an update check
+trivio://invoice?id=...      ->  /invoice?id=...
+```
+
+At runtime:
+- **macOS** delivers the URL via the `open-url` event;
+- **Windows/Linux** deliver it as an argv entry in the `second-instance` event
+   (the single-instance lock focuses the running window and forwards the link).
+
+The link is forwarded to the live renderer on the `deep-link` channel; if the
+window is not up yet (a cold-start `trivio://` launch) it is queued and flushed
+on `ready-to-show`. The renderer subscribes with
+`window.trivioDesktop.onDeepLink(cb)` (returns an unsubscribe fn). In-app
+navigation itself goes through the existing `navigate` bridge → `window:navigate`
+IPC, so the web layer is unchanged.
+
+### Auto-updates
+
+`electron-updater` is wired in but **guarded**: checks run only when the app is
+packaged *and* a feed is configured, so dev / unsigned builds never hit the
+network.
+
+- On a packaged build, `setupUpdater()` enables auto-download + install-on-quit and
+  pops a "Restart / Later" prompt when an update is downloaded.
+- A manual **"Check for Updates…"** menu item calls `runUpdateCheck()`.
+- The updater loads lazily via `require("electron-updater")` inside a `try/catch`,
+  so the shell still boots if the package is unavailable.
+
+Point the feed at your hosted updates:
+
+```bash
+# at build time (baked into the generic feed) or at run time:
+UPDATE_FEED_URL=https://updates.example.com/trivio/ electron desktop/dist/main.cjs
+```
+
+electron-builder also auto-writes `Resources/app-update.yml` (generic provider);
+`updaterFeedConfigured()` detects it, so a packaged build with no
+`UPDATE_FEED_URL` still has a feed to check.
+
 ## Limitations / next steps
 
 - `local` mode still expects Postgres + Redis to be reachable (a bundled DB
   binary is out of scope).
-- No auto-updater wired yet (add `electron-updater` + an update feed).
+- The update **feed is not hosted yet** — the auto-updater is wired end-to-end but
+   has no `UPDATE_FEED_URL` / hosted feed in this repo.
 - No tray / dock extras beyond the standard app menu.
-- No deep-link scheme yet (`trivio://`) — the IPC + `navigate` bridge is in
-  place; register the scheme in `main.ts` and the OS via the builder config.
+- Deep links + auto-updates are wired; the `trivio://` scheme is registered in
+  `main.ts` and `electron-builder.yml`.

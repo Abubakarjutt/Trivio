@@ -24,13 +24,32 @@ import {
   shell,
   dialog,
   ipcMain,
+  protocol,
   type MenuItemConstructorOptions,
+  type MessageBoxOptions,
+  type MessageBoxReturnValue,
 } from "electron";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import net from "node:net";
+
+// Register the trivio:// deep-link scheme as a privileged/standard scheme so the
+// renderer can link to it and the OS routes trivio:// URLs to this app. Must run
+// before app.whenReady().
+protocol.registerSchemesAsPrivileged([
+    {
+      scheme: "trivio",
+      privileges: {
+        standard: true,
+        secure: true,
+        supportFetchAPI: true,
+        corsEnabled: true,
+        stream: true,
+      },
+    },
+]);
 
 // ── Paths & mode ─────────────────────────────────────────────────────────────
 
@@ -225,7 +244,13 @@ function createWindow(): BrowserWindow {
   });
 
   // Reveal only after first paint to avoid a white flash.
-  win.once("ready-to-show", () => win.show());
+  win.once("ready-to-show", () => {
+    win.show();
+    // Flush a deep link that arrived before the window was ready (a cold-start
+    // trivio:// launch), then run the optional update check.
+    flushPendingDeepLink();
+    void runUpdateCheck();
+  });
 
   // Open external http(s) links in the user's default browser, not in-app.
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -274,6 +299,136 @@ function chosenUrlForNav(): string {
   return mainWindow?.webContents.getURL() || "http://127.0.0.1:3000";
 }
 
+// ── Deep links (trivio://) & auto-updater ──────────────────────────────────
+
+// A trivio:// URL (e.g. trivio://settings/security, trivio://update) asks the
+// in-app web layer to navigate to a route. On macOS it arrives via `open-url`;
+// on Windows/Linux it arrives in the second-instance argv. We forward it to the
+// live renderer on the `deep-link` channel; if no window is up yet (a cold-start
+// trivio:// launch) we queue it and flush once the window loads.
+const DEEP_LINK_SCHEME = "trivio";
+let pendingDeepLinkRaw: string | null = null;
+
+function parseDeepLink(raw: string): { path: string; query: string } {
+  const withoutScheme = raw.replace(new RegExp(`^${DEEP_LINK_SCHEME}://`, "i"), "");
+  const [pathPart, queryPart] = withoutScheme.split("?", 2);
+  const path = pathPart.startsWith("/") ? pathPart : `/${pathPart || ""}`;
+  return { path, query: queryPart ? `?${queryPart}` : "" };
+}
+
+function sendDeepLink(raw: string): void {
+  const { path, query } = parseDeepLink(raw);
+  mainWindow?.webContents.send("deep-link", { raw, path, query });
+}
+
+function dispatchDeepLink(raw: string): void {
+  console.log(`[desktop] deep link -> ${raw}`);
+  if (!mainWindow || !mainWindow.isVisible()) {
+    pendingDeepLinkRaw = raw;
+    return;
+  }
+  sendDeepLink(raw);
+}
+
+function flushPendingDeepLink(): void {
+  if (!pendingDeepLinkRaw) return;
+  const raw = pendingDeepLinkRaw;
+  pendingDeepLinkRaw = null;
+  sendDeepLink(raw);
+}
+
+// Auto-updater. electron-updater reads the feed from the app-update.yml that
+// electron-builder writes into Resources/ (generic provider). Point it at a
+// hosted feed by setting UPDATE_FEED_URL at build/run time. Checks only run in a
+// packaged build and only when a feed is configured, so an unsigned / dev build
+// never hits the network.
+//
+// Loaded lazily and guarded so the shell still boots if the updater package is
+// unavailable at runtime.
+interface MinimalUpdater {
+  autoDownload: boolean;
+  autoInstallOnAppQuit: boolean;
+  setFeedURL(url: string): void;
+  checkForUpdates(): Promise<{ updateInfo: { version: string } } | null>;
+  on(event: string, cb: (...args: unknown[]) => void): void;
+  quitAndInstall(): void;
+}
+
+function getUpdater(): MinimalUpdater | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { autoUpdater } = require("electron-updater") as { autoUpdater: MinimalUpdater };
+    return autoUpdater;
+  } catch (err) {
+    console.warn("[desktop] electron-updater unavailable — updates disabled:", err);
+    return null;
+  }
+}
+
+// Parent the native dialog on the main window when it exists, otherwise show it
+// parent-less. Electron accepts both the parented and options-only overload;
+// the helper keeps the call sites type-correct when the window has closed.
+function showDialog(options: MessageBoxOptions): Promise<MessageBoxReturnValue> {
+  return mainWindow
+        ? dialog.showMessageBox(mainWindow, options)
+        : dialog.showMessageBox(options);
+}
+
+function updaterFeedConfigured(): boolean {
+  return Boolean(process.env.UPDATE_FEED_URL) || existsSync(join(process.resourcesPath, "app-update.yml"));
+}
+
+function runUpdateCheck(): void {
+  if (!app.isPackaged) {
+    void showDialog({
+      type: "info",
+      title: "Trivio",
+      message: "Updates are only checked in the installed app.",
+      buttons: ["OK"],
+    });
+    return;
+  }
+  const updater = getUpdater();
+  if (!updater) return;
+  if (!updaterFeedConfigured()) {
+    console.log("[desktop] no update feed configured — skipping check");
+    return;
+  }
+  if (process.env.UPDATE_FEED_URL) updater.setFeedURL(process.env.UPDATE_FEED_URL);
+  void updater
+    .checkForUpdates()
+    .then((res) => {
+      const v = res?.updateInfo?.version;
+      if (v && v !== app.getVersion()) console.log(`[desktop] update available: ${v}`);
+      else console.log("[desktop] already on the latest version");
+    })
+    .catch((err) => console.warn("[desktop] update check failed:", err));
+}
+
+function setupUpdater(): void {
+  if (!app.isPackaged) return;
+  const updater = getUpdater();
+  if (!updater) return;
+  updater.autoDownload = true;
+  updater.autoInstallOnAppQuit = true;
+  updater.on("update-downloaded", (info) => {
+    const version = (info as { version?: string })?.version;
+    void showDialog({
+        type: "info",
+        title: "Trivio",
+        message: `A new version${version ? ` (${version})` : ""} of Trivio is ready.`,
+        detail: "Restart the app to finish the update.",
+        buttons: ["Restart", "Later"],
+        defaultId: 0,
+        cancelId: 1,
+      })
+      .then(({ response }) => {
+        if (response === 0) updater.quitAndInstall();
+      });
+  });
+  updater.on("error", (err) => console.warn("[desktop] auto-updater error:", err));
+}
+
 // ── Native menu ──────────────────────────────────────────────────────────────
 
 function buildMenu(): void {
@@ -296,6 +451,10 @@ function buildMenu(): void {
             if (url) void shell.openExternal(url);
           },
         },
+         {
+          label: "Check for Updates…",
+          click: () => runUpdateCheck(),
+         },
         { type: "separator" },
         { role: "services" },
         { type: "separator" },
@@ -358,16 +517,26 @@ const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
-  app.on("second-instance", () => {
+  app.on("second-instance", (_e, argv) => {
+    // On Windows/Linux a trivio:// URL is delivered as an argv entry here.
+    const link = argv.find((a) => a.startsWith(`${DEEP_LINK_SCHEME}://`));
+    if (link) dispatchDeepLink(link);
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.focus();
     }
   });
 
+  // macOS routes a trivio:// URL here while the app is already running.
+  app.on("open-url", (event, url) => {
+    event.preventDefault();
+    dispatchDeepLink(url);
+  });
+
   app.whenReady().then(async () => {
     buildMenu();
     registerIpc();
+    setupUpdater();
 
     const mode = resolveMode();
     const assembledExists = existsSync(join(serverDir(), "server.js"));

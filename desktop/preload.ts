@@ -5,13 +5,14 @@
 // like a native app (deep-linking, native dialogs, updates) without ever
 // exposing `nodeIntegration`.
 
-import { contextBridge, ipcRenderer, shell } from "electron";
+import { contextBridge, ipcRenderer } from "electron";
 
 // Channels the renderer may use. Keep this list explicit and small.
 const CHANNELS = {
   OPEN_EXTERNAL: "shell:openExternal",
   OPEN_ITEM: "shell:openItem",
   SHOW_MESSAGE_BOX: "dialog:showMessageBox",
+  DEEP_LINK: "deep-link",
   // Future: quit-to-tray, update checks, deep links, etc.
 } as const;
 
@@ -61,6 +62,13 @@ const api = {
   }): Promise<number> {
     return ipcRenderer.invoke(CHANNELS.SHOW_MESSAGE_BOX, options);
   },
+      // Subscribe to trivio:// deep links delivered to this window. Returns an
+      // unsubscribe function so the renderer can clean up on unmount.
+    onDeepLink(cb: (info: { raw: string; path: string; query: string }) => void): () => void {
+      const handler = (_e: unknown, info: { raw: string; path: string; query: string }) => cb(info);
+      ipcRenderer.on(CHANNELS.DEEP_LINK, handler);
+      return () => ipcRenderer.removeListener(CHANNELS.DEEP_LINK, handler);
+    },
 };
 
 // Expose the bridge only on the expected global and only in the main frame.
@@ -72,5 +80,4 @@ if (typeof window !== "undefined") {
   });
 }
 
-// Keep imports that are not referenced in all build paths from being dropped.
-void shell;
+// The bridge is intentionally small and frozen; no extra imports are needed.
