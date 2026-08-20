@@ -51,3 +51,12 @@ storage/
 
 # graphify skill output (generated, not source)
 /graphify-out/
+
+# embedded PostgreSQL engine — fetched, platform-specific binary (large).
+# Produced by `npm run fetch:pg` (see desktop/embedded/fetch-postgres.mjs);
+# the source tooling stays tracked, only the binary is ignored.
+/desktop/embedded/bin/
+/desktop/embedded/lib/
+/desktop/embedded/VERSION
+/desktop/embedded/MANIFEST.json
+/desktop/embedded/.dl/

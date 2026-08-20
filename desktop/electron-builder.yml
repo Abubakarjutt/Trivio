@@ -35,8 +35,8 @@ directories:
 # extraResources (the assembled app-server tree) instead of the huge Next.js
 # node_modules, keeping the .app small and fast.
 files:
-- dist/main.cjs
-- dist/preload.cjs
+  - dist/main.cjs
+  - dist/preload.cjs
 
 # The runnable Next.js server, laid down next to the app resources. main.cjs
 # boots it from Contents/Resources/app-server via the ELECTRON_RUN_AS_NODE trick.
@@ -47,6 +47,17 @@ extraResources:
       - "**/*"
       - "!.env"
       - "!**/.env"
+      # The embedded PostgreSQL engine (fetched by `npm run fetch:pg`).
+      # resolvePostgresBinaries looks for <resourcesPath>/postgres/bin at runtime,
+      # so this must mirror the on-disk engine layout (bin/ + lib/ siblings).
+  - from: desktop/embedded
+    to: postgres
+    filter:
+      - "bin/**/*"
+      - "lib/**/*"
+      - "VERSION"
+      - "MANIFEST.json"
+      - "!**/.DS_Store"
 
 dmg:
   artifactName: "${productName}-${version}-${arch}.${ext}"

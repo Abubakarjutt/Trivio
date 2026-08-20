@@ -34,21 +34,27 @@ import { existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import net from "node:net";
+import {
+  decideDatabaseMode,
+  startEmbeddedDatabase,
+  stopDatabaseProcess,
+  type DatabaseHandle,
+} from "./embedded/embedded-db";
 
 // Register the trivio:// deep-link scheme as a privileged/standard scheme so the
 // renderer can link to it and the OS routes trivio:// URLs to this app. Must run
 // before app.whenReady().
 protocol.registerSchemesAsPrivileged([
-    {
-      scheme: "trivio",
-      privileges: {
-        standard: true,
-        secure: true,
-        supportFetchAPI: true,
-        corsEnabled: true,
-        stream: true,
-      },
+  {
+    scheme: "trivio",
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true,
     },
+  },
 ]);
 
 // ── Paths & mode ─────────────────────────────────────────────────────────────
@@ -80,6 +86,7 @@ function serverDir(): string {
 // ── Local server lifecycle ───────────────────────────────────────────────────
 
 let server: ChildProcess | null = null;
+let dbHandle: DatabaseHandle | null = null;
 
 function getFreePort(): Promise<number> {
   return new Promise((res, rej) => {
@@ -119,7 +126,11 @@ function buildServerEnv(base: string): NodeJS.ProcessEnv {
   // user has a file to fill in. Real credentials stay in the user home dir,
   // never inside the signed app bundle (assemble-server ships only .env.example).
   const userEnv = join(homedir(), ".trivio", ".env");
-  if (!process.env.TRIVIO_ENV_FILE && !existsSync(userEnv) && existsSync(join(base, ".env.example"))) {
+  if (
+    !process.env.TRIVIO_ENV_FILE &&
+    !existsSync(userEnv) &&
+    existsSync(join(base, ".env.example"))
+  ) {
     try {
       mkdirSync(join(homedir(), ".trivio"), { recursive: true });
       writeFileSync(userEnv, readFileSync(join(base, ".env.example"), "utf8"));
@@ -185,7 +196,49 @@ async function startLocalServer(): Promise<string> {
     NODE_ENV: "production",
     NEXTAUTH_URL: `http://127.0.0.1:${port}`,
     AUTH_TRUST_HOST: "true",
+    // Server-side flag: this instance is bound to loopback only and never
+    // reachable off-machine, so IP-based rate limiting has no abuse surface
+    // to defend and would otherwise lock every real user out of their own
+    // single-tenant install after a handful of retries (all share 127.0.0.1).
+    // See server/middleware/rateLimit.ts.
+    TRIVIO_DESKTOP_EMBEDDED: "true",
+    // The desktop app is a single-tenant local install with no guarantee an
+    // email provider (Resend) is configured, so the verification round-trip
+    // would leave users permanently unable to sign in. See server/routers/auth.ts.
+    SKIP_EMAIL_VERIFICATION: "true",
   });
+
+  // ── Database ──────────────────────────────────────────────────────────────
+  // By default the desktop app owns its OWN embedded Postgres inside the user's
+  // data dir (see desktop/embedded/embedded-db.ts) — no external server, no
+  // docker container. Embedded is the DEFAULT: a bare DATABASE_URL (e.g. the one
+  // in the shared .env.example) does NOT bypass it. An external database is
+  // selected only via TRIVIO_DATABASE_MODE=external or TRIVIO_DATABASE_URL
+  // (a hosted SaaS instance, a dev box, CI) — then no engine is started and the
+  // same server code runs unchanged everywhere.
+  const dbMode = decideDatabaseMode(env);
+  if (dbMode === "embedded") {
+    const ignoredExternalUrl = env.DATABASE_URL;
+    const db = await startEmbeddedDatabase({
+      env,
+      userDataDir: app.getPath("userData"),
+      resourcesDir: app.isPackaged ? process.resourcesPath : join(appRoot(), "desktop", "embedded"),
+      serverDir: dir,
+      isPackaged: app.isPackaged,
+    });
+    dbHandle = db;
+    env.DATABASE_URL = db.url;
+    env.TRIVIO_DATABASE_URL = db.url;
+    console.log(`[desktop] using built-in embedded Postgres at ${db.dataDir} (${db.url})`);
+    if (ignoredExternalUrl) {
+      console.log(
+        `[desktop] note: a bare DATABASE_URL ("${ignoredExternalUrl}") was ignored — the built-in ` +
+          `engine is the default. Set TRIVIO_DATABASE_MODE=external (or TRIVIO_DATABASE_URL) to use it.`
+      );
+    }
+  } else {
+    console.log("[desktop] using external DATABASE_URL from environment");
+  }
 
   // A packaged Electron app ships no standalone `node` binary, so we launch the
   // Electron executable itself as a Node runtime (ELECTRON_RUN_AS_NODE) to host
@@ -391,13 +444,14 @@ function getUpdater(): MinimalUpdater | null {
 // parent-less. Electron accepts both the parented and options-only overload;
 // the helper keeps the call sites type-correct when the window has closed.
 function showDialog(options: MessageBoxOptions): Promise<MessageBoxReturnValue> {
-  return mainWindow
-        ? dialog.showMessageBox(mainWindow, options)
-        : dialog.showMessageBox(options);
+  return mainWindow ? dialog.showMessageBox(mainWindow, options) : dialog.showMessageBox(options);
 }
 
 function updaterFeedConfigured(): boolean {
-  return Boolean(process.env.UPDATE_FEED_URL) || existsSync(join(process.resourcesPath, "app-update.yml"));
+  return (
+    Boolean(process.env.UPDATE_FEED_URL) ||
+    existsSync(join(process.resourcesPath, "app-update.yml"))
+  );
 }
 
 function runUpdateCheck(): void {
@@ -436,17 +490,16 @@ function setupUpdater(): void {
   updater.on("update-downloaded", (info) => {
     const version = (info as { version?: string })?.version;
     void showDialog({
-        type: "info",
-        title: "Trivio",
-        message: `A new version${version ? ` (${version})` : ""} of Trivio is ready.`,
-        detail: "Restart the app to finish the update.",
-        buttons: ["Restart", "Later"],
-        defaultId: 0,
-        cancelId: 1,
-      })
-      .then(({ response }) => {
-        if (response === 0) updater.quitAndInstall();
-      });
+      type: "info",
+      title: "Trivio",
+      message: `A new version${version ? ` (${version})` : ""} of Trivio is ready.`,
+      detail: "Restart the app to finish the update.",
+      buttons: ["Restart", "Later"],
+      defaultId: 0,
+      cancelId: 1,
+    }).then(({ response }) => {
+      if (response === 0) updater.quitAndInstall();
+    });
   });
   updater.on("error", (err) => console.warn("[desktop] auto-updater error:", err));
 }
@@ -473,10 +526,10 @@ function buildMenu(): void {
             if (url) void shell.openExternal(url);
           },
         },
-         {
+        {
           label: "Check for Updates…",
           click: () => runUpdateCheck(),
-         },
+        },
         { type: "separator" },
         { role: "services" },
         { type: "separator" },
@@ -608,21 +661,40 @@ You can also run Trivio in thin-client mode by setting DESKTOP_MODE=remote.`
   });
 }
 
-// Gracefully stop the embedded server when the app closes.
-app.on("window-all-closed", () => {
+// Gracefully stop the embedded server AND the embedded Postgres engine on
+// every quit path, so the app never leaves a database process behind.
+async function stopAll(): Promise<void> {
   stopServer();
+  await stopDatabase();
+}
+
+// Tear down the embedded engine if one is running. Idempotent; never throws.
+async function stopDatabase(): Promise<void> {
+  if (!dbHandle) return;
+  const handle = dbHandle;
+  dbHandle = null;
+  try {
+    await handle.stop();
+    console.log("[desktop] embedded Postgres stopped");
+  } catch (err) {
+    console.error("[desktop] error stopping embedded Postgres:", err);
+  }
+}
+
+app.on("window-all-closed", () => {
+  void stopAll();
   // Keep the app alive in the dock on macOS (standard behaviour).
   if (process.platform !== "darwin") app.quit();
 });
 
-app.on("before-quit", () => stopServer());
+app.on("before-quit", () => {
+  void stopAll();
+});
 process.on("SIGINT", () => {
-  stopServer();
-  app.quit();
+  void stopAll().then(() => app.quit());
 });
 process.on("SIGTERM", () => {
-  stopServer();
-  app.exit(0);
+  void stopAll().then(() => app.exit(0));
 });
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

@@ -25,9 +25,15 @@ const SHIP = process.env.SHIP === "1";
 const problems = []; // hard errors (die when SHIP=1)
 const warnings = []; // soft notices (always printed, exit 0)
 
-function log(msg) { console.log(`[preflight] ${msg}`); }
-function warn(msg) { warnings.push(msg); }
-function err(msg) { problems.push(msg); }
+function log(msg) {
+  console.log(`[preflight] ${msg}`);
+}
+function warn(msg) {
+  warnings.push(msg);
+}
+function err(msg) {
+  problems.push(msg);
+}
 
 // ── 1. The assembled / buildable server tree ────────────────────────────────
 const standalone = join(root, ".next", "standalone");
@@ -46,7 +52,7 @@ if (process.platform === "darwin") {
   try {
     const out = execFileSync("security", ["find-identity", "-v", "-p", "codesigning"], {
       encoding: "utf8",
-     });
+    });
     identities = out
       .split(/\r?\n/)
       .map((l) => l.trim())
@@ -54,17 +60,18 @@ if (process.platform === "darwin") {
       .map((l) => {
         const m = l.match(/\d+\)\s+([0-9A-F]{40})\s+"(.+?)"/);
         return m ? { sha1: m[1], name: m[2] } : null;
-       })
+      })
       .filter(Boolean);
-   } catch (e) {
+  } catch (e) {
     warn(`could not query the keychain (security): ${e.message.split("\n")[0]}`);
-   }
+  }
 } else {
   log("non-macOS host — skipping code-signing/notary checks (mac target only).");
 }
 
 const devId = identities.find((i) => /Developer ID Application/i.test(i.name));
-const devOnly = identities.length > 0 && !devId && identities.every((i) => /Apple Development/i.test(i.name));
+const devOnly =
+  identities.length > 0 && !devId && identities.every((i) => /Apple Development/i.test(i.name));
 
 if (devId) {
   log(`Developer ID Application identity: ${devId.name}`);
@@ -81,7 +88,27 @@ const hasKeychainProfile = Boolean(process.env.NOTARY_PROFILE);
 if (hasNotary || hasKeychainProfile) {
   log("notary credentials present — the build will be notarized + stapled.");
 } else {
-  const msg = "no Apple notary credentials (APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD, or NOTARY_PROFILE) — the build will NOT be notarized.";
+  const msg =
+    "no Apple notary credentials (APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD, or NOTARY_PROFILE) — the build will NOT be notarized.";
+  SHIP ? err(msg) : warn(msg);
+}
+
+// ── 3. The embedded PostgreSQL engine ───────────────────────────────────────
+// The default desktop build is local-mode: it ships its OWN Postgres (no docker,
+// no external DB). If the engine isn't laid down under desktop/embedded/bin the
+// packaged app would start with no database. `npm run fetch:pg` produces it.
+const engineBin = join(root, "desktop", "embedded", "bin", "postgres");
+if (existsSync(engineBin)) {
+  try {
+    const out = execFileSync(engineBin, ["--version"], { encoding: "utf8" }).trim();
+    log(`embedded Postgres engine present: ${out}`);
+  } catch {
+    warn(`desktop/embedded/bin/postgres exists but 'postgres --version' failed`);
+  }
+} else {
+  const msg =
+    "no embedded Postgres engine at desktop/embedded/bin — run `npm run fetch:pg` " +
+    "(the default build does this automatically); without it the shipped app has no database";
   SHIP ? err(msg) : warn(msg);
 }
 
@@ -93,7 +120,9 @@ if (problems.length) {
     `[preflight] ✗ ${problems.length} blocking problem(s). ` +
       `Set CSC_NAME="Developer ID Application: ..." (or CSC_LINK) and APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD ` +
       `(plus APPLE_TEAM_ID), then re-run. See desktop/README.md "Sign & notarize".`
-   );
+  );
   process.exit(1);
 }
-console.log("[preflight] ✓ ready to build (ad-hoc/unsigned unless signing + notary creds are present).");
+console.log(
+  "[preflight] ✓ ready to build (ad-hoc/unsigned unless signing + notary creds are present)."
+);

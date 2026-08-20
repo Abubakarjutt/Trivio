@@ -70,10 +70,13 @@ console.log(`  standalone run dir: ${runDir}`);
 console.log(`  · copying standalone run tree → dist-server`);
 cpSync(runDir, out, { recursive: true });
 
-// 2. Static assets (Next serves ./static relative to the server cwd).
+// 2. Static assets. The standalone server's distDir is "./.next" (see
+//    required-server-files.json), so it resolves /_next/static/* requests to
+//    <cwd>/.next/static — NOT a top-level ./static. Copying there instead
+//    silently 404s every CSS/JS/font chunk and the app renders unstyled.
 if (existsSync(join(root, ".next", "static"))) {
-  console.log(`  · copying .next/static  → dist-server/static`);
-  cpSync(join(root, ".next", "static"), join(out, "static"), {
+  console.log(`  · copying .next/static  → dist-server/.next/static`);
+  cpSync(join(root, ".next", "static"), join(out, ".next", "static"), {
     recursive: true,
   });
 } else {

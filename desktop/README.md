@@ -108,10 +108,13 @@ for `PORT`/`HOSTNAME`):
    in one file in your home dir instead of editing inside the signed app.
 
 On first run the shell seeds `~/.trivio/.env` from the bundled template. Fill
-in that file (real credentials are **never** baked into the `.app`):
+in that file (real credentials are **never** baked into the `.app`). `DATABASE_URL`
+is **optional** — the desktop uses its built-in embedded Postgres by default (see
+"Embedded database"); set it only when you opt into an external database:
 
 ```ini
-DATABASE_URL=postgresql://...@host:5432/...
+# optional — leave blank for the built-in embedded Postgres (no docker)
+# DATABASE_URL=postgresql://...@host:5432/...
 REDIS_URL=redis://...
 NEXTAUTH_SECRET=...
 CRON_SECRET=...
@@ -135,17 +138,42 @@ choices, both supported:
 
 - **Thin client (recommended for shipping).** `DESKTOP_MODE=remote` loads your
   hosted web app (`https://app.trivio-ai.com` or your own
-  `ELECTRON_REMOTE_URL`). The desktop binary is just a native window + deep
+   `ELECTRON_REMOTE_URL`). The desktop binary is just a native window + deep
   links + updates on top of the web app — like the Linear/Notion desktop apps.
   No local DB/Redis. Small, fast, uniform.
-- **Full local stack.** `DESKTOP_MODE=local` boots the embedded Next.js
-  standalone server. Point `DATABASE_URL`/`REDIS_URL` at hosted Postgres/Redis
-  (still recommended even in local mode — a bundled Postgres binary is a lot
-  of work and not in scope here).
+- **Full local stack (the default binary).** `DESKTOP_MODE=local` boots the
+  embedded Next.js standalone server, which in turn runs its **own built-in
+  PostgreSQL** — see "Embedded database" below. No `docker compose up`, no
+  external `DATABASE_URL` to fill in; the database is part of the app.
 
-`npm run build:desktop` produces a **local-mode** binary by default. To ship a
-thin client instead, set `DESKTOP_MODE=remote` on the launch (see the scripts
-below) or add a launch flag — see "Packaging a remote client".
+`npm run build:desktop` produces a **local-mode** binary by default (it ships
+the embedded engine). To ship a thin client instead, set `DESKTOP_MODE=remote`
+on the launch (see the scripts below) or add a launch flag — see "Packaging a
+remote client".
+
+## Embedded database
+
+The schema uses `NUMERIC(19,4)` for every monetary value (a hard invariant —
+money is never a float) plus Postgres enum columns, so SQLite is not an option.
+Rather than ask you to run Postgres in a separate process or a **docker
+container**, the desktop app ships and runs its **own PostgreSQL** on loopback:
+
+    ~/Library/Application Support/Trivio/database   ←  PGDATA (the on-disk cluster)
+
+- On **first boot** the cluster is created with `initdb` and migrated with
+  `prisma migrate deploy`; on **every boot** the server is (re)started on a
+  private loopback port; on **quit** it is stopped cleanly. The database is part
+  of the app, not an external service — **no docker, no DATABASE_URL to fill in**.
+- The engine is fetched on demand (idempotent) with `npm run fetch:pg` from a
+  system Postgres, a Homebrew keg, or an EnterpriseDB archive; the build runs it
+  automatically. It is git-ignored (large, platform-specific) — only the tooling
+  under `desktop/embedded/` is tracked.
+- **Using an external database instead** is a deliberate opt-in: set
+  `TRIVIO_DATABASE_MODE=external` (then `DATABASE_URL` is used) or
+  `TRIVIO_DATABASE_URL=postgresql://…`. In that case **no engine is started** and
+  the same server code runs unchanged. A bare `DATABASE_URL` alone does **not**
+  bypass the built-in engine — the desktop defaults to embedded so a placeholder
+  URL can't silently force a docker/external dependency.
 
 ### Packaging a remote (thin-client) build
 
