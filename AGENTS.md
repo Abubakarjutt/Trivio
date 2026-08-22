@@ -73,3 +73,17 @@ npm run build:desktop         # next build + assemble + electron-builder -> rele
 ## Current Sprint
 
 See [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) — Sprint 0 (scaffold) is next.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub issues in `Abubakarjutt/Trivio` via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical roles, one label string each (defaults). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at the repo root (created lazily by /domain-modeling). See `docs/agents/domain.md`.
