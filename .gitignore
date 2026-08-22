@@ -60,3 +60,8 @@ storage/
 /desktop/embedded/VERSION
 /desktop/embedded/MANIFEST.json
 /desktop/embedded/.dl/
+
+# agent/dev scratch (machine-local, not for public repo)
+.superpowers/
+.serena/
+.claude/settings.local.json
