@@ -15,11 +15,8 @@ test.describe("Navigation & Public Routes", () => {
 
   test("pricing page is publicly accessible", async ({ page }) => {
     await page.goto("/pricing");
-    await expect(page.getByText("Simple, transparent pricing")).toBeVisible();
-    await expect(page.getByText("Pro Monthly", { exact: true })).toBeVisible();
-    await expect(page.getByText("Pro Annual", { exact: true })).toBeVisible();
-    await expect(page.getByText("$29", { exact: true })).toBeVisible();
-    await expect(page.getByText("$290", { exact: true })).toBeVisible();
+    await expect(page.getByText("Free, forever", { exact: false })).toBeVisible();
+    await expect(page.getByText("$0", { exact: true })).toBeVisible();
   });
 
   test("unknown routes redirect unauthenticated users to login", async ({ page }) => {

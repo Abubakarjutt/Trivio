@@ -106,7 +106,7 @@ describe("authRouter.register", () => {
     const caller = makePublicCaller();
     const result = await caller.register(validInput);
 
-    expect(result).toEqual({ success: true });
+    expect(result).toEqual({ success: true, skipVerification: false });
     expect(mockCreate).toHaveBeenCalledOnce();
   });
 

@@ -2,8 +2,14 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { buildChatMessages, executeToolCall, parseToolCalls, type ToolResult } from "@/server/services/chat.service";
+import {
+  buildChatMessages,
+  executeToolCall,
+  parseToolCalls,
+  type ToolResult,
+} from "@/server/services/chat.service";
 import { chatRateLimiter } from "@/server/middleware/rateLimit";
+import { resolveProvider } from "@/server/services/ai-status";
 
 const chatBodySchema = z.object({
   message: z.string().min(1).max(4000),
@@ -11,6 +17,52 @@ const chatBodySchema = z.object({
   attachmentId: z.string().uuid().optional(),
 });
 
+// ── Provider configuration ─────────────────────────────────────────────────────
+//
+// Two chat backends are supported:
+//   • gemini  — the cloud backend (Google Generative Language API); auto-selected when GEMINI_API_KEY is set. Used by the
+//                hosted web app. Requires GEMINI_API_KEY.
+//   • ollama  — a LOCAL model (Gemma, e.g. "gemma4:e4b") served by an Ollama
+//                instance the desktop app installs & runs on the user's machine.
+//                No API key, fully offline. Selected via AI_PROVIDER=ollama,
+//                which the desktop shell sets once its Ollama setup is complete.
+//
+// The desktop shell points the embedded server at its own loopback Ollama via
+// OLLAMA_HOST / OLLAMA_MODEL. If that instance is not reachable (not installed,
+// not started, or the model not pulled yet) the route emits a `needs_setup`
+// error event so the UI can prompt the user to finish the Ollama setup instead
+// of showing a generic failure.
+
+// Provider selection is shared with the AI-status probe (see
+// server/services/ai-status.ts -> resolveProvider) so the two never disagree:
+// an explicit AI_PROVIDER wins; otherwise prefer the cloud when a key is set,
+// else the local Ollama engine.
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? "";
+const AI_PROVIDER = resolveProvider(process.env);
+const GEMINI_MODEL = process.env.CHAT_MODEL ?? "gemini-2.5-flash";
+const OLLAMA_HOST = (process.env.OLLAMA_HOST || "http://127.0.0.1:11434").replace(/\/$/, "");
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "gemma4:e4b";
+
+// Thrown by a provider when it cannot serve a turn yet (e.g. Ollama not set up).
+// Surfaced to the client as an SSE `error` event carrying `code: "needs_setup"`
+// so the UI can offer the Ollama setup flow rather than a dead-end error.
+class NeedsSetupError extends Error {
+  readonly code = "needs_setup";
+  constructor(message: string) {
+    super(message);
+    this.name = "NeedsSetupError";
+  }
+}
+
+// The text the model produced, after provider-specific shaping. Both providers
+// return a plain string (our tool-calling is a TEXT protocol — TOOL_CALL: lines
+// — so no native function-calling is required or honoured).
+interface ProviderTurn {
+  text: string;
+}
+
+// Summarise executed tool results into a human-readable block appended to the
+// assistant's reply. Returns "" when there's nothing worth summarising.
 function buildToolSummary(toolResults: ToolResult[]): string {
   return toolResults
     .map((r) => {
@@ -102,10 +154,195 @@ function buildToolSummary(toolResults: ToolResult[]): string {
     .join("\n");
 }
 
-export const maxDuration = 120;
+// ── Gemini provider ────────────────────────────────────────────────────────────
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? "";
-const GEMINI_MODEL   = process.env.CHAT_MODEL ?? "gemma-4-26b-a4b-it";
+async function runGemini(params: {
+  systemMsg?: { role: string; content: string };
+  chatMsgs: { role: string; content: string }[];
+}): Promise<ProviderTurn> {
+  const { systemMsg, chatMsgs } = params;
+
+  // Convert to Gemini's contents format (user/model roles)
+  const contents = chatMsgs.map((m) => ({
+    role: m.role === "assistant" ? "model" : "user",
+    parts: [{ text: m.content }],
+  }));
+
+  const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+
+  const res = await fetch(geminiUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...(systemMsg ? { systemInstruction: { parts: [{ text: systemMsg.content }] } } : {}),
+      contents,
+      generationConfig: { temperature: 0.2, maxOutputTokens: 8192 },
+      // Disable native function calling — we use our own TOOL_CALL text format
+      toolConfig: { functionCallingConfig: { mode: "NONE" } },
+    }),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(`Gemini returned ${res.status}: ${errText.slice(0, 200)}`);
+  }
+
+  const json = (await res.json()) as {
+    candidates?: Array<{
+      content?: {
+        parts?: Array<{
+          text?: string;
+          thought?: boolean;
+          functionCall?: { name?: string; args?: Record<string, unknown> };
+        }>;
+      };
+      finishReason?: string;
+    }>;
+    promptFeedback?: { blockReason?: string };
+    error?: { message?: string; code?: number };
+  };
+
+  const parts = json.candidates?.[0]?.content?.parts ?? [];
+  const finishReason = json.candidates?.[0]?.finishReason;
+
+  // Reject native function calls — mode=NONE is set, so any native function
+  // call is unexpected and could be a prompt-injection attempt bypassing
+  // the nonce-based tool-call guard. Drop the native call and respond with
+  // a safe fallback instead of synthesising a TOOL_CALL text line.
+  if (finishReason === "UNEXPECTED_TOOL_CALL") {
+    return {
+      text: "I'm sorry, I wasn't able to generate a response. Please try again.",
+    };
+  }
+
+  const fullContent = parts
+    .filter((p) => !p.thought && p.text)
+    .map((p) => p.text!)
+    .join("")
+    .trim();
+
+  const responseText =
+    fullContent ||
+    (finishReason === "MAX_TOKENS"
+      ? "I'm sorry, I ran out of space to form a reply. Please try asking a shorter or simpler question."
+      : "I'm sorry, I wasn't able to generate a response. Please try again.");
+
+  return { text: responseText };
+}
+
+// ── Ollama provider (local Gemma) ──────────────────────────────────────────────
+
+async function runOllama(params: {
+  systemMsg?: { role: string; content: string };
+  chatMsgs: { role: string; content: string }[];
+}): Promise<ProviderTurn> {
+  const { systemMsg, chatMsgs } = params;
+
+  // Ollama's /api/chat uses system/user/assistant roles directly.
+  const messages = [
+    ...(systemMsg ? [{ role: "system", content: systemMsg.content }] : []),
+    ...chatMsgs.map((m) => ({
+      role: m.role === "assistant" ? "assistant" : "user",
+      content: m.content,
+    })),
+  ];
+
+  const res = await fetch(`${OLLAMA_HOST}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: OLLAMA_MODEL,
+      messages,
+      stream: false,
+      options: { temperature: 0.2, num_predict: 8192 },
+    }),
+    signal: AbortSignal.timeout(180000),
+  }).catch((err) => {
+    // Connection refused / DNS / timeout → the local Ollama isn't up yet.
+    throw new NeedsSetupError(
+      "The local AI assistant (Ollama + Gemma) isn't running. Set it up in Settings → AI Assistant, then try again."
+    );
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    // A missing model (404/400 "model not found") or a stopped server both mean
+    // the user still has to finish setup.
+    if (res.status === 404 || /model|not found|unknown/i.test(errText)) {
+      throw new NeedsSetupError(
+        `The local model "${OLLAMA_MODEL}" isn't available yet. Finish the AI Assistant setup in Settings, then try again.`
+      );
+    }
+    throw new Error(`Ollama returned ${res.status}: ${errText.slice(0, 200)}`);
+  }
+
+  const json = (await res.json()) as {
+    message?: { content?: string };
+    done?: boolean;
+    error?: string;
+  };
+  if (json.error) {
+    if (/model|not found|unknown/i.test(json.error)) {
+      throw new NeedsSetupError(
+        `The local model "${OLLAMA_MODEL}" isn't available yet. Finish the AI Assistant setup in Settings, then try again.`
+      );
+    }
+    throw new Error(`Ollama: ${json.error}`);
+  }
+
+  const text = (json.message?.content ?? "").trim();
+  return { text: text || "I'm sorry, I wasn't able to generate a response. Please try again." };
+}
+
+// ── Shared post-processing ─────────────────────────────────────────────────────
+
+async function finishTurn(params: {
+  conversationId: string;
+  userOrgId: string;
+  userId: string;
+  responseText: string;
+  nonce: string;
+  sendEvent: (event: string, data: unknown) => void;
+  close: () => void;
+}): Promise<void> {
+  const { conversationId, userOrgId, userId, responseText, nonce, sendEvent, close } = params;
+
+  sendEvent("token", { content: responseText });
+
+  const { text, toolCalls } = parseToolCalls(responseText, nonce);
+  const toolResults: ToolResult[] = [];
+
+  if (toolCalls.length > 0) {
+    for (const call of toolCalls) {
+      const result = await executeToolCall(db, userOrgId, userId, call);
+      toolResults.push(result);
+    }
+  }
+
+  const summary = buildToolSummary(toolResults);
+  const finalContent = summary ? `${text}\n\n${summary}`.trim() : text;
+
+  await db.chatMessage.create({
+    data: {
+      conversationId,
+      role: "assistant",
+      content: finalContent,
+      toolCalls:
+        toolCalls.length > 0
+          ? (toolCalls as unknown as import("@prisma/client").Prisma.InputJsonValue)
+          : undefined,
+      toolResults:
+        toolResults.length > 0
+          ? (toolResults as unknown as import("@prisma/client").Prisma.InputJsonValue)
+          : undefined,
+    },
+  });
+
+  sendEvent("done", { conversationId, content: finalContent, toolCalls, toolResults });
+  close();
+}
+
+export const maxDuration = 120;
 
 export async function POST(req: NextRequest) {
   const session = await auth();
@@ -183,108 +420,54 @@ export async function POST(req: NextRequest) {
       sendEvent("start", { conversationId });
 
       try {
-        if (!GEMINI_API_KEY) {
-          sendEvent("error", { message: "AI chat is not configured. Please set GEMINI_API_KEY." });
-          controller.close();
-          return;
-        }
-
         // Separate system prompt from conversation history
         const systemMsg = messages.find((m) => m.role === "system");
-        const chatMsgs  = messages.filter((m) => m.role !== "system");
+        const chatMsgs = messages.filter((m) => m.role !== "system");
 
-        // Convert to Gemini's contents format (user/model roles)
-        const contents = chatMsgs.map((m) => ({
-          role: m.role === "assistant" ? "model" : "user",
-          parts: [{ text: m.content }],
-        }));
-
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
-
-        const res = await fetch(geminiUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ...(systemMsg ? { systemInstruction: { parts: [{ text: systemMsg.content }] } } : {}),
-            contents,
-            generationConfig: { temperature: 0.2, maxOutputTokens: 8192 },
-            // Disable native function calling — we use our own TOOL_CALL text format
-            toolConfig: { functionCallingConfig: { mode: "NONE" } },
-          }),
-        });
-
-        if (!res.ok) {
-          const errText = await res.text().catch(() => "");
-          sendEvent("error", { message: `Gemini returned ${res.status}: ${errText.slice(0, 200)}` });
-          controller.close();
+        // ── Provider selection ─────────────────────────────────────────────
+        if (AI_PROVIDER === "ollama") {
+          // Local Gemma via the desktop's Ollama. If it isn't reachable yet the
+          // provider throws NeedsSetupError, which we surface as a `needs_setup`
+          // error event so the UI can prompt the user to finish setup.
+          const turn = await runOllama({ systemMsg, chatMsgs });
+          await finishTurn({
+            conversationId,
+            userOrgId: user.organisationId!,
+            userId: user.id,
+            responseText: turn.text,
+            nonce,
+            sendEvent,
+            close: () => controller.close(),
+          });
           return;
         }
 
-        const json = await res.json() as {
-          candidates?: Array<{
-            content?: { parts?: Array<{ text?: string; thought?: boolean; functionCall?: { name?: string; args?: Record<string, unknown> } }> };
-            finishReason?: string;
-          }>;
-          promptFeedback?: { blockReason?: string };
-          error?: { message?: string; code?: number };
-        };
-
-        const parts = json.candidates?.[0]?.content?.parts ?? [];
-        const finishReason = json.candidates?.[0]?.finishReason;
-
-        // Reject native function calls — mode=NONE is set, so any native function
-        // call is unexpected and could be a prompt-injection attempt bypassing
-        // the nonce-based tool-call guard. Drop the native call and respond with
-        // a safe fallback instead of synthesising a TOOL_CALL text line.
-        if (finishReason === "UNEXPECTED_TOOL_CALL") {
-          sendEvent("token", { content: "I'm sorry, I wasn't able to generate a response. Please try again." });
-          sendEvent("done", { conversationId, content: "I'm sorry, I wasn't able to generate a response. Please try again.", toolCalls: [], toolResults: [] });
-          await db.chatMessage.create({
-            data: { conversationId, role: "assistant", content: "I'm sorry, I wasn't able to generate a response. Please try again." },
+        // ── Gemini (cloud — used when the provider is "gemini") ─────────────────────────────────────────
+        if (!GEMINI_API_KEY) {
+          sendEvent("error", {
+            code: "needs_setup",
+            message: "AI chat is not configured. Please set GEMINI_API_KEY.",
           });
           controller.close();
           return;
         }
 
-        const fullContent = parts
-          .filter((p) => !p.thought && p.text)
-          .map((p) => p.text!)
-          .join("")
-          .trim();
-
-        const responseText = fullContent ||
-          (finishReason === "MAX_TOKENS"
-            ? "I'm sorry, I ran out of space to form a reply. Please try asking a shorter or simpler question."
-            : "I'm sorry, I wasn't able to generate a response. Please try again.");
-
-        sendEvent("token", { content: responseText });
-
-        const { text, toolCalls } = parseToolCalls(responseText, nonce);
-        const toolResults: ToolResult[] = [];
-
-        if (toolCalls.length > 0) {
-          for (const call of toolCalls) {
-            const result = await executeToolCall(db, user.organisationId!, user.id, call);
-            toolResults.push(result);
-          }
-        }
-
-        const summary = buildToolSummary(toolResults);
-        const finalContent = summary ? `${text}\n\n${summary}`.trim() : text;
-
-        await db.chatMessage.create({
-          data: {
-            conversationId,
-            role: "assistant",
-            content: finalContent,
-            toolCalls: toolCalls.length > 0 ? (toolCalls as unknown as import("@prisma/client").Prisma.InputJsonValue) : undefined,
-            toolResults: toolResults.length > 0 ? (toolResults as unknown as import("@prisma/client").Prisma.InputJsonValue) : undefined,
-          },
+        const turn = await runGemini({ systemMsg, chatMsgs });
+        await finishTurn({
+          conversationId,
+          userOrgId: user.organisationId!,
+          userId: user.id,
+          responseText: turn.text,
+          nonce,
+          sendEvent,
+          close: () => controller.close(),
         });
-
-        sendEvent("done", { conversationId, content: finalContent, toolCalls, toolResults });
       } catch (err) {
-        sendEvent("error", { message: err instanceof Error ? err.message : "Unknown error" });
+        if (err instanceof NeedsSetupError) {
+          sendEvent("error", { code: "needs_setup", message: err.message });
+        } else {
+          sendEvent("error", { message: err instanceof Error ? err.message : "Unknown error" });
+        }
       }
 
       controller.close();

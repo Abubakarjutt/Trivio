@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { createTRPCRouter, orgProcedure } from "../trpc";
+import { getAiStatus, type AiStatus } from "../services/ai-status";
 
 export const chatRouter = createTRPCRouter({
   getConversation: orgProcedure
@@ -38,4 +39,9 @@ export const chatRouter = createTRPCRouter({
       });
       return { success: true };
     }),
+
+  // AI-assistant availability probe — reports whether a chat turn can be served
+  // right now. Desktop mode selects a LOCAL Ollama+Gemma model; the web default is
+  // Gemini. `ready=false` tells the UI to offer the Ollama setup flow.
+  getAiStatus: orgProcedure.query(async (): Promise<AiStatus> => getAiStatus()),
 });

@@ -41,3 +41,27 @@ prisma/*.db
 prisma/*.db-journal
 storage/
 .gstack/
+
+# desktop (Electron) build artifacts — large & reproducible
+/desktop/dist/
+/desktop/dist-server/
+/release/
+/desktop/build/icon-1024.png
+/desktop/build/*.log
+
+# graphify skill output (generated, not source)
+/graphify-out/
+
+# embedded PostgreSQL engine — fetched, platform-specific binary (large).
+# Produced by `npm run fetch:pg` (see desktop/embedded/fetch-postgres.mjs);
+# the source tooling stays tracked, only the binary is ignored.
+/desktop/embedded/bin/
+/desktop/embedded/lib/
+/desktop/embedded/VERSION
+/desktop/embedded/MANIFEST.json
+/desktop/embedded/.dl/
+
+# agent/dev scratch (machine-local, not for public repo)
+.superpowers/
+.serena/
+.claude/settings.local.json

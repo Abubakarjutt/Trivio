@@ -22,10 +22,9 @@ export default async function SettingsPage() {
 
   const emailImportToken = user.organisation?.emailImportToken ?? "";
 
-  const tierLabel = user.organisation?.subscriptionTier === "PRO" ? "Pro" : "Free";
-  const tierColor = user.organisation?.subscriptionTier === "PRO"
-    ? "bg-primary/10 text-primary"
-    : "bg-muted text-muted-foreground";
+  // Trivio is open-source — every account is on the free, fully-featured plan.
+  const tierLabel = "Free";
+  const tierColor = "bg-muted text-muted-foreground";
 
   return (
     <div className="flex flex-col min-h-full">

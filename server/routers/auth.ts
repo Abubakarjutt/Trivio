@@ -34,20 +34,34 @@ export const authRouter = createTRPCRouter({
       }
 
       const hashedPassword = await bcrypt.hash(input.password, 12);
+
+      // Local/dev convenience: skip the email round-trip and activate the
+      // account immediately. Opt-in only (default off) — the desktop app's
+      // embedded server always runs as a production Next.js build, so this
+      // can't be gated on NODE_ENV. The hosted SaaS must never set this.
+      const skipVerification = process.env.SKIP_EMAIL_VERIFICATION === "true";
+
       await ctx.db.user.create({
-        data: { name: input.name, email: normalised, hashedPassword },
+        data: {
+          name: input.name,
+          email: normalised,
+          hashedPassword,
+          emailVerified: skipVerification ? new Date() : null,
+        },
       });
 
-      // Create and send email verification token
-      await ctx.db.emailVerificationToken.deleteMany({ where: { email: normalised } });
-      const token = await ctx.db.emailVerificationToken.create({
-        data: { email: normalised, expires: new Date(Date.now() + 24 * 60 * 60 * 1000) },
-      });
-      await sendVerificationEmail(normalised, `${appUrl}/verify-email?token=${token.token}`).catch(
-        () => {},
-      );
+      if (!skipVerification) {
+        await ctx.db.emailVerificationToken.deleteMany({ where: { email: normalised } });
+        const token = await ctx.db.emailVerificationToken.create({
+          data: { email: normalised, expires: new Date(Date.now() + 24 * 60 * 60 * 1000) },
+        });
+        await sendVerificationEmail(
+          normalised,
+          `${appUrl}/verify-email?token=${token.token}`,
+        ).catch(() => {});
+      }
 
-      return { success: true };
+      return { success: true, skipVerification };
     }),
 
   me: protectedProcedure.query(async ({ ctx }) => {

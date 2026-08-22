@@ -12,9 +12,9 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3001/register)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3001/dashboard)",
       "Bash(echo \"PID: $!\")",
-      "Bash(sed -i '' 's/## Phase 3 — Accounts Payable \\(Sprint 3\\)/## Phase 3 — Accounts Payable \\(Sprint 3\\) ✅ Complete/' /Users/Apple/projects/AutoAccounts/docs/IMPLEMENTATION_PLAN.md)",
+      "Bash(sed -i '' 's/## Phase 3 \u2014 Accounts Payable \\(Sprint 3\\)/## Phase 3 \u2014 Accounts Payable \\(Sprint 3\\) \u2705 Complete/' /Users/Apple/projects/AutoAccounts/docs/IMPLEMENTATION_PLAN.md)",
       "Bash(sed -i '' 's/- \\\\[ \\\\] \\\\*\\\\*P3-0/- [x] **P3-0/g' /Users/Apple/projects/AutoAccounts/docs/IMPLEMENTATION_PLAN.md)",
-      "Bash(sed -i '' 's/| Sprint 3 | AP | P3-01 to P3-09 | Not started |/| Sprint 3 | AP | P3-01 to P3-09 | ✅ Complete |/' /Users/Apple/projects/AutoAccounts/docs/IMPLEMENTATION_PLAN.md)",
+      "Bash(sed -i '' 's/| Sprint 3 | AP | P3-01 to P3-09 | Not started |/| Sprint 3 | AP | P3-01 to P3-09 | \u2705 Complete |/' /Users/Apple/projects/AutoAccounts/docs/IMPLEMENTATION_PLAN.md)",
       "Bash(pkill -f \"next dev\")",
       "Bash(npm run dev > /tmp/autoaccounts-dev.log 2>&1 & *)",
       "Bash(npx tsc *)",
@@ -150,7 +150,7 @@
       "Bash(curl -sf http://localhost:11434/api/tags)",
       "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('Ollama running, models:', [m['name'] for m in d.get\\('models',[]\\)]\\)\")",
       "Bash(docker run *)",
-      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('✅ Container→Ollama: reachable, models:', [m['name'] for m in d.get\\('models',[]\\)]\\)\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('\u2705 Container\u2192Ollama: reachable, models:', [m['name'] for m in d.get\\('models',[]\\)]\\)\")",
       "Bash(curl -s http://localhost:11434/api/show -d '{\"name\":\"gemma4:e4b\"}')",
       "Bash(curl -s http://localhost:11434/api/show -d '{\"name\":\"gemma4:e4b\", \"verbose\": true}')",
       "Bash(nc -z localhost 5433)",
@@ -200,6 +200,20 @@
       "Bash(/Users/Apple/.claude/plugins/cache/claude-plugins-official/superpowers/5.1.0/skills/brainstorming/scripts/start-server.sh --project-dir /Users/Apple/projects/EasyFinance)",
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); deps={**d.get\\('dependencies',{}\\), **d.get\\('devDependencies',{}\\)}; [print\\(k,v\\) for k,v in deps.items\\(\\)]\")",
       "Bash(mkdir -p /Users/Apple/projects/EasyFinance/docs/superpowers/specs)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/Apple/.local/bin/headroom wrap selfheal --marker headroom-wrap-selfheal",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }

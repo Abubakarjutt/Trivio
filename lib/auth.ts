@@ -42,7 +42,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           where: { email: parsed.data.email },
         });
         if (!user?.hashedPassword) return null;
-        if (!user.emailVerified) return null;
+        const skipVerification = process.env.SKIP_EMAIL_VERIFICATION === "true";
+        if (!skipVerification && !user.emailVerified) return null;
 
         const valid = await bcrypt.compare(parsed.data.password, user.hashedPassword);
         if (!valid) return null;

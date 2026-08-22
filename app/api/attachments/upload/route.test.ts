@@ -10,9 +10,6 @@ vi.mock("@/lib/db", () => ({
 }));
 vi.mock("@/lib/storage", () => ({ saveFile: vi.fn().mockResolvedValue("org-1/att-1.jpg") }));
 vi.mock("@/lib/queue", () => ({ extractionQueue: { add: vi.fn().mockResolvedValue({}) } }));
-vi.mock("@/server/middleware/usageGate", () => ({
-  assertCanExtract: vi.fn().mockResolvedValue(undefined),
-}));
 vi.mock("crypto", async () => {
   const actual = await vi.importActual<typeof import("crypto")>("crypto");
   return { ...actual, randomUUID: vi.fn().mockReturnValue("test-uuid") };
@@ -23,14 +20,12 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { saveFile } from "@/lib/storage";
 import { extractionQueue } from "@/lib/queue";
-import { assertCanExtract } from "@/server/middleware/usageGate";
 
 const mockAuth = vi.mocked(auth);
 const mockFindUnique = vi.mocked(db.user.findUnique);
 const mockAttachmentCreate = vi.mocked(db.attachment.create);
 const mockSaveFile = vi.mocked(saveFile);
 const mockQueueAdd = vi.mocked(extractionQueue.add);
-const mockAssertCanExtract = vi.mocked(assertCanExtract);
 
 function makeFileReq(file: File) {
   const formData = new FormData();
@@ -51,7 +46,6 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockSaveFile.mockResolvedValue("org-1/test-uuid.jpg");
   mockQueueAdd.mockResolvedValue({} as any);
-  mockAssertCanExtract.mockResolvedValue(undefined);
   mockAttachmentCreate.mockResolvedValue({} as any);
 });
 
@@ -120,17 +114,6 @@ describe("POST /api/attachments/upload", () => {
     expect(res.status).toBe(422);
     const body = await res.json();
     expect(body.error).toMatch(/too large/i);
-  });
-
-  it("returns 403 if assertCanExtract throws", async () => {
-    mockAuth.mockResolvedValue(VALID_SESSION as any);
-    mockFindUnique.mockResolvedValue(VALID_USER as any);
-    mockAssertCanExtract.mockRejectedValue(new Error("Limit reached"));
-    const req = makeFileReq(VALID_FILE);
-    const res = await POST(req);
-    expect(res.status).toBe(403);
-    const body = await res.json();
-    expect(body.error).toMatch(/free plan limit/i);
   });
 
   it("returns 201 with attachmentId and status PENDING on success", async () => {

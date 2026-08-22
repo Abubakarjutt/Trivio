@@ -234,29 +234,15 @@ describe("POST /api/chat", () => {
     expect((events[0].data as { conversationId: string }).conversationId).toBeTruthy();
   });
 
-  // ── Missing API key ───────────────────────────────────────────────────────
-  // GEMINI_API_KEY is captured as a module-level constant at import time.
-  // In the test environment the env var is not set, so the constant is "".
-  // This means the route always takes the "no API key" branch during tests.
-  // We validate the observable SSE behaviour of that branch here.
+  // ── Smart default: no AI_PROVIDER, no GEMINI_API_KEY ───────────────────────
+  // With neither an explicit provider nor a Gemini key, the route falls back to
+  // the local Ollama engine (see ai-status.resolveProvider). The gemini no-key
+  // branch is covered in its own describe below, where AI_PROVIDER=gemini is
+  // forced via a fresh module import.
 
-  it("emits 'start' then 'error' when GEMINI_API_KEY is not configured", async () => {
-    const res = await POST(makeReq({ message: "hello" }));
-    const events = await readSSE(res);
-    expect(events[0].event).toBe("start");
-    const errorEvent = events.find((e) => e.event === "error");
-    expect(errorEvent).toBeDefined();
-    expect((errorEvent!.data as { message: string }).message).toContain("GEMINI_API_KEY");
-  });
-
-  it("returns 200 status even when AI key is not configured", async () => {
+  it("returns 200 status even when no provider is configured", async () => {
     const res = await POST(makeReq({ message: "hello" }));
     expect(res.status).toBe(200);
-  });
-
-  it("does not call fetch when GEMINI_API_KEY is not configured", async () => {
-    await POST(makeReq({ message: "hello" }));
-    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   // ── Existing conversation ─────────────────────────────────────────────────
@@ -286,7 +272,9 @@ describe("POST /api/chat", () => {
     await POST(makeReq({ message: "check attachment", attachmentId }));
     const calls = vi.mocked(db.chatMessage.create).mock.calls;
     const userMsg = calls.find((c) => (c[0] as { data: { role: string } }).data.role === "user");
-    expect((userMsg![0] as { data: { attachmentId: string } }).data.attachmentId).toBe(attachmentId);
+    expect((userMsg![0] as { data: { attachmentId: string } }).data.attachmentId).toBe(
+      attachmentId
+    );
   });
 
   it("saves null attachmentId when not provided", async () => {
@@ -315,15 +303,6 @@ describe("POST /api/chat", () => {
         userMessage: "test",
       })
     );
-  });
-
-  // ── SSE stream only emits 'start' + 'error' when key is missing ──────────
-
-  it("SSE stream has exactly two events (start + error) when API key missing", async () => {
-    const res = await POST(makeReq({ message: "hello" }));
-    const events = await readSSE(res);
-    expect(events).toHaveLength(2);
-    expect(events.map((e) => e.event)).toEqual(["start", "error"]);
   });
 });
 
@@ -380,7 +359,9 @@ describe("POST /api/chat (with GEMINI_API_KEY configured)", () => {
     mockFetch.mockResolvedValue({
       ok: true,
       json: async () => ({
-        candidates: [{ content: { parts: [{ text: "Hello! How can I help?" }] }, finishReason: "STOP" }],
+        candidates: [
+          { content: { parts: [{ text: "Hello! How can I help?" }] }, finishReason: "STOP" },
+        ],
       }),
     });
   });
@@ -408,7 +389,9 @@ describe("POST /api/chat (with GEMINI_API_KEY configured)", () => {
     mockFetch.mockResolvedValue({
       ok: true,
       json: async () => ({
-        candidates: [{ content: { parts: [{ text: "Hello! How can I help you?" }] }, finishReason: "STOP" }],
+        candidates: [
+          { content: { parts: [{ text: "Hello! How can I help you?" }] }, finishReason: "STOP" },
+        ],
       }),
     });
     const { parseToolCalls: ptc } = await import("@/server/services/chat.service");
@@ -443,7 +426,11 @@ describe("POST /api/chat (with GEMINI_API_KEY configured)", () => {
   });
 
   it("executes tool calls when parseToolCalls returns them", async () => {
-    const { parseToolCalls: ptc, executeToolCall: etc, buildChatMessages: bcm } = await import("@/server/services/chat.service");
+    const {
+      parseToolCalls: ptc,
+      executeToolCall: etc,
+      buildChatMessages: bcm,
+    } = await import("@/server/services/chat.service");
     const { db: dbMod } = await import("@/lib/db");
     const toolCall = { tool: "list_invoices", args: {} };
     vi.mocked(ptc).mockReturnValue({ text: "Here are the invoices:", toolCalls: [toolCall] });
@@ -453,12 +440,7 @@ describe("POST /api/chat (with GEMINI_API_KEY configured)", () => {
     const res = await POST_WITH_KEY(makeReq({ message: "show my invoices" }));
     const events = await readSSE(res);
 
-    expect(vi.mocked(etc)).toHaveBeenCalledWith(
-      dbMod,
-      ORG_ID,
-      USER_ID,
-      toolCall
-    );
+    expect(vi.mocked(etc)).toHaveBeenCalledWith(dbMod, ORG_ID, USER_ID, toolCall);
     const doneEvent = events.find((e) => e.event === "done");
     expect(doneEvent).toBeDefined();
     const data = doneEvent!.data as { toolCalls: unknown[] };
@@ -483,9 +465,14 @@ describe("POST /api/chat (with GEMINI_API_KEY configured)", () => {
   });
 
   it("includes toolCalls and toolResults in the done event when tools are used", async () => {
-    const { parseToolCalls: ptc, executeToolCall: etc } = await import("@/server/services/chat.service");
+    const { parseToolCalls: ptc, executeToolCall: etc } =
+      await import("@/server/services/chat.service");
     const toolCall = { tool: "create_contact", args: { name: "Alice" } };
-    const toolResult = { tool: "create_contact", success: true, data: { name: "Alice", type: "CUSTOMER" } };
+    const toolResult = {
+      tool: "create_contact",
+      success: true,
+      data: { name: "Alice", type: "CUSTOMER" },
+    };
     vi.mocked(ptc).mockReturnValue({ text: "Contact created.", toolCalls: [toolCall] });
     vi.mocked(etc).mockResolvedValue(toolResult as never);
 
@@ -496,5 +483,111 @@ describe("POST /api/chat (with GEMINI_API_KEY configured)", () => {
     const data = doneEvent!.data as { toolCalls: unknown[]; toolResults: unknown[] };
     expect(data.toolCalls).toHaveLength(1);
     expect(data.toolResults).toHaveLength(1);
+  });
+});
+
+// ── Provider-selection helper ──────────────────────────────────────────────────
+// Re-imports the route in a fresh module registry with a specific env so the
+// provider is decided deterministically (resolveProvider reads env at import time).
+async function loadPost(env: { AI_PROVIDER?: string; GEMINI_API_KEY?: string }) {
+  vi.clearAllMocks();
+  vi.resetModules();
+  if (env.AI_PROVIDER === undefined) delete process.env.AI_PROVIDER;
+  else process.env.AI_PROVIDER = env.AI_PROVIDER;
+  if (env.GEMINI_API_KEY === undefined) delete process.env.GEMINI_API_KEY;
+  else process.env.GEMINI_API_KEY = env.GEMINI_API_KEY;
+
+  vi.mock("@/lib/auth", () => ({ auth: vi.fn() }));
+  vi.mock("@/lib/db", () => ({
+    db: {
+      user: { findUnique: vi.fn() },
+      chatConversation: { create: vi.fn(), findFirst: vi.fn() },
+      chatMessage: { create: vi.fn() },
+    },
+  }));
+  vi.mock("@/server/services/chat.service", () => ({
+    buildChatMessages: vi.fn().mockResolvedValue({ messages: [], nonce: "abc" }),
+    parseToolCalls: vi.fn().mockReturnValue({ text: "AI response", toolCalls: [] }),
+    executeToolCall: vi.fn(),
+  }));
+  vi.mock("@/server/middleware/rateLimit", () => ({
+    chatRateLimiter: vi.fn().mockResolvedValue(undefined),
+  }));
+
+  const mod = await import("@/app/api/chat/route");
+  const authMod = await import("@/lib/auth");
+  const dbMod = await import("@/lib/db");
+  vi.mocked(authMod.auth).mockResolvedValue({ user: { id: USER_ID } } as never);
+  vi.mocked(dbMod.db.user.findUnique).mockResolvedValue({
+    id: USER_ID,
+    organisationId: ORG_ID,
+    organisation: { id: ORG_ID, name: "Test Org" },
+  } as never);
+  vi.mocked(dbMod.db.chatConversation.create).mockResolvedValue({ id: CONV_ID } as never);
+  vi.mocked(dbMod.db.chatConversation.findFirst).mockResolvedValue({ id: CONV_ID } as never);
+  vi.mocked(dbMod.db.chatMessage.create).mockResolvedValue({} as never);
+  return mod.POST;
+}
+
+// ── Gemini provider forced, no API key ───────────────────────────────────────────
+// Forces AI_PROVIDER=gemini so the "no key -> needs_setup" behaviour is exercised
+// deterministically, independent of the smart default.
+describe("POST /api/chat (Gemini provider, no API key)", () => {
+  let POST_NOKEY: typeof POST;
+
+  beforeEach(async () => {
+    POST_NOKEY = await loadPost({ AI_PROVIDER: "gemini" });
+  });
+
+  it("emits 'start' then 'error' with a GEMINI_API_KEY message", async () => {
+    const res = await POST_NOKEY(makeReq({ message: "hello" }));
+    const events = await readSSE(res);
+    expect(events[0].event).toBe("start");
+    const errorEvent = events.find((e) => e.event === "error");
+    expect(errorEvent).toBeDefined();
+    expect((errorEvent!.data as { message: string }).message).toContain("GEMINI_API_KEY");
+  });
+
+  it("does not call fetch when the key is missing", async () => {
+    await POST_NOKEY(makeReq({ message: "hello" }));
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("emits exactly two events (start + error)", async () => {
+    const res = await POST_NOKEY(makeReq({ message: "hello" }));
+    const events = await readSSE(res);
+    expect(events).toHaveLength(2);
+    expect(events.map((e) => e.event)).toEqual(["start", "error"]);
+  });
+});
+
+// ── Smart default: no explicit AI_PROVIDER ────────────────────────────────────────
+// With no provider set, the route prefers Gemini when a key is present and falls
+// back to the local Ollama engine otherwise.
+describe("POST /api/chat (smart default — no explicit AI_PROVIDER)", () => {
+  it("routes to the local Ollama engine when neither a key nor a provider is set", async () => {
+    const POST_DEFAULT = await loadPost({});
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ message: { content: "hi from ollama" }, done: true }),
+    });
+    const res = await POST_DEFAULT(makeReq({ message: "hello" }));
+    await readSSE(res);
+    const url = mockFetch.mock.calls[0]?.[0] as string;
+    expect(url).toContain("/api/chat");
+    expect(url).not.toContain("generativelanguage.googleapis.com");
+  });
+
+  it("honours an explicit AI_PROVIDER=ollama even when a Gemini key is present", async () => {
+    const POST_OLLAMA = await loadPost({ AI_PROVIDER: "ollama", GEMINI_API_KEY: "fake-key-123" });
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ message: { content: "hi" }, done: true }),
+    });
+    const res = await POST_OLLAMA(makeReq({ message: "hello" }));
+    await readSSE(res);
+    const url = mockFetch.mock.calls[0]?.[0] as string;
+    expect(url).toContain("/api/chat");
+    expect(url).not.toContain("generativelanguage.googleapis.com");
   });
 });

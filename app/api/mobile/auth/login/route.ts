@@ -37,8 +37,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid email or password." }, { status: 401 });
     }
 
-    // Mirror the web CredentialsProvider: reject unverified accounts
-    if (!user.emailVerified) {
+    // Reject unverified accounts unless this deployment has disabled email
+    // verification (single-tenant desktop install — see ~/.trivio/.env).
+    const skipVerification = process.env.SKIP_EMAIL_VERIFICATION === "true";
+    if (!skipVerification && !user.emailVerified) {
       return NextResponse.json({ error: "Please verify your email before logging in." }, { status: 401 });
     }
 

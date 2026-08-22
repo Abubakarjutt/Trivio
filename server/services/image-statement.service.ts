@@ -6,7 +6,7 @@
 import type { RawTransaction } from "./statement-parser.service";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? "";
-const GEMINI_MODEL   = process.env.GEMINI_MODEL   ?? "gemma-4-26b-a4b-it";
+const GEMINI_MODEL   = process.env.GEMINI_MODEL   ?? "gemini-2.5-flash";
 const GEMINI_URL     = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 const IMAGE_PARSE_PROMPT = `You are a bank statement parser. Extract all financial transactions visible in this bank or credit card statement image.

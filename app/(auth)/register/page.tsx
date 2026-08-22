@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { signIn } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -47,12 +49,30 @@ function PasswordStrength({ password }: { password: string }) {
 
 export default function RegisterPage() {
   const { toast } = useToast();
+  const router = useRouter();
   const [form, setForm] = useState({ name: "", email: "", password: "", confirmPassword: "" });
   const [gdprConsent, setGdprConsent] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
   const register = trpc.auth.register.useMutation({
-    onSuccess: () => setSubmitted(true),
+    onSuccess: async () => {
+       // Desktop/standalone builds have no email provider, so a "check your
+       // inbox" prompt can never resolve — and an already-existing account
+       // returns success WITHOUT skipVerification. Always attempt the sign-in
+       // straight in; fall back to the verification screen only when sign-in
+       // genuinely fails (hosted SaaS, where verification is still required).
+      const signInResult = await signIn("credentials", {
+        email: form.email,
+        password: form.password,
+        redirect: false,
+       });
+      if (signInResult?.error) {
+        setSubmitted(true);
+       } else {
+        router.push("/dashboard");
+        router.refresh();
+       }
+    },
     onError: (err) => toast({ variant: "destructive", title: err.message }),
   });
 

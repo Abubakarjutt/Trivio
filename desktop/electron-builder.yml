@@ -1,0 +1,89 @@
+# Trivio — electron-builder packaging config
+#
+# Produces a native macOS .app + .dmg + .zip. The .app bundles:
+#   - the compiled Electron main/preload (desktop/dist/*.cjs)
+#   - the self-contained Next.js server tree (desktop/dist-server -> Resources/app-server)
+#   - hardened-runtime + notarization support when credentials are present
+#
+# Build order (run `npm run build:desktop`), which invokes this file:
+#   next build -> desktop/assemble-server.mjs -> desktop/build-electron.mjs -> electron-builder
+#
+# Sign & notarize (optional, only when shipping): set env vars at build time.
+#   CSC_NAME / CSC_LINK / CSC_KEY_PASSWORD          developer identity (or .p12)
+#   APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID   notarytool
+# electron-builder consumes these automatically; without them the app is
+# ad-hoc signed and will show a Gatekeeper "unidentified developer" warning.
+
+appId: com.trivio.desk
+productName: Trivio
+copyright: Copyright © 2025 Trivio
+
+# Register the trivio:// deep-link scheme in the macOS app so the OS routes
+# trivio://... URLs (e.g. trivio://settings, trivio://update) to Trivio. main.ts
+# registers it as privileged and handles open-url / second-instance at runtime.
+protocols:
+  - name: Trivio
+    schemes:
+      - trivio
+
+directories:
+  output: release
+  buildResources: desktop/build
+  app: desktop
+
+# Ship only the compiled shell + its manifest; the server is pulled in via
+# extraResources (the assembled app-server tree) instead of the huge Next.js
+# node_modules, keeping the .app small and fast.
+files:
+  - dist/main.cjs
+  - dist/preload.cjs
+
+# The runnable Next.js server, laid down next to the app resources. main.cjs
+# boots it from Contents/Resources/app-server via the ELECTRON_RUN_AS_NODE trick.
+extraResources:
+  - from: desktop/dist-server
+    to: app-server
+    filter:
+      - "**/*"
+      - "!.env"
+      - "!**/.env"
+      # The embedded PostgreSQL engine (fetched by `npm run fetch:pg`).
+      # resolvePostgresBinaries looks for <resourcesPath>/postgres/bin at runtime,
+      # so this must mirror the on-disk engine layout (bin/ + lib/ siblings).
+  - from: desktop/embedded
+    to: postgres
+    filter:
+      - "bin/**/*"
+      - "lib/**/*"
+      - "VERSION"
+      - "MANIFEST.json"
+      - "!**/.DS_Store"
+
+dmg:
+  artifactName: "${productName}-${version}-${arch}.${ext}"
+  title: "${productName}"
+  contents:
+    - x: 140
+      y: 160
+    - x: 420
+      y: 160
+      type: link
+      path: /Applications
+
+mac:
+  category: public.app-category.finance
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: desktop/entitlements.mac.plist
+  entitlementsInherit: desktop/entitlements.mac.inherit.plist
+  icon: desktop/build/icon.icns
+  # Apple Silicon first (build host is arm64). To add an x64 target, run
+  # `prisma generate` with the x64 query engine, then add `- x64` below or use
+  # target universal (requires both engine archs).
+  target:
+    - target: dmg
+      arch:
+        - arm64
+    - target: zip
+      arch:
+        - arm64

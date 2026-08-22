@@ -23,6 +23,21 @@ AutoAccounts is a SaaS accounting web app for non-accountants (freelancers, solo
 - **Email**: Resend
 - **Payments**: Stripe
 - **Local dev**: Docker Compose
+- **Desktop**: Electron + electron-builder (macOS); wraps the Next.js app — see `desktop/`
+
+## Desktop (macOS)
+
+The web app is also shipped as a native macOS app (`desktop/`): an Electron
+shell that boots the app's own server inside a native window — UI and backend
+are unchanged. Run modes via `DESKTOP_MODE`: **dev** (loads `next dev`),
+**local** (boots the Next.js `standale` server from `desktop/dist-server`),
+**remote** (loads an already-hosted URL — thin client).
+
+The embedded server runs on a private loopback port via `ELECTRON_RUN_AS_NODE`
+(no separate `node` binary shipped) and loads credentials from
+`~/.trivio/.env` (copy `.env.example` there). Sign & notarize with `CSC_NAME`
++ `APPLE_*` (entitlements are already wired for hardened runtime).
+Full details: [`desktop/README.md`](desktop/README.md).
 
 ## Critical Invariants
 
@@ -49,6 +64,26 @@ npm run test          # Vitest unit/integration
 npm run test:e2e      # Playwright E2E
 ```
 
+```bash
+# macOS desktop (Electron) — full details in desktop/README.md
+npm run dev:desktop           # native window + `next dev` (fast loop)
+npm run build:desktop         # next build + assemble + electron-builder -> release/*.dmg
+```
+
 ## Current Sprint
 
 See [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) — Sprint 0 (scaffold) is next.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub issues in `Abubakarjutt/Trivio` via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical roles, one label string each (defaults). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at the repo root (created lazily by /domain-modeling). See `docs/agents/domain.md`.
