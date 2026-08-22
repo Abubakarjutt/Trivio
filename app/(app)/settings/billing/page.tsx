@@ -1,10 +1,6 @@
 "use client";
 
 import { trpc } from "@/lib/trpc/client";
-import { buildCheckoutUrl } from "@/lib/lemonsqueezy";
-import { useSession } from "next-auth/react";
-
-const FREE_AI_LIMIT = 3;
 
 const FEATURES = [
   "Unlimited AI statement extractions",
@@ -14,7 +10,6 @@ const FEATURES = [
 ];
 
 export default function BillingPage() {
-  const { data: session } = useSession();
   const { data: org } = trpc.org.get.useQuery();
 
   if (!org) {
@@ -33,14 +28,6 @@ export default function BillingPage() {
     );
   }
 
-  const isPro = org.plan === "PRO";
-  const checkoutUrl =
-    session?.user?.email && org.id
-      ? buildCheckoutUrl(session.user.email, org.id)
-      : "#";
-
-  const aiUsed = org.aiExtractionsUsed ?? 0;
-
   return (
     <div className="flex flex-col min-h-full">
       <header className="sticky top-0 z-10 flex items-center gap-4 border-b border-border/40 bg-background/95 backdrop-blur px-8 py-4">
@@ -58,78 +45,31 @@ export default function BillingPage() {
             <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1">
               Current plan
             </p>
-            <p className="text-lg font-semibold">{isPro ? "Pro" : "Free"}</p>
-            {isPro && org.lsSubscriptionStatus === "cancelled" && (
-              <p className="text-xs text-amber-600 mt-1">
-                Cancelled — access until end of billing period
-              </p>
-            )}
+            <p className="text-lg font-semibold">Free — Open Source</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Trivio is open source. Every feature below is free, no account limits.
+            </p>
           </div>
           <span
             className="px-3 py-1 rounded-full text-xs font-bold"
-            style={{
-              background: isPro ? "#EBF5F0" : "hsl(var(--muted))",
-              color: isPro ? "#1A6644" : "hsl(var(--muted-foreground))",
-            }}
+            style={{ background: "#EBF5F0", color: "#1A6644" }}
           >
-            {isPro ? "PRO" : "FREE"}
+            FREE
           </span>
         </div>
 
-        {/* Usage stats — Free only */}
-        {!isPro && (
-          <div className="rounded-xl border border-border/40 bg-card p-4 space-y-4">
-            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-              This month&apos;s usage
-            </p>
-
-            <div>
-              <div className="flex justify-between text-sm mb-1.5">
-                <span className="text-muted-foreground">AI statement extractions</span>
-                <span className="font-semibold">{aiUsed} / {FREE_AI_LIMIT}</span>
-              </div>
-              <div className="h-2 rounded-full bg-muted overflow-hidden">
-                <div
-                  className="h-full rounded-full transition-all"
-                  style={{
-                    width: `${Math.min((aiUsed / FREE_AI_LIMIT) * 100, 100)}%`,
-                    background: aiUsed >= FREE_AI_LIMIT ? "#EF4444" : "#1A6644",
-                  }}
-                />
-              </div>
-            </div>
-
-          </div>
-        )}
-
-        {/* CTA */}
-        {isPro ? (
-          <a
-            href="https://app.lemonsqueezy.com/my-orders"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center justify-center w-full h-11 rounded-xl text-sm font-semibold border border-border/40 text-foreground hover:border-border transition-colors"
-          >
-            Manage subscription →
-          </a>
-        ) : (
-          <div className="space-y-3">
-            <a
-              href={checkoutUrl}
-              className="inline-flex items-center justify-center w-full h-11 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
-              style={{ background: "#1A6644" }}
-            >
-              Upgrade to Pro — $15/month
-            </a>
-            <ul className="space-y-1.5">
-              {FEATURES.map((f) => (
-                <li key={f} className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span className="text-green-600">✓</span> {f}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+        <div className="rounded-xl border border-border/40 bg-card p-4 space-y-1.5">
+          <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2">
+            Included, unlimited
+          </p>
+          <ul className="space-y-1.5">
+            {FEATURES.map((f) => (
+              <li key={f} className="flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="text-green-600">✓</span> {f}
+              </li>
+            ))}
+          </ul>
+        </div>
       </main>
     </div>
   );
