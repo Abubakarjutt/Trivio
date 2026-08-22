@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Fraunces, DM_Sans, DM_Mono } from "next/font/google";
 import "./globals.css";
 import { TRPCReactProvider } from "@/lib/trpc/provider";
-import { ToastProvider, ToastViewport } from "@/components/ui/toast";
+import { Toaster } from "@/components/ui/toaster";
 
 const fraunces = Fraunces({
   subsets: ["latin"],
@@ -37,10 +37,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <a href="#main-content" className="skip-link">Skip to main content</a>
         <TRPCReactProvider>
-          <ToastProvider>
-            {children}
-            <ToastViewport />
-          </ToastProvider>
+          {children}
+          <Toaster />
         </TRPCReactProvider>
       </body>
     </html>

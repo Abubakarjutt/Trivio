@@ -41,6 +41,109 @@ import {
   type DatabaseHandle,
 } from "./embedded/embedded-db";
 
+
+// ── Ollama (local AI) engine lifecycle ─────────────────────────────────────────
+// The desktop shell owns a local Ollama server + Gemma model so the AI chat can
+// run fully offline. We keep the engine's running handle and the env the server
+// was started with; the server-env integration (buildServerEnv) points the
+// embedded Next.js app at this loopback Ollama.
+import {
+  buildLayout,
+  runSetup,
+  getStatus,
+  startServer,
+  stopOllama,
+  ollamaPort,
+  ollamaModelName,
+  ollamaServerUrl,
+  type OllamaHandle,
+  type OllamaStatus,
+  type OllamaProgress,
+} from "./embedded/ollama";
+
+// Module-level engine state.
+let ollamaHandleRef: { handle: OllamaHandle | null } = { handle: null };
+let ollamaLayout = null as ReturnType<typeof buildLayout> | null;
+let ollamaEnv: NodeJS.ProcessEnv = { ...process.env };
+let ollamaSetupInProgress = false;
+
+function getOllamaLayout() {
+  if (!ollamaLayout) ollamaLayout = buildLayout(process.env, app.getPath("userData"));
+  return ollamaLayout;
+}
+
+// Broadcast a progress/status snapshot to every open window so the onboarding,
+// settings, and chat UIs can reflect the engine's state in real time.
+function broadcastOllamaProgress(p: OllamaProgress): void {
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed()) w.webContents.send("ollama:progress", p);
+   }
+}
+
+function broadcastOllamaStatus(s: OllamaStatus): void {
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed()) w.webContents.send("ollama:status", s);
+   }
+}
+
+// Point the embedded Next.js server at the local Ollama engine. The chat route
+// (app/api/chat/route.ts) reads AI_PROVIDER / OLLAMA_HOST / OLLAMA_PORT /
+// OLLAMA_MODEL; when the desktop shell owns the engine we default the provider
+// to "ollama" and point it at our loopback server. An explicit value the user
+// set in ~/.trivio/.env still wins.
+function applyOllamaToServerEnv(env: NodeJS.ProcessEnv): void {
+  const layout = getOllamaLayout();
+  const port = ollamaPort(env);
+  ollamaEnv = env;
+  if (!env.AI_PROVIDER) env.AI_PROVIDER = "ollama";
+  if (!env.OLLAMA_HOST) env.OLLAMA_HOST = ollamaServerUrl("127.0.0.1", port);
+  if (!env.OLLAMA_PORT) env.OLLAMA_PORT = String(port);
+  if (!env.OLLAMA_MODEL) env.OLLAMA_MODEL = ollamaModelName(env);
+  void layout;
+}
+
+// Kick off a full setup (download binary → start server → pull model), guarding
+// against concurrent runs. Safe to call from multiple entry points (onboarding,
+// settings, chat prompt) — the guard makes it idempotent.
+async function triggerOllamaSetup(): Promise<OllamaStatus> {
+  if (ollamaSetupInProgress) {
+    console.log("[ollama] setup already in progress — reusing");
+    return getStatus({ layout: getOllamaLayout(), env: ollamaEnv });
+   }
+  ollamaSetupInProgress = true;
+  try {
+    const status = await runSetup({
+      layout: getOllamaLayout(),
+      env: ollamaEnv,
+      onProgress: broadcastOllamaProgress,
+      log: (m) => console.log(m),
+     }, ollamaHandleRef);
+    broadcastOllamaStatus(status);
+    return status;
+   } finally {
+    ollamaSetupInProgress = false;
+   }
+}
+
+
+// The local AI engine (Ollama + a Gemma model) that the desktop shell OWNS: it
+// downloads the Ollama binary into the user's data dir, runs `ollama serve` on a
+// private loopback port, and pulls the model — so the user never touches a
+// terminal. The embedded Next.js server points its "ollama" chat provider at
+// this instance (see buildServerEnv). All decisions are pure/injectable in
+// ./embedded/ollama; here we only wire it to IPC + the server env.
+import {
+  buildLayout,
+  getStatus,
+  runSetup,
+  startServer,
+  stopOllama,
+  ollamaModelName,
+  type OllamaHandle,
+  type OllamaStatus,
+  type OllamaProgress,
+} from "./embedded/ollama";
+
 // Register the trivio:// deep-link scheme as a privileged/standard scheme so the
 // renderer can link to it and the OS routes trivio:// URLs to this app. Must run
 // before app.whenReady().
