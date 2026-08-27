@@ -137,3 +137,98 @@ jobs:
           else
             echo "Manual dispatch -- skipping release publish (push a v* tag to publish)."
           fi
+
+  # ── Windows ──────────────────────────────────────────────────────────────────
+  # A native Windows build (NSIS setup.exe + portable.exe, x64) with the EMBEDDED
+  # PostgreSQL engine. The EDB Windows engine can only be fetched/verified on a
+  # Windows runner, so this job runs natively on windows-latest. It needs the macOS
+  # job to run first so the GitHub Release (created there) already exists, and then
+  # it *appends* the Windows artifacts with `gh release upload` (never clobbering
+  # the .dmg/.zip the macOS job added).
+  #
+  # Signing is optional: set the Windows Authenticode secrets (WIN_CSC_LINK =
+  # base64 .pfx + WIN_CSC_KEY_PASSWORD) and the build signs the .exe/.nsis. Without
+  # them the build is unsigned and Windows SmartScreen shows a "protected your PC"
+  # warning until a user clicks "Run anyway". desktop/preflight.mjs reports this.
+  desktop-windows:
+    needs: [desktop-macos]
+    runs-on: windows-latest
+
+    env:
+      WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+      WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+      # electron-builder reads CSC_LINK / CSC_KEY_PASSWORD for Authenticode.
+      CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Align package.json version with the release tag
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] && [ -n "${GITHUB_REF_NAME:-}" ]; then
+            ver="${GITHUB_REF_NAME#v}"
+            echo "Syncing package.json version to $ver (tag $GITHUB_REF_NAME)"
+            npm version "$ver" --no-git-tag-version
+          else
+            echo "Manual dispatch -- keeping package.json version as-is."
+          fi
+
+      # build:desktop:win fetches the EDB Windows engine, runs preflight, builds
+      # the shell + server, generates the .ico, and runs electron-builder --win
+      # (NSIS + portable). SHIP=1 (build:desktop:win:ship) hard-fails without a
+      # signing cert, so an unsigned build never ships by mistake.
+      - name: Build Windows (NSIS + portable, embedded Postgres)
+        shell: bash
+        run: npm run build:desktop:win
+
+      - name: List build output
+        shell: bash
+        run: ls -la release/
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivio-windows-${{ github.ref_name }}
+          path: |
+            release/*.exe
+            release/*.blockmap
+            release/latest-win.yml
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            tag="${GITHUB_REF_NAME}"
+             # A prerelease tag (e.g. v1.0.0-rc.1) must be published as prerelease.
+            prerelease_flag=""
+            case "$tag" in
+               *-rc*|*-alpha*|*-beta*|*rc.*|*alpha.*|*beta.*) prerelease_flag="--prerelease" ;;
+            esac
+            # The macOS job created the release; append the Windows artifacts
+            # (upload --clobber only touches same-named files, so the .dmg/.zip stay).
+            echo "Uploading Windows artifacts to GitHub Release $tag ${prerelease_flag:+(prerelease)}"
+            gh release upload "$tag" \
+              release/*.exe release/*.blockmap release/latest-win.yml \
+              --clobber \
+              $prerelease_flag
+          else
+            echo "Manual dispatch -- skipping release publish (push a v* tag to publish)."
+          fi

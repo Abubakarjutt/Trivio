@@ -64,7 +64,8 @@ const versionArg = flag("version", process.env.TRIVIO_PG_VERSION || "16");
 
 const SOURCE = sourceArg;
 const wantArch = archOverride || arch(); // "arm64" | "x64"
-const wantPlatform = platform(); // "darwin" | "linux" | ...
+const wantPlatform = platform(); // "darwin" | "linux" | "win32"
+const EXE = wantPlatform === "win32" ? ".exe" : ""; // Windows executables
 const PG_VERSION = versionArg;
 
 function log(...a) {
@@ -78,9 +79,9 @@ function die(msg, hint) {
 
 // ── Idempotency ──────────────────────────────────────────────────────────────
 function installedVersion() {
-  if (!existsSync(join(BIN, "postgres"))) return null;
+  if (!existsSync(join(BIN, "postgres" + EXE))) return null;
   try {
-    const out = spawnSync(join(BIN, "postgres"), ["--version"], { encoding: "utf8" });
+    const out = spawnSync(join(BIN, "postgres" + EXE), ["--version"], { encoding: "utf8" });
     const m = (out.stdout || "").match(/PostgreSQL ([0-9]+\.[0-9]+(?:\.[0-9]+)?)/);
     return m ? m[1] : "unknown";
   } catch {
@@ -115,11 +116,11 @@ function normalizeEngine(binDir, libDir, source, version) {
   const candidateLib = libDir || join(dirname(binDir), "lib");
   if (existsSync(candidateLib)) copyDir(candidateLib, LIB);
   for (const exe of ["initdb", "postgres"]) {
-    const p = join(BIN, exe);
-    if (existsSync(p)) {
+    const p = join(BIN, exe + EXE);
+    if (existsSync(p) && wantPlatform !== "win32") {
       try {
         // Make the executables runnable (keg copies are already +x; copied dirs
-        // from npm archives may not be).
+        // from npm archives may not be). No-op on Windows (no chmod, .exe are already runnable).
         spawnSync("chmod", ["755", p]);
       } catch {}
     }
@@ -144,12 +145,15 @@ function normalizeEngine(binDir, libDir, source, version) {
 // Prove the engine is real by invoking the shipped binaries.
 function verify() {
   for (const exe of ["postgres", "initdb"]) {
-    const p = join(BIN, exe);
-    if (!existsSync(p)) die(`expected ${exe} in ${BIN}`);
+    const p = join(BIN, exe + EXE);
+    if (!existsSync(p)) die(`expected ${exe}${EXE} in ${BIN}`);
     const out = spawnSync(p, ["--version"], { encoding: "utf8" });
     if (out.status !== 0)
-      die(`${exe} --version failed (exit ${out.status})`, String(out.stderr || out.stdout).trim());
-    log(`✓ ${exe}: ${String(out.stdout).trim()}`);
+      die(
+        `${exe}${EXE} --version failed (exit ${out.status})`,
+        String(out.stderr || out.stdout).trim()
+      );
+    log(`✓ ${exe}${EXE}: ${String(out.stdout).trim()}`);
   }
 }
 
@@ -159,7 +163,11 @@ function detectLocal() {
   const pgc = spawnSync("pg_config", ["--bindir", "--libdir"], { encoding: "utf8" });
   if (pgc.status === 0) {
     const [bindir, libdir] = String(pgc.stdout).trim().split("\n");
-    if (bindir && existsSync(join(bindir, "initdb")) && existsSync(join(bindir, "postgres")))
+    if (
+      bindir &&
+      existsSync(join(bindir, "initdb" + EXE)) &&
+      existsSync(join(bindir, "postgres" + EXE))
+    )
       return { bindir, libdir, version: PG_VERSION, source: "local:pg_config" };
   }
   // 2. Homebrew keg (macOS). postgresql → symlinks into a versioned keg.
@@ -167,7 +175,7 @@ function detectLocal() {
   for (const base of kegs) {
     for (const name of ["postgresql", "postgresql@17", "postgresql@16", "postgresql@18"]) {
       const bindir = join(base, name, "bin");
-      if (existsSync(join(bindir, "initdb")) && existsSync(join(bindir, "postgres")))
+      if (existsSync(join(bindir, "initdb" + EXE)) && existsSync(join(bindir, "postgres" + EXE)))
         return {
           bindir,
           libdir: join(base, name, "lib"),
@@ -182,7 +190,7 @@ function detectLocal() {
   });
   if (which.status === 0) {
     const dir = dirname(String(which.stdout).trim().split(/\r?\n/)[0]);
-    if (dir && existsSync(join(dir, "postgres")))
+    if (dir && existsSync(join(dir, "postgres" + EXE)))
       return {
         bindir: dir,
         libdir: join(dir, "..", "lib"),
@@ -233,7 +241,9 @@ function fromBrew() {
 // TRIVIO_PG_DOWNLOAD_URL for a pinned build. Requires `unzip` on the host.
 function fromEdb() {
   const archPart = wantArch === "arm64" ? "aarch64" : "x64";
-  const osPart = wantPlatform === "darwin" ? "macos13" : "linux";
+  // EDB archive names: macos13 (macOS), linux, or windows. Windows is x64 only.
+  const osPart =
+    wantPlatform === "darwin" ? "macos13" : wantPlatform === "win32" ? "windows" : "linux";
   const url =
     process.env.TRIVIO_PG_DOWNLOAD_URL ||
     `https://get.enterprisedb.com/postgresql/postgresql-${PG_VERSION}-binaries-${osPart}-${archPart}.zip`;
@@ -248,18 +258,25 @@ function fromEdb() {
       `download failed: ${url}`,
       "set TRIVIO_PG_DOWNLOAD_URL to a pinned EDB archive, or use --source=local/brew"
     );
-  const uz = spawnSync("unzip", ["-q", zipPath, "-d", join(tmp, "x")], { stdio: "inherit" });
-  if (uz.status !== 0) die("unzip failed (is 'unzip' installed?)");
-  // EDB layout: <root>/pgsql/{bin,lib}
+  // Windows 10+ ships `tar` (libarchive) which extracts .zip; POSIX uses unzip.
+  const uz =
+    wantPlatform === "win32"
+      ? spawnSync("tar", ["-xf", zipPath, "-C", join(tmp, "x")], { stdio: "inherit" })
+      : spawnSync("unzip", ["-q", zipPath, "-d", join(tmp, "x")], { stdio: "inherit" });
+  if (uz.status !== 0) die("archive extraction failed (need 'unzip' on POSIX or 'tar' on Windows)");
+  // EDB layout: <root>/pgsql/{bin,lib}. Windows keeps its DLLs under bin/, so a
+  // separate lib/ may be absent — that is fine (the engine is self-contained).
   const extracted = readdirSync(join(tmp, "x"), { withFileTypes: true })
     .map((e) => join(tmp, "x", e.name))
     .find(
-      (p) => existsSync(join(p, "bin", "initdb")) || existsSync(join(p, "pgsql", "bin", "initdb"))
+      (p) =>
+        existsSync(join(p, "bin", "initdb" + EXE)) ||
+        existsSync(join(p, "pgsql", "bin", "initdb" + EXE))
     );
   if (!extracted) die("could not locate pgsql/bin inside the EDB archive");
   const pgsql = existsSync(join(extracted, "pgsql")) ? join(extracted, "pgsql") : extracted;
   const bindir = join(pgsql, "bin");
-  const libdir = join(pgsql, "lib");
+  const libdir = existsSync(join(pgsql, "lib")) ? join(pgsql, "lib") : undefined;
   rmSync(tmp, { recursive: true, force: true });
   log(`using EDB engine at ${bindir}`);
   normalizeEngine(bindir, libdir, "edb", PG_VERSION);

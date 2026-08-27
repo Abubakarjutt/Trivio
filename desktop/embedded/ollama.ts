@@ -1,4 +1,3 @@
-// Trivio desktop — embedded Ollama engine (a local Gemma model for AI chat).
 //
 // The AI chat's "ollama" provider (see app/api/chat/route.ts) talks to a local
 // Ollama server running Gemma. The desktop shell OWNS that lifecycle so the user
@@ -18,14 +17,7 @@
 // fetch, all of which are injectable.
 
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  chmodSync,
-  rmSync,
-  readdirSync,
-  statSync,
-} from "node:fs";
+import { existsSync, mkdirSync, chmodSync, rmSync, readdirSync, statSync, cpSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
 import { createConnection } from "node:net";
 
@@ -85,17 +77,14 @@ export interface OllamaProgress {
 // Where the Ollama install lives. Overridable via TRIVIO_OLLAMA_HOME (tests /
 // power users); otherwise under the Electron userData dir so it survives app
 // updates and is isolated per user.
-export function resolveOllamaHome(
-  env: NodeJS.ProcessEnv,
-  userDataDir: string
-): string {
+export function resolveOllamaHome(env: NodeJS.ProcessEnv, userDataDir: string): string {
   return env.TRIVIO_OLLAMA_HOME || join(userDataDir, "ollama");
 }
 
 export function buildLayout(
   env: NodeJS.ProcessEnv,
   userDataDir: string,
-  plat: OllamaPlatform = (process.platform as OllamaPlatform)
+  plat: OllamaPlatform = process.platform as OllamaPlatform
 ): OllamaLayout {
   const home = resolveOllamaHome(env, userDataDir);
   const binName = plat === "win32" ? "ollama.exe" : "ollama";
@@ -105,8 +94,8 @@ export function buildLayout(
     bin: join(home, "bin", binName),
     modelsDir: join(home, "models"),
     versionFile: join(home, "VERSION"),
-    };
-  }
+  };
+}
 
 // The server URL the embedded Next.js server will point its ollama provider at.
 export function ollamaServerUrl(host: string, port: number): string {
@@ -125,14 +114,14 @@ export function ollamaPort(env: NodeJS.ProcessEnv): number {
 export function ollamaModelName(env: NodeJS.ProcessEnv): string {
   const raw = (env.OLLAMA_MODEL || "").trim().toLowerCase();
   if (
-     raw === "gemma e2b" ||
-     raw === "gemma-e2b" ||
-     raw === "gemma2b" ||
-     raw === "gemma 2b" ||
-     raw === "gemma"
+    raw === "gemma e2b" ||
+    raw === "gemma-e2b" ||
+    raw === "gemma2b" ||
+    raw === "gemma 2b" ||
+    raw === "gemma"
   ) {
     return "gemma4:e4b";
-    }
+  }
   // A concrete tag (has a colon) or a non-gemma name: trust it as-is.
   if (raw) return raw;
   return "gemma4:e4b";
@@ -140,7 +129,7 @@ export function ollamaModelName(env: NodeJS.ProcessEnv): string {
 
 // Arch-aware download asset for the official Ollama releases. Overridable with
 // OLLAMA_DOWNLOAD_URL so a pinned/patched build can be pointed at without a code
-// change. (macOS is the shipped target; linux is supported; win32 needs a URL.)
+// change. Windows ships the embeddable zip (see the win32 branch below).
 export function ollamaDownloadUrl(
   env: NodeJS.ProcessEnv,
   plat: OllamaPlatform,
@@ -154,16 +143,18 @@ export function ollamaDownloadUrl(
 
   if (plat === "darwin") {
     // Apple Silicon ships Ollama-darwin.zip; Intel ships Ollama-darwin-amd64.zip.
-    return targetArch === "arm64"
-       ? `${base}/Ollama-darwin.zip`
-       : `${base}/Ollama-darwin-amd64.zip`;
-    }
+    return targetArch === "arm64" ? `${base}/Ollama-darwin.zip` : `${base}/Ollama-darwin-amd64.zip`;
+  }
   if (plat === "linux") {
     return `${base}/ollama-linux-${archPart}.tgz`;
-    }
+  }
   if (plat === "win32") {
-    return `${base}/Ollama-Setup-x64.exe`;
-    }
+    // Embeddable zip, NOT the NSIS installer: the desktop owns a headless
+    // `ollama serve`, so we ship the portable build that drops ollama.exe +
+    // its GPU libs at the archive root. archPart is amd64/arm64, matching
+    // Ollama's release asset names (ollama-windows-{amd64,arm64}.zip).
+    return `${base}/ollama-windows-${archPart}.zip`;
+  }
   throw new Error(`Unsupported platform for Ollama download: ${plat}`);
 }
 
@@ -192,8 +183,8 @@ export function ollamaChildEnv(
     ...base,
     OLLAMA_HOST: `${host}:${port}`,
     OLLAMA_MODELS: join(home, "models"),
-   };
-  }
+  };
+}
 
 export function ollamaPullArgs(model: string): string[] {
   return ["pull", model];
@@ -205,8 +196,8 @@ export function isModelPulled(models: string[], model: string): boolean {
   if (!models.length) return false;
   const bare = model.includes(":") ? model : `${model}:latest`;
   return models.some(
-     (m) => m === model || m === bare || m.startsWith(`${model}:`) || m.startsWith(`${model}-`)
-   );
+    (m) => m === model || m === bare || m.startsWith(`${model}:`) || m.startsWith(`${model}-`)
+  );
 }
 
 // Parse one line of `ollama pull` output into a progress step. Ollama's
@@ -227,44 +218,43 @@ export function parsePullLine(
   if (/^success$/i.test(t)) return { ...soFar, phase: "ready", message: "Model downloaded" };
   if (/error|failed|unable|denied/i.test(t)) {
     return { ...soFar, phase: "error", message: t };
-    }
+  }
 
   const m = t.match(/(\d+(?:\.\d+)?)\s*%/);
   if (m) {
     const pct = Math.max(0, Math.min(100, Math.round(Number(m[1]))));
     if (pct > soFar.pct) soFar.pct = pct;
     return { ...soFar, phase: "pulling", message: t };
-    }
+  }
 
   if (/pulling|verifying|writing|downloading|manifest|schedule|copying/i.test(t)) {
     return { ...soFar, phase: "pulling", message: t };
-    }
+  }
   return { ...soFar, phase: "pulling", message: t };
 }
 
 // Is a full setup complete enough to serve a turn?
-export function isSetupComplete(s: Pick<OllamaStatus, "binaryInstalled" | "serverRunning" | "modelAvailable">): boolean {
+export function isSetupComplete(
+  s: Pick<OllamaStatus, "binaryInstalled" | "serverRunning" | "modelAvailable">
+): boolean {
   return s.binaryInstalled && s.serverRunning && s.modelAvailable;
 }
 
 // Candidate locations for the `ollama` executable inside an extracted archive,
 // most-specific first. Ollama's macOS release is a .app bundle whose CLI lives
 // under Resources; the raw/CLI builds put a bare `ollama` at the root.
-export function ollamaBinaryCandidates(
-  extractDir: string,
-  plat: OllamaPlatform
-): string[] {
+export function ollamaBinaryCandidates(extractDir: string, plat: OllamaPlatform): string[] {
   const exe = plat === "win32" ? "ollama.exe" : "ollama";
   const byPlat: string[] =
     plat === "darwin"
-       ? [
-         join("Ollama.app", "Contents", "Resources", "ollama"),
-         join("Ollama.app", "Contents", "MacOS", "Ollama"),
-         "ollama",
+      ? [
+          join("Ollama.app", "Contents", "Resources", "ollama"),
+          join("Ollama.app", "Contents", "MacOS", "Ollama"),
+          "ollama",
         ]
-       : plat === "win32"
-         ? ["ollama.exe", "Ollama Setup.exe"]
-         : ["bin/ollama", "ollama"];
+      : plat === "win32"
+        ? ["ollama.exe"]
+        : ["bin/ollama", "ollama"];
 
   return byPlat.map((p) => join(extractDir, p));
 }
@@ -304,7 +294,7 @@ export async function ensureBinary(
   if (exists(layout.bin)) {
     log(`[ollama] binary already present at ${layout.bin}`);
     return layout.bin;
-    }
+  }
 
   const url = ollamaDownloadUrl(env, plat, targetArch);
   log(`[ollama] downloading ${url}`);
@@ -314,63 +304,77 @@ export async function ensureBinary(
   rm(tmpDir, { recursive: true, force: true });
   mkdir(tmpDir, { recursive: true });
 
-  const archivePath = join(tmpDir, kind === "tgz" ? "ollama.tgz" : kind === "exe" ? "Ollama.exe" : "ollama.zip");
+  const archivePath = join(
+    tmpDir,
+    kind === "tgz" ? "ollama.tgz" : kind === "exe" ? "Ollama.exe" : "ollama.zip"
+  );
 
   if (kind === "exe") {
-    // Windows needs an installer; the desktop target is macOS so this path is
-    // best-effort. Run the MSI silently if present, else fail with guidance.
-    const r = spawnSyncImpl(process.platform === "win32" ? "msiexec" : "echo",
-       ["/i", archivePath, "/quiet"],
-      { stdio: "pipe" });
-    if (r.status !== 0) {
-      throw new Error("Installing Ollama on Windows needs admin rights; set OLLAMA_BIN to a local ollama.exe instead.");
-      }
-    return layout.bin;
-    }
+    // The Windows .exe is an NSIS/MSI *installer* — it needs admin rights and
+    // drops into %LOCALAPPDATA%\Programs, so it is not embeddable. The desktop
+    // ships the embeddable ollama-windows-*.zip instead, so an .exe/.msi URL only
+    // reaches here via a user-supplied OLLAMA_DOWNLOAD_URL; reject it with
+    // actionable guidance rather than trying to run an installer.
+    throw new Error(
+      "Ollama on Windows must be the embeddable zip (ollama-windows-amd64.zip / " +
+        "ollama-windows-arm64.zip), not the installer. Clear OLLAMA_DOWNLOAD_URL to " +
+        "use the default embeddable build."
+    );
+  }
 
   // curl the archive (consistent with the embedded PG fetch tool).
   const dl = spawnSyncImpl("curl", ["-fL", "-o", archivePath, url], { stdio: "pipe" });
   if (dl.status !== 0) {
-    throw new Error(`Failed to download Ollama from ${url} (curl exit ${dl.status}). Check your connection or set OLLAMA_DOWNLOAD_URL.`);
-    }
+    throw new Error(
+      `Failed to download Ollama from ${url} (curl exit ${dl.status}). Check your connection or set OLLAMA_DOWNLOAD_URL.`
+    );
+  }
 
   const extractDir = join(tmpDir, "x");
   mkdir(extractDir, { recursive: true });
   if (kind === "zip") {
-    const uz = spawnSyncImpl("unzip", ["-q", archivePath, "-d", extractDir], { stdio: "pipe" });
-    if (uz.status !== 0) throw new Error("Failed to extract Ollama (is 'unzip' available?)");
-    } else {
-     // tgz — use tar via shell (portable across platforms).
-    const tz = spawnSyncImpl(
-      "sh",
-      ["-c", `tar -xzf ${archivePath} -C ${extractDir}`],
-      { stdio: "pipe" }
-     );
-    if (tz.status !== 0) throw new Error("Failed to extract Ollama (is 'tar' available?)");
+    // Windows 10+ ships libarchive `tar` (handles .zip); POSIX uses `unzip`.
+    const uz =
+      plat === "win32"
+        ? spawnSyncImpl("tar", ["-xf", archivePath, "-C", extractDir], { stdio: "pipe" })
+        : spawnSyncImpl("unzip", ["-q", archivePath, "-d", extractDir], { stdio: "pipe" });
+    if (uz.status !== 0) {
+      throw new Error(
+        plat === "win32"
+          ? "Failed to extract Ollama (need 'tar' — ships with Windows 10+)"
+          : "Failed to extract Ollama (is 'unzip' available?)"
+      );
     }
+  } else {
+    // tgz — use tar via shell (portable across platforms).
+    const tz = spawnSyncImpl("sh", ["-c", `tar -xzf ${archivePath} -C ${extractDir}`], {
+      stdio: "pipe",
+    });
+    if (tz.status !== 0) throw new Error("Failed to extract Ollama (is 'tar' available?)");
+  }
 
   const found = findOllamaBinary(extractDir, plat, exists);
   if (!found) {
     throw new Error("Could not locate the ollama executable inside the downloaded archive.");
-    }
+  }
 
   // Copy the resolved binary (and its .app siblings if needed) into bin/.
   const destDir = dirname(found);
-  copyInto(destDir, layout.binDir, exists, log);
+  copyInto(destDir, layout.binDir, log);
   // The bare binary is what we run.
   const binDest = plat === "win32" ? layout.bin : layout.bin;
   if (!exists(binDest)) {
     // Fall back: the resolved file may already be at the canonical name.
     const resolved = exists(join(layout.binDir, plat === "win32" ? "ollama.exe" : "ollama"))
-        ? join(layout.binDir, plat === "win32" ? "ollama.exe" : "ollama")
-        : found;
+      ? join(layout.binDir, plat === "win32" ? "ollama.exe" : "ollama")
+      : found;
     return resolved;
-    }
+  }
   try {
     chmod(binDest, 0o755);
-    } catch {
-     /* non-fatal on some FS */
-    }
+  } catch {
+    /* non-fatal on some FS */
+  }
   rm(tmpDir, { recursive: true, force: true });
   log(`[ollama] binary ready at ${binDest}`);
   return binDest;
@@ -385,7 +389,7 @@ export function findOllamaBinary(
   // 1. Known candidate paths.
   for (const c of ollamaBinaryCandidates(extractDir, plat)) {
     if (exists(c)) return c;
-    }
+  }
   // 2. Recursive search (depth-limited) for any executable of the right name.
   const want = plat === "win32" ? "ollama.exe" : "ollama";
   const found: string[] = [];
@@ -394,34 +398,32 @@ export function findOllamaBinary(
     let entries: string[] = [];
     try {
       entries = readdirSync(dir);
-      } catch {
+    } catch {
       return;
-      }
+    }
     for (const e of entries) {
       const full = join(dir, e);
       if (e === want) {
         found.push(full);
         continue;
-        }
+      }
       try {
         if (statSync(full).isDirectory()) walk(full, depth + 1);
-        } catch {
-       /* skip */
-       }
+      } catch {
+        /* skip */
       }
-    };
+    }
+  };
   walk(extractDir, 0);
   return found[0] ?? null;
 }
 
 // Copy every file under srcDir into destDir (best-effort; used to hoist the
 // extracted binary + its runtime siblings next to our canonical name).
-function copyInto(srcDir: string, destDir: string, exists: (p: string) => boolean, log: (m: string) => void): void {
-  const cp = spawnSync("cp", ["-R", srcDir, destDir], { stdio: "pipe" });
-  if (cp.status !== 0) {
-    log(`[ollama] note: could not copy runtime siblings from ${srcDir} (cp exit ${cp.status})`);
-    }
-  void exists;
+function copyInto(srcDir: string, destDir: string, log: (m: string) => void): void {
+  // cpSync (Node >=16.7) is cross-platform, unlike the POSIX-only `cp -R`.
+  cpSync(srcDir, destDir, { recursive: true });
+  void log;
 }
 
 // Wait for a TCP port to accept a connection. Uses node:net's createConnection;
@@ -439,7 +441,7 @@ export function waitForPort(host: string, port: number, timeoutMs = 30000): Prom
       if (settled) return;
       settled = true;
       reject(new Error(`timed out waiting for Ollama on ${host}:${port}`));
-     }, timeoutMs);
+    }, timeoutMs);
     const attempt = () => {
       const socket = netConnect({ host, port });
       const onConnected = () => {
@@ -448,17 +450,17 @@ export function waitForPort(host: string, port: number, timeoutMs = 30000): Prom
         clearTimeout(timer);
         socket.destroy();
         resolve();
-       };
+      };
       const onError = () => {
         socket.destroy();
         if (settled) return;
         attempt(); // retry until the timeout fires
-       };
+      };
       socket.once("connect", onConnected);
       socket.once("error", onError);
-     };
+    };
     attempt();
-   });
+  });
 }
 
 // Start `ollama serve` on a private loopback port and return a handle.
@@ -486,7 +488,7 @@ export async function startServer(opts: StartServerOpts): Promise<OllamaHandle> 
     stdio: ["ignore", "pipe", "pipe"],
     env: childEnv,
     detached: process.platform !== "win32",
-   });
+  });
   server.stdout?.on("data", (d: Buffer) => log(`[ollama:out] ${String(d).trimEnd()}`));
   server.stderr?.on("data", (d: Buffer) => log(`[ollama:err] ${String(d).trimEnd()}`));
 
@@ -498,7 +500,7 @@ export async function startServer(opts: StartServerOpts): Promise<OllamaHandle> 
     url,
     port,
     stop: () => stopOllama(server, log),
-    };
+  };
 }
 
 // Pull a model, streaming progress. Resolves when the pull exits 0.
@@ -522,13 +524,13 @@ export function pullModel(opts: PullOpts): Promise<{ ok: boolean }> {
     const child = spawnImpl(opts.binPath, ollamaPullArgs(opts.model), {
       stdio: ["ignore", "pipe", "pipe"],
       env: childEnv,
-      });
+    });
     let acc = { pct: 0 };
     let lastEmit = 0;
     const emitNow = (p: OllamaProgress) => {
       emit(p);
       lastEmit = Date.now();
-      };
+    };
     child.stdout?.on("data", (d: Buffer) => {
       const text = String(d);
       for (const line of text.split(/\r?\n/)) {
@@ -539,17 +541,16 @@ export function pullModel(opts: PullOpts): Promise<{ ok: boolean }> {
         else if (Date.now() - lastEmit > 400) {
           emitNow({ phase: "pulling", pct: r.pct, message: r.message });
           lastEmit = Date.now();
-          }
         }
       }
-     );
+    });
     child.on("exit", (code) => {
       if (code === 0) resolve({ ok: true });
       else reject(new Error(`ollama pull ${opts.model} failed (exit ${code})`));
-      });
+    });
     child.on("error", (err) => reject(err));
     void log;
-    });
+  });
 }
 
 // List locally available models. `ollama list` reads the on-disk manifest dir
@@ -568,18 +569,21 @@ export function listModels(opts: ListModelsOpts): Promise<string[]> {
   return new Promise((resolve) => {
     let child: ChildProcess;
     try {
-      child = spawnImpl(opts.binPath, ["list"], { stdio: ["ignore", "pipe", "pipe"], env: childEnv });
-      } catch {
+      child = spawnImpl(opts.binPath, ["list"], {
+        stdio: ["ignore", "pipe", "pipe"],
+        env: childEnv,
+      });
+    } catch {
       resolve([]);
       return;
-      }
+    }
     let out = "";
     child.stdout?.on("data", (d: Buffer) => {
       out += String(d);
-      });
+    });
     child.on("exit", () => resolve(parseModelList(out)));
     child.on("error", () => resolve([]));
-    });
+  });
 }
 
 // `ollama list` prints a table:  NAME  ID  SIZE  MODIFIED
@@ -595,11 +599,11 @@ export function parseModelList(out: string): string[] {
     if (t.toUpperCase() === "NAME" || /^NAME\s+ID/i.test(t)) {
       seenHeader = true;
       continue;
-      }
+    }
     if (!seenHeader) continue;
     const name = t.split(/\s+/)[0];
     if (name && !names.includes(name)) names.push(name);
-    }
+  }
   return names;
 }
 
@@ -611,17 +615,19 @@ export async function probeServer(
   timeoutMs = 4000
 ): Promise<{ running: boolean; models: string[]; version?: string } | null> {
   try {
-    const res = await fetchImpl(`http://${host}:${port}/api/tags`, { signal: AbortSignal.timeout(timeoutMs) });
+    const res = await fetchImpl(`http://${host}:${port}/api/tags`, {
+      signal: AbortSignal.timeout(timeoutMs),
+    });
     if (!res.ok) return null;
     const tags = (await res.json()) as { models?: Array<{ name?: string }>; version?: string };
     return {
       running: true,
       models: (tags.models ?? []).map((m) => m.name ?? "").filter(Boolean),
       version: tags.version,
-      };
-    } catch {
+    };
+  } catch {
     return null;
-    }
+  }
 }
 
 // ── Aggregate status ───────────────────────────────────────────────────────────
@@ -658,8 +664,8 @@ export async function getStatus(opts: GetStatusOpts): Promise<OllamaStatus> {
       bin: opts.layout.bin,
       port,
       ready: false,
-      };
-    }
+    };
+  }
 
   const probe = await probeServer(host, port, opts.fetchImpl);
   const serverRunning = !!probe;
@@ -674,11 +680,11 @@ export async function getStatus(opts: GetStatusOpts): Promise<OllamaStatus> {
         home: opts.layout.home,
         env: opts.env,
         log: opts.log,
-        });
-      } catch {
-        models = [];
-        }
+      });
+    } catch {
+      models = [];
     }
+  }
 
   const modelAvailable = isModelPulled(models, model);
   return {
@@ -692,7 +698,7 @@ export async function getStatus(opts: GetStatusOpts): Promise<OllamaStatus> {
     bin: opts.layout.bin,
     port,
     ready: isSetupComplete({ binaryInstalled, serverRunning, modelAvailable }),
-    };
+  };
 }
 
 // ── High-level orchestrator used by the main process ────────────────────────────
@@ -746,9 +752,9 @@ export async function runSetup(
       chmodSyncImpl: opts.chmodSyncImpl,
       rmSyncImpl: opts.rmSyncImpl,
       log,
-      });
+    });
     emit({ phase: "extracting", message: "Ollama installed" });
-    }
+  }
 
   // 2. Start the server if it isn't running.
   const probe = await probeServer(host, port, opts.fetchImpl);
@@ -763,9 +769,9 @@ export async function runSetup(
       spawnImpl: opts.spawnImpl,
       waitForReady: opts.waitForReady,
       log,
-      });
+    });
     handleRef.handle = handle;
-    }
+  }
 
   // 3. Pull the model if it isn't present.
   const pre = probe?.models ?? [];
@@ -780,8 +786,8 @@ export async function runSetup(
       spawnImpl: opts.spawnImpl,
       onProgress: (p) => emit(p),
       log,
-      });
-    }
+    });
+  }
 
   emit({ phase: "ready", message: "AI assistant ready" });
 
@@ -799,9 +805,8 @@ export async function runSetup(
     bin: opts.layout.bin,
     port,
     ready: !!finalProbe && isModelPulled(models, model),
-    };
+  };
 }
-
 
 // ── Stop ───────────────────────────────────────────────────────────────────────
 
@@ -817,10 +822,10 @@ export function stopOllama(
     const kill = setTimeout(() => {
       if (!server.killed) server.kill("SIGKILL");
       resolve();
-      }, 10000);
+    }, 10000);
     server.once("exit", () => {
       clearTimeout(kill);
       resolve();
-      });
     });
+  });
 }

@@ -31,7 +31,7 @@ import {
 } from "electron";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, platform } from "node:os";
 import { join, resolve } from "node:path";
 import net from "node:net";
 import {
@@ -40,7 +40,6 @@ import {
   stopDatabaseProcess,
   type DatabaseHandle,
 } from "./embedded/embedded-db";
-
 
 // ── Ollama (local AI) engine lifecycle ─────────────────────────────────────────
 // The desktop shell owns a local Ollama server + Gemma model so the AI chat can
@@ -77,13 +76,13 @@ function getOllamaLayout() {
 function broadcastOllamaProgress(p: OllamaProgress): void {
   for (const w of BrowserWindow.getAllWindows()) {
     if (!w.isDestroyed()) w.webContents.send("ollama:progress", p);
-   }
+  }
 }
 
 function broadcastOllamaStatus(s: OllamaStatus): void {
   for (const w of BrowserWindow.getAllWindows()) {
     if (!w.isDestroyed()) w.webContents.send("ollama:status", s);
-   }
+  }
 }
 
 // Point the embedded Next.js server at the local Ollama engine. The chat route
@@ -109,22 +108,24 @@ async function triggerOllamaSetup(): Promise<OllamaStatus> {
   if (ollamaSetupInProgress) {
     console.log("[ollama] setup already in progress — reusing");
     return getStatus({ layout: getOllamaLayout(), env: ollamaEnv });
-   }
+  }
   ollamaSetupInProgress = true;
   try {
-    const status = await runSetup({
-      layout: getOllamaLayout(),
-      env: ollamaEnv,
-      onProgress: broadcastOllamaProgress,
-      log: (m) => console.log(m),
-     }, ollamaHandleRef);
+    const status = await runSetup(
+      {
+        layout: getOllamaLayout(),
+        env: ollamaEnv,
+        onProgress: broadcastOllamaProgress,
+        log: (m) => console.log(m),
+      },
+      ollamaHandleRef
+    );
     broadcastOllamaStatus(status);
     return status;
-   } finally {
+  } finally {
     ollamaSetupInProgress = false;
-   }
+  }
 }
-
 
 // The local AI engine (Ollama + a Gemma model) that the desktop shell OWNS: it
 // downloads the Ollama binary into the user's data dir, runs `ollama serve` on a
@@ -132,17 +133,6 @@ async function triggerOllamaSetup(): Promise<OllamaStatus> {
 // terminal. The embedded Next.js server points its "ollama" chat provider at
 // this instance (see buildServerEnv). All decisions are pure/injectable in
 // ./embedded/ollama; here we only wire it to IPC + the server env.
-import {
-  buildLayout,
-  getStatus,
-  runSetup,
-  startServer,
-  stopOllama,
-  ollamaModelName,
-  type OllamaHandle,
-  type OllamaStatus,
-  type OllamaProgress,
-} from "./embedded/ollama";
 
 // Register the trivio:// deep-link scheme as a privileged/standard scheme so the
 // renderer can link to it and the OS routes trivio:// URLs to this app. Must run
@@ -401,15 +391,21 @@ function stopServer(): void {
 let mainWindow: BrowserWindow | null = null;
 
 function createWindow(): BrowserWindow {
+  // Native macOS chrome (traffic lights inset over the app's own top bar,
+  // which has safe top padding so they never overlap content). On Windows/
+  // Linux we use the platform's standard window frame instead.
+  const isMac = platform() === "darwin";
   const win = new BrowserWindow({
     width: 1360,
     height: 900,
     minWidth: 1024,
     minHeight: 720,
-    // Native macOS chrome with the traffic-light buttons inset over the app's
-    // top bar, which has safe top padding so they never overlap content.
-    titleBarStyle: "hiddenInset",
-    trafficLightPosition: { x: 18, y: 16 },
+    ...(isMac
+      ? {
+          titleBarStyle: "hiddenInset",
+          trafficLightPosition: { x: 18, y: 16 },
+        }
+      : {}),
     backgroundColor: "#0b0d10",
     show: false,
     title: "Trivio",
@@ -610,12 +606,16 @@ function setupUpdater(): void {
 // ── Native menu ──────────────────────────────────────────────────────────────
 
 function buildMenu(): void {
-  if (process.platform !== "darwin") {
-    Menu.setApplicationMenu(null);
-    return;
-  }
+  // macOS keeps its standard app-name menu (About / Services / Hide / Quit);
+  // Windows + Linux get a conventional File / Edit / View / Window bar.
+  const template = process.platform === "darwin" ? macMenuTemplate() : nonMacMenuTemplate();
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
 
-  const template: MenuItemConstructorOptions[] = [
+// macOS: the standard app-name menu (About / Services / Hide / Quit) plus the
+// usual Edit / View / Window role menus.
+function macMenuTemplate(): MenuItemConstructorOptions[] {
+  return [
     {
       label: app.name,
       submenu: [
@@ -668,7 +668,7 @@ function buildMenu(): void {
         { role: "forceReload" },
         {
           label: "Developer Tools",
-          accelerator: process.platform === "darwin" ? "Alt+CmdOrCtrl+I" : "Ctrl+Shift+I",
+          accelerator: "Ctrl+Shift+I",
           click: () => mainWindow?.webContents.toggleDevTools(),
         },
         { type: "separator" },
@@ -684,8 +684,68 @@ function buildMenu(): void {
       submenu: [{ role: "minimize" }, { role: "zoom" }, { type: "separator" }, { role: "front" }],
     },
   ];
+}
 
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+// Windows / Linux: a conventional top menu bar using only cross-platform
+// Electron roles (no macOS-only roles such as services / hide / front).
+function nonMacMenuTemplate(): MenuItemConstructorOptions[] {
+  return [
+    {
+      label: "File",
+      submenu: [
+        {
+          label: "Open in Browser",
+          accelerator: "Ctrl+Shift+B",
+          click: () => {
+            const url = mainWindow?.webContents.getURL();
+            if (url) void shell.openExternal(url);
+          },
+        },
+        {
+          label: "Check for Updates…",
+          click: () => runUpdateCheck(),
+        },
+        { type: "separator" },
+        { role: "quit" },
+      ],
+    },
+    {
+      label: "Edit",
+      submenu: [
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        { role: "pasteAndMatchStyle" },
+        { role: "delete" },
+        { role: "selectAll" },
+      ],
+    },
+    {
+      label: "View",
+      submenu: [
+        { role: "reload" },
+        { role: "forceReload" },
+        {
+          label: "Developer Tools",
+          accelerator: "Ctrl+Shift+I",
+          click: () => mainWindow?.webContents.toggleDevTools(),
+        },
+        { type: "separator" },
+        { role: "resetZoom" },
+        { role: "zoomIn" },
+        { role: "zoomOut" },
+        { type: "separator" },
+        { role: "togglefullscreen" },
+      ],
+    },
+    {
+      label: "Window",
+      submenu: [{ role: "minimize" }, { role: "close" }],
+    },
+  ];
 }
 
 // ── App lifecycle ────────────────────────────────────────────────────────────

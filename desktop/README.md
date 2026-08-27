@@ -258,6 +258,58 @@ Publish with: `git tag v1.2.3 && git push origin v1.2.3`.
 
 ---
 
+## Windows build
+
+The desktop shell also ships as a **Windows x64** app (an NSIS installer plus a
+portable single-file `.exe`). The UI and backend are unchanged — Windows uses the
+same embedded-server + embedded-Postgres model as macOS, with a few platform
+differences:
+
+- **Targets:** `electron-builder --win` produces `Trivio-<ver>-win-x64.exe`
+  (NSIS, per-user install, no UAC prompt) and a `…-portable.exe`. Both are x64
+  only — the embedded Postgres engine and the Ollama runtime are x64-only, and
+  x64 binaries run under emulation on ARM64 Windows.
+- **Per-user install, data preserved on uninstall:** `nsis.perMachine: false`
+  installs under `%LOCALAPPDATA%` (no admin rights) and
+  `deleteAppDataOnUninstall: false` keeps the embedded database — it lives in the
+  per-user AppData `userData` dir, never in the install dir.
+- **Signing is optional:** an unsigned build runs but Windows **SmartScreen**
+  shows a "protected your PC" warning. To Authenticode-sign, set `CSC_LINK`
+  (base64 `.pfx`) + `CSC_KEY_PASSWORD`; electron-builder signs the `.exe` / `.nsis`
+   automatically. `preflight` reports the signing state and
+   `build:desktop:win:ship` (SHIP=1) hard-fails without a cert.
+- **Embedded database on Windows** lives in the same per-user `userData`
+  location (`%APPDATA%\Trivio\database`). Prisma connects over **TCP** (Windows
+  has no unix socket), so `renderServerArgs` omits `-k <socket>` on `win32` and
+  the engine's DLLs are self-contained under `bin/`.
+- **Ollama auto-download:** first run fetches the **embeddable**
+   `ollama-windows-<arch>.zip` (not the installer) into the user data dir and
+  extracts it with the `tar` that ships with Windows 10+ — no admin, no
+   `%LOCALAPPDATA%\Programs\Ollama` install. The `.exe`/`.msi` installer path is
+  rejected with actionable guidance.
+- **Cross-build caveat:** running `build:desktop:win` on a **macOS** host fetches
+  the macOS Prisma engine, not the win-x64 one — so the real Windows package is
+  built natively on `windows-latest` in CI (which runs `npx prisma generate`
+  there).
+
+```bash
+# on a Windows host (or in CI's desktop-windows job)
+npm run build:desktop:win           # → release/Trivio-<ver>-win-x64.exe (+ portable)
+npm run build:desktop:win:ship      # SHIP=1: refuse to build unsigned
+npm run dev:desktop:local:win       # run a local-mode build on Windows
+```
+
+### CI / GitHub release (Windows)
+
+The `desktop-windows` job in `.github/workflows/desktop-release.yml` runs on
+`windows-latest`, **after** `desktop-macos` (which creates the GitHub Release),
+and **appends** the Windows artifacts to the *same* release via
+`gh release upload --clobber` (only same-named files are touched, so the
+`.dmg` / `.zip` stay). Signing is optional via the `WIN_CSC_LINK` /
+`WIN_CSC_KEY_PASSWORD` secrets (mapped to `CSC_LINK` / `CSC_KEY_PASSWORD`).
+
+---
+
 ## Menu & window
 
 - **Traffic-light chrome** (`titleBarStyle: hiddenInset`) on a 1360×900 window

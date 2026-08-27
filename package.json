@@ -31,6 +31,10 @@
     "build:desktop:ship": "SHIP=1 npm run build:desktop",
     "notarize": "node desktop/notarize.mjs",
     "package:desktop": "node desktop/build-electron.mjs && npm run build:server && electron-builder --config desktop/electron-builder.yml --mac",
+    "build:desktop:win": "npm run fetch:pg && node desktop/preflight.mjs && npm run build && npm run build:electron && npm run gen:icon && npm run build:server && electron-builder --config desktop/electron-builder.yml --win",
+    "build:desktop:win:ship": "SHIP=1 npm run build:desktop:win",
+    "package:desktop:win": "node desktop/build-electron.mjs && npm run build:server && npm run fetch:pg && electron-builder --config desktop/electron-builder.yml --win",
+    "dev:desktop:local:win": "node desktop/build-electron.mjs && npm run build:server && cross-env DESKTOP_MODE=local electron desktop/dist/main.cjs",
     "test:desktop": "node desktop/test-shell.cjs"
   },
   "dependencies": {

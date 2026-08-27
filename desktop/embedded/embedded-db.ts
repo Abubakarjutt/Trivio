@@ -147,8 +147,11 @@ export function renderInitdbArgs(cfg: EmbeddedDbConfig): string[] {
 
 // `postgres` server args: bind loopback only, keep the unix socket in a
 // dedicated dir (not PGDATA), and cap connections for a single-user install.
-export function renderServerArgs(cfg: EmbeddedDbConfig): string[] {
-  return [
+export function renderServerArgs(
+  cfg: EmbeddedDbConfig,
+  platform: NodeJS.Platform = process.platform
+): string[] {
+  const args = [
     "-D",
     cfg.dataDir,
     "-c",
@@ -157,9 +160,11 @@ export function renderServerArgs(cfg: EmbeddedDbConfig): string[] {
     String(cfg.port),
     "-c",
     "max_connections=100",
-    "-k",
-    cfg.unixSocketDir,
   ];
+  // Windows has no unix-domain sockets; Prisma connects over TCP regardless,
+  // so the -k socket flag is only meaningful on POSIX.
+  if (platform !== "win32") args.push("-k", cfg.unixSocketDir);
+  return args;
 }
 
 // Locate the `initdb` + `postgres` executables. Resolution order:
@@ -175,8 +180,12 @@ export function resolvePostgresBinaries(
   env: NodeJS.ProcessEnv,
   resourcesDir: string,
   exists: (p: string) => boolean = existsSync,
-  allowPathFallback = false
+  allowPathFallback = false,
+  platform: NodeJS.Platform = process.platform
 ): PostgresBinaries | null {
+  // Windows executables carry a .exe suffix; the EDB Windows engine is
+  // self-contained (DLLs live in bin/, no sibling lib/ dir to locate).
+  const exe = platform === "win32" ? ".exe" : "";
   const dirs = [
     env.TRIVIO_PG_BIN || "",
     join(resourcesDir, "postgres", "bin"),
@@ -184,17 +193,17 @@ export function resolvePostgresBinaries(
   ];
   for (const dir of dirs) {
     if (!dir) continue;
-    const initdb = join(dir, "initdb");
+    const initdb = join(dir, "initdb" + exe);
     if (exists(initdb)) {
-      const libDir = join(dir, "..", "lib");
+      const libDir = exe ? undefined : join(dir, "..", "lib");
       return {
         initdb,
-        postgres: join(dir, "postgres"),
-        libDir: exists(libDir) ? libDir : undefined,
+        postgres: join(dir, "postgres" + exe),
+        libDir: libDir && exists(libDir) ? libDir : undefined,
       };
     }
   }
-  if (allowPathFallback) return { initdb: "initdb", postgres: "postgres" };
+  if (allowPathFallback) return { initdb: "initdb" + exe, postgres: "postgres" + exe };
   return null;
 }
 

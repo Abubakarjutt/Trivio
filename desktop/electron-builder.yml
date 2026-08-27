@@ -87,3 +87,45 @@ mac:
     - target: zip
       arch:
         - arm64
+
+# ── Windows ────────────────────────────────────────────────────────────────────
+# A native Windows installer (NSIS setup.exe) + a no-install portable build. The
+# same shell boots the embedded server + embedded Postgres; on Windows the PG
+# engine is the native EDB build (initdb.exe / postgres.exe + DLLs in bin/).
+#
+# Cross-building: a *thin-client* (DESKTOP_MODE=remote) Windows binary can be
+# produced on any host (the Electron shell is cross-platform). A *local*
+# (embedded-Postgres) Windows binary needs the native Windows engine under
+# desktop/embedded/bin, which only a Windows runner can fetch/test.
+win:
+  icon: desktop/build/icon.ico
+  # No publisher / certificate here by default: an unsigned build runs but
+  # Windows SmartScreen will show a "protected your PC" warning until you add a
+  # code-signing cert (CSC_LINK = base64 .pfx + CSC_KEY_PASSWORD). When those
+  # are set electron-builder signs the .exe / .nsis automatically.
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+  artifactName: "${productName}-${version}-win-${arch}.${ext}"
+
+# NSIS: a real (non-one-click) installer with a progress bar and an uninstaller.
+# perMachine:false installs per-user (no admin needed). The embedded database
+# lives in the per-user AppData dir (userData), so it is preserved on uninstall
+# (deleteAppDataOnUninstall stays false — we never wipe the user's data).
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  deleteAppDataOnUninstall: false
+  shortcutName: Trivio
+
+# The portable build is a single self-contained .exe (no installer, no write to
+# Program Files); ideal for trying the app or running from a USB stick.
+portable:
+  artifactName: "${productName}-${version}-win-${arch}-portable.${ext}"

@@ -184,6 +184,16 @@ describe("renderServerArgs", () => {
     expect(args).toContain("max_connections=100");
     expect(args[args.indexOf("-k") + 1]).toBe("/tmp/sock");
   });
+  it("omits the -k unix-socket flag on Windows (no unix sockets)", () => {
+    const args = renderServerArgs(baseConfig({ port: 6543, unixSocketDir: "/tmp/sock" }), "win32");
+    expect(args).not.toContain("-k");
+    expect(args).not.toContain("/tmp/sock");
+  });
+
+  it("keeps the -k socket flag on POSIX (linux/darwin)", () => {
+    const args = renderServerArgs(baseConfig({ port: 6543, unixSocketDir: "/tmp/sock" }), "linux");
+    expect(args[args.indexOf("-k") + 1]).toBe("/tmp/sock");
+  });
 });
 
 describe("resolvePostgresBinaries", () => {
@@ -211,6 +221,23 @@ describe("resolvePostgresBinaries", () => {
   it("allows a PATH fallback when unpackaged/dev", () => {
     const res = resolvePostgresBinaries({}, "/res", fakeExists([]), true);
     expect(res).toEqual({ initdb: "initdb", postgres: "postgres", libDir: undefined });
+  });
+  it("resolves the .exe engine and no libDir on Windows", () => {
+    const res = resolvePostgresBinaries(
+      { TRIVIO_PG_BIN: "/data/pg/bin" },
+      "/res",
+      fakeExists(["/data/pg/bin/initdb.exe"]),
+      false,
+      "win32"
+    );
+    expect(res?.initdb).toContain("initdb.exe");
+    expect(res?.postgres).toContain("postgres.exe");
+    expect(res?.libDir).toBeUndefined();
+  });
+
+  it("yields .exe names for the PATH fallback on Windows", () => {
+    const res = resolvePostgresBinaries({}, "/res", fakeExists([]), true, "win32");
+    expect(res).toEqual({ initdb: "initdb.exe", postgres: "postgres.exe", libDir: undefined });
   });
 });
 

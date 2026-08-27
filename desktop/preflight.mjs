@@ -46,9 +46,50 @@ if (existsSync(join(distServer, "server.js"))) {
   err("no .next/standalone and no desktop/dist-server — run `npm run build` first.");
 }
 
-// ── 2. macOS code-signing identity + Apple notary credentials ───────────────
-let identities = [];
+// ── 2. Code-signing + notarization / SmartScreen posture ──────────────────────
+// On macOS: a "Developer ID Application" identity + Apple notary credentials.
+// On Windows: an Authenticode certificate via CSC_LINK (base64 .pfx) + CSC_KEY_
+// PASSWORD. Without signing, macOS Gatekeeper / Windows SmartScreen will warn.
 if (process.platform === "darwin") {
+  const identities = macCodeSignIdentities();
+  const devId = identities.find((i) => /Developer ID Application/i.test(i.name));
+  const devOnly =
+    identities.length > 0 && !devId && identities.every((i) => /Apple Development/i.test(i.name));
+  if (devId) {
+    log(`Developer ID Application identity: ${devId.name}`);
+  } else if (devOnly) {
+    const msg = `only "Apple Development" identities found — these cannot be distributed. Use a "Developer ID Application" cert to ship a .dmg that opens on other machines.`;
+    SHIP ? err(msg) : warn(msg);
+  } else if (identities.length === 0) {
+    const msg = `no codesigning identity in the keychain — the build will be ad-hoc/unsigned and Gatekeeper will block it on other machines.`;
+    SHIP ? err(msg) : warn(msg);
+  }
+  const hasNotary = Boolean(process.env.APPLE_ID && process.env.APPLE_APP_SPECIFIC_PASSWORD);
+  const hasKeychainProfile = Boolean(process.env.NOTARY_PROFILE);
+  if (hasNotary || hasKeychainProfile) {
+    log("notary credentials present — the build will be notarized + stapled.");
+  } else {
+    const msg =
+      "no Apple notary credentials (APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD, or NOTARY_PROFILE) — the build will NOT be notarized.";
+    SHIP ? err(msg) : warn(msg);
+  }
+} else if (process.platform === "win32") {
+  const hasCert = Boolean(process.env.CSC_LINK || process.env.CSC_NAME);
+  if (hasCert) {
+    log(
+      "Windows signing certificate present (CSC_LINK/CSC_NAME) — the .exe will be Authenticode-signed."
+    );
+  } else {
+    const msg =
+      "no Windows signing certificate (CSC_LINK = base64 .pfx + CSC_KEY_PASSWORD) — the .exe will be unsigned and Windows SmartScreen will show a 'protected your PC' warning until signed.";
+    SHIP ? err(msg) : warn(msg);
+  }
+} else {
+  log("non-macOS/non-Windows host — skipping code-signing checks.");
+}
+
+function macCodeSignIdentities() {
+  let identities = [];
   try {
     const out = execFileSync("security", ["find-identity", "-v", "-p", "codesigning"], {
       encoding: "utf8",
@@ -65,39 +106,20 @@ if (process.platform === "darwin") {
   } catch (e) {
     warn(`could not query the keychain (security): ${e.message.split("\n")[0]}`);
   }
-} else {
-  log("non-macOS host — skipping code-signing/notary checks (mac target only).");
-}
-
-const devId = identities.find((i) => /Developer ID Application/i.test(i.name));
-const devOnly =
-  identities.length > 0 && !devId && identities.every((i) => /Apple Development/i.test(i.name));
-
-if (devId) {
-  log(`Developer ID Application identity: ${devId.name}`);
-} else if (devOnly) {
-  const msg = `only "Apple Development" identities found — these cannot be distributed. Use a "Developer ID Application" cert to ship a .dmg that opens on other machines.`;
-  SHIP ? err(msg) : warn(msg);
-} else if (identities.length === 0) {
-  const msg = `no codesigning identity in the keychain — the build will be ad-hoc/unsigned and Gatekeeper will block it on other machines.`;
-  SHIP ? err(msg) : warn(msg);
-}
-
-const hasNotary = Boolean(process.env.APPLE_ID && process.env.APPLE_APP_SPECIFIC_PASSWORD);
-const hasKeychainProfile = Boolean(process.env.NOTARY_PROFILE);
-if (hasNotary || hasKeychainProfile) {
-  log("notary credentials present — the build will be notarized + stapled.");
-} else {
-  const msg =
-    "no Apple notary credentials (APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD, or NOTARY_PROFILE) — the build will NOT be notarized.";
-  SHIP ? err(msg) : warn(msg);
+  return identities;
 }
 
 // ── 3. The embedded PostgreSQL engine ───────────────────────────────────────
 // The default desktop build is local-mode: it ships its OWN Postgres (no docker,
 // no external DB). If the engine isn't laid down under desktop/embedded/bin the
 // packaged app would start with no database. `npm run fetch:pg` produces it.
-const engineBin = join(root, "desktop", "embedded", "bin", "postgres");
+const engineBin = join(
+  root,
+  "desktop",
+  "embedded",
+  "bin",
+  "postgres" + (process.platform === "win32" ? ".exe" : "")
+);
 if (existsSync(engineBin)) {
   try {
     const out = execFileSync(engineBin, ["--version"], { encoding: "utf8" }).trim();
@@ -114,12 +136,15 @@ if (existsSync(engineBin)) {
 
 // ── Verdict ──────────────────────────────────────────────────────────────────
 for (const w of warnings) console.log(`[preflight] WARN  ${w}`);
+
 if (problems.length) {
-  for (const p of problems) console.error(`[preflight] FAIL  ${p}`);
+  for (const p of problems) console.error(`[preflight] FAIL    ${p}`);
   console.error(
     `[preflight] ✗ ${problems.length} blocking problem(s). ` +
-      `Set CSC_NAME="Developer ID Application: ..." (or CSC_LINK) and APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD ` +
-      `(plus APPLE_TEAM_ID), then re-run. See desktop/README.md "Sign & notarize".`
+      `Set a signing identity: CSC_NAME="Developer ID Application: ..." on macOS, ` +
+      `or CSC_LINK (base64 .pfx) + CSC_KEY_PASSWORD on Windows, and ` +
+      `APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD (plus APPLE_TEAM_ID) on macOS, ` +
+      `then re-run. See desktop/README.md "Sign & notarize".`
   );
   process.exit(1);
 }
