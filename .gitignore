@@ -64,4 +64,6 @@ storage/
 # agent/dev scratch (machine-local, not for public repo)
 .superpowers/
 .serena/
-.claude/settings.local.json
+# ignore all local Claude Code tooling/config (settings, launch, worktrees).
+# A stray .claude/worktrees/* gitlink with no .gitmodules broke `npm version`/git in CI.
+.claude/

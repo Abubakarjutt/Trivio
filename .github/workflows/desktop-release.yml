@@ -1,21 +1,40 @@
 name: Desktop release
 
-# Build, sign, and notarize the macOS desktop app on a version tag, then
-# publish a GitHub Release containing exactly the artifacts electron-updater
-# needs (latest-mac.yml + .blockmap + .zip). Triggered by tags like `v1.2.3`
-# or manually from the Actions tab.
+# Build, sign (when credentials are present), and publish the desktop app on a
+# version tag, or on a manual "Run workflow" (which builds + uploads CI artifacts
+# but does NOT create a public release).
 #
-# Required repo secrets (Settings -> Secrets and variables -> Actions):
-#   CSC_LINK                     base64-encoded "Developer ID Application" .p12
+# ── macOS (desktop-macos) ──────────────────────────────────────────────────────
+# Produces a native .dmg + .zip for Apple Silicon. If the Apple Developer ID +
+# notary secrets are present, the build is signed, notarized and stapled (a
+# Gatekeeper-clean .dmg). If they are ABSENT, the build still succeeds as an
+# UNSIGNED ad-hoc-signed .dmg so an artifact always ships — with a clear log
+# warning that macOS will warn on other machines until it is signed.
+#
+# ── Windows (desktop-windows) ──────────────────────────────────────────────────
+# A native Windows installer (NSIS setup.exe) + a no-install portable .exe, x64,
+# with the EMBEDDED PostgreSQL engine. The EDB Windows engine can only be
+# fetched/verified on a Windows runner, so this job runs natively on
+# windows-latest and needs the macOS job first (it creates the GitHub Release,
+# which this job then appends its .exe artifacts to).
+#
+# Signing is OPTIONAL on both platforms: an unsigned build runs but shows an OS
+# warning (macOS Gatekeeper / Windows SmartScreen "Run anyway").
+#
+# Required repo secrets (Settings -> Secrets and variables -> Actions) for a
+# SIGNED, distribution-quality build (all optional — an unsigned build still ships):
+#   CSC_LINK                     base64-encoded "Developer ID Application" .p12 (macOS)
 #   CSC_KEY_PASSWORD             password for that .p12
 #   APPLE_ID                     Apple Developer account email (notarytool)
 #   APPLE_APP_SPECIFIC_PASSWORD  app-specific password for the notary
-#   APPLE_TEAM_ID                 10-char Apple team id (e.g. R3B5NU8CVN)
+#   APPLE_TEAM_ID                10-char Apple team id (e.g. R3B5NU8CVN)
+#   WIN_CSC_LINK                 base64-encoded Windows Authenticode .pfx
+#   WIN_CSC_KEY_PASSWORD         password for that .pfx
 #
-# The cert in CSC_LINK MUST be a "Developer ID Application" identity -- NOT an
+# The macOS CSC_LINK MUST be a "Developer ID Application" identity -- NOT an
 # "Apple Development" cert. Only the former yields a .dmg Gatekeeper will open
-# on other machines. desktop/preflight.mjs (run first by build:desktop:ship)
-# hard-fails on a Development cert or missing notary creds.
+# on other machines. desktop/preflight.mjs (run by build:desktop:ship when
+# signing is detected) hard-fails on a Development cert or missing notary creds.
 
 on:
   push:
@@ -29,8 +48,10 @@ permissions:
 
 jobs:
   desktop-macos:
-    # arm64 runner -- matches the app's current arm64-only target. Add an x64 /
-    # universal target later by regenerating the prisma engine for that arch.
+    # arm64 runner -- matches the app's current arm64-only target. A universal /
+    # x64 target is intentionally NOT built here: it requires the x64 Postgres
+    # engine to be embedded too (fetch:pg lays down one arch), which this arm64
+    # runner cannot verify. See desktop/electron-builder.yml.
     runs-on: macos-15
 
     env:
@@ -41,7 +62,6 @@ jobs:
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
     steps:
-      # Pinned SHAs match deploy.yml's security posture (checkout + setup-node).
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -61,34 +81,63 @@ jobs:
 
       # electron-updater keys latest-mac.yml off the app's internal version, so a
       # `v1.2.3` tag must produce 1.2.3 artifacts. On a tag push we sync the
-      # version (no git commit); on manual dispatch we keep it as-is.
+      # version (NO git tag/commit); on manual dispatch we keep it as-is.
+      #
+      # `npm pkg set` (pure JSON edit of package.json) is used INSTEAD OF
+      # `npm version` on purpose: `npm version` shells out to `git`, which is
+      # fragile under a shallow `actions/checkout` and any stray worktree state.
       - name: Align package.json version with the release tag
         run: |
           if [ "${{ github.event_name }}" = "push" ] && [ -n "${GITHUB_REF_NAME:-}" ]; then
             ver="${GITHUB_REF_NAME#v}"
             echo "Syncing package.json version to $ver (tag $GITHUB_REF_NAME)"
-            npm version "$ver" --no-git-tag-version
+            npm pkg set version="$ver"
           else
             echo "Manual dispatch -- keeping package.json version as-is."
           fi
 
-      # SHIP=1 makes preflight hard-fail without a Developer ID identity + Apple
-      # notary creds; electron-builder then signs + auto-notarizes + staples the
-      # .zip and .dmg when APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD (+ APPLE_TEAM_ID)
-      # are present.
-      - name: Build, sign & auto-notarize
-        run: npm run build:desktop:ship
+      # Decide signed vs unsigned up front so the build + verify + notes stay honest.
+      - name: Detect signing & notarization credentials
+        id: signing
+        run: |
+          has_cert="${CSC_LINK:-}${CSC_NAME:-}"
+          has_notary="${APPLE_ID:-}${APPLE_APP_SPECIFIC_PASSWORD:-}${NOTARY_PROFILE:-}"
+          if [ -n "$has_cert" ] && [ -n "$has_notary" ]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+            echo "Developer ID + notary credentials detected -- building signed & notarized."
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            missing=""
+            [ -z "$has_cert" ]   && missing="${missing} a Developer ID cert (CSC_LINK + CSC_KEY_PASSWORD)"
+            [ -z "$has_notary" ] && missing="${missing} notary credentials (APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD, or NOTARY_PROFILE)"
+            echo "No signing credentials (missing:${missing}). The macOS build will be UNSIGNED (ad-hoc)."
+            echo "Set those repo secrets to ship a Gatekeeper-clean .dmg that opens on other Macs."
+          fi
 
-      # electron-builder already notarized during the build; this makes the
-      # notarization explicit + inspectable in the log and guarantees a ticket
-      # even if auto-notarize is ever disabled.
+      # SHIP=1 makes preflight hard-fail without a Developer ID identity + Apple
+      # notary creds; when signing is detected we ship the strict path, otherwise
+      # we produce an UNSIGNED build (preflight only warns) so an artifact always
+      # ships. electron-builder signs + auto-notarizes + staples when creds exist.
+      - name: Build (signed & notarized, or unsigned if no credentials)
+        run: |
+          if [ "${{ steps.signing.outputs.signed }}" = "true" ]; then
+            echo "Building SIGNED & notarized."
+            npm run build:desktop:ship
+          else
+            echo "Building UNSIGNED (ad-hoc signed -- Gatekeeper will warn on other Macs)."
+            npm run build:desktop
+          fi
+
+      # electron-builder already notarized during the signed build; this makes the
+      # notarization explicit + inspectable in the log and guarantees a ticket.
       - name: Explicit notarize (belt-and-suspenders)
+        if: steps.signing.outputs.signed == 'true'
         run: npm run notarize
 
-      # Hard gates: codesign --verify --deep --strict and `stapler validate` (a
-      # stapled ticket is what makes the .dmg Gatekeeper-clean). spctl is
-      # informational only -- it is finicky in headless CI.
+      # Hard gates only when we actually signed (an ad-hoc/unsigned build would
+      # legitimately fail codesign --verify --strict, so don't gate on it).
       - name: Verify signature & notarization
+        if: steps.signing.outputs.signed == 'true'
         run: |
           app="release/mac-arm64/Trivio.app"
           dmg="$(ls release/*.dmg | head -1)"
@@ -115,7 +164,7 @@ jobs:
 
       # electron-updater needs a NON-draft release carrying latest-mac.yml +
       # .blockmap + .zip. Re-runs use --clobber. Manual dispatch skips the
-      # publish (nothing to tag against yet).
+      # publish (nothing to tag against yet). The notes are HONEST about signing.
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -127,29 +176,32 @@ jobs:
             case "$tag" in
               *-rc*|*-alpha*|*-beta*|*rc.*|*alpha.*|*beta.*) prerelease_flag="--prerelease" ;;
             esac
+            if [ "${{ steps.signing.outputs.signed }}" = "true" ]; then
+              notes="Trivio desktop -- macOS (arm64), SIGNED & notarized. Open the .dmg, drag Trivio.app to Applications, and you are ready to go. Update feed: https://github.com/${{ github.repository }}/releases/latest"
+            else
+              notes="Trivio desktop -- macOS (arm64), UNSIGNED (ad-hoc). Open the .dmg, drag Trivio.app to Applications. If macOS blocks it, right-click the app -> Open (or 'xattr -d com.apple.quarantine Trivio.app'). Set the Apple Developer ID + notary repo secrets for a Gatekeeper-clean build. Update feed: https://github.com/${{ github.repository }}/releases/latest"
+            fi
             echo "Publishing GitHub Release $tag ${prerelease_flag:+(prerelease)}"
             gh release create "$tag" \
               release/*.dmg release/*.zip release/*.blockmap release/latest-mac.yml \
               --clobber \
               --title "Trivio $tag" \
-              --notes "Trivio desktop -- macOS (arm64), signed & notarized. Update feed: https://github.com/${{ github.repository }}/releases/latest" \
+              --notes "$notes" \
               $prerelease_flag
           else
             echo "Manual dispatch -- skipping release publish (push a v* tag to publish)."
           fi
 
   # ── Windows ──────────────────────────────────────────────────────────────────
-  # A native Windows build (NSIS setup.exe + portable.exe, x64) with the EMBEDDED
-  # PostgreSQL engine. The EDB Windows engine can only be fetched/verified on a
-  # Windows runner, so this job runs natively on windows-latest. It needs the macOS
-  # job to run first so the GitHub Release (created there) already exists, and then
-  # it *appends* the Windows artifacts with `gh release upload` (never clobbering
-  # the .dmg/.zip the macOS job added).
+  # Native Windows build (NSIS setup.exe + portable.exe, x64) with the EMBEDDED
+  # PostgreSQL engine. Runs natively on windows-latest; needs the macOS job first
+  # so the GitHub Release already exists, then APPENDS the Windows artifacts with
+  # `gh release upload` (never clobbering the .dmg/.zip the macOS job added).
   #
-  # Signing is optional: set the Windows Authenticode secrets (WIN_CSC_LINK =
-  # base64 .pfx + WIN_CSC_KEY_PASSWORD) and the build signs the .exe/.nsis. Without
-  # them the build is unsigned and Windows SmartScreen shows a "protected your PC"
-  # warning until a user clicks "Run anyway". desktop/preflight.mjs reports this.
+  # Signing is optional: set WIN_CSC_LINK (base64 .pfx) + WIN_CSC_KEY_PASSWORD and
+  # the .exe/.nsis are Authenticode-signed. Without them the build is unsigned and
+  # Windows SmartScreen shows a "protected your PC" warning until the user clicks
+  # "Run anyway". desktop/preflight.mjs reports this.
   desktop-windows:
     needs: [desktop-macos]
     runs-on: windows-latest
@@ -177,24 +229,47 @@ jobs:
       - name: Generate Prisma client
         run: npx prisma generate
 
+      # Same pure-JSON version sync as the macOS job (no git dependency).
       - name: Align package.json version with the release tag
         shell: bash
         run: |
           if [ "${{ github.event_name }}" = "push" ] && [ -n "${GITHUB_REF_NAME:-}" ]; then
             ver="${GITHUB_REF_NAME#v}"
             echo "Syncing package.json version to $ver (tag $GITHUB_REF_NAME)"
-            npm version "$ver" --no-git-tag-version
+            npm pkg set version="$ver"
           else
             echo "Manual dispatch -- keeping package.json version as-is."
           fi
 
+      # Decide signed vs unsigned up front.
+      - name: Detect Windows signing credential
+        id: wsign
+        shell: bash
+        run: |
+          if [ -n "${WIN_CSC_LINK:-}" ]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+            echo "Windows Authenticode certificate detected -- signing the .exe/.nsis."
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "No WIN_CSC_LINK -- the .exe will be UNSIGNED (Windows SmartScreen shows 'Run anyway' until signed)."
+            echo "Set the WIN_CSC_LINK (base64 .pfx) + WIN_CSC_KEY_PASSWORD secrets for a signed build."
+          fi
+
       # build:desktop:win fetches the EDB Windows engine, runs preflight, builds
       # the shell + server, generates the .ico, and runs electron-builder --win
-      # (NSIS + portable). SHIP=1 (build:desktop:win:ship) hard-fails without a
-      # signing cert, so an unsigned build never ships by mistake.
+      # (NSIS + portable). When signed we use the SHIP path (preflight hard-fails
+      # without a cert, so an unsigned build never ships by mistake); otherwise we
+      # produce an UNSIGNED build so an artifact always ships.
       - name: Build Windows (NSIS + portable, embedded Postgres)
         shell: bash
-        run: npm run build:desktop:win
+        run: |
+          if [ "${{ steps.wsign.outputs.signed }}" = "true" ]; then
+            echo "Building SIGNED Windows app."
+            npm run build:desktop:win:ship
+          else
+            echo "Building UNSIGNED Windows app (SmartScreen 'Run anyway' until signed)."
+            npm run build:desktop:win
+          fi
 
       - name: List build output
         shell: bash
@@ -217,10 +292,10 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
             tag="${GITHUB_REF_NAME}"
-             # A prerelease tag (e.g. v1.0.0-rc.1) must be published as prerelease.
+            # A prerelease tag (e.g. v1.0.0-rc.1) must be published as prerelease.
             prerelease_flag=""
             case "$tag" in
-               *-rc*|*-alpha*|*-beta*|*rc.*|*alpha.*|*beta.*) prerelease_flag="--prerelease" ;;
+              *-rc*|*-alpha*|*-beta*|*rc.*|*alpha.*|*beta.*) prerelease_flag="--prerelease" ;;
             esac
             # The macOS job created the release; append the Windows artifacts
             # (upload --clobber only touches same-named files, so the .dmg/.zip stay).

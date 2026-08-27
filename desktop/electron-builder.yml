@@ -77,9 +77,12 @@ mac:
   entitlements: desktop/entitlements.mac.plist
   entitlementsInherit: desktop/entitlements.mac.inherit.plist
   icon: desktop/build/icon.icns
-  # Apple Silicon first (build host is arm64). To add an x64 target, run
-  # `prisma generate` with the x64 query engine, then add `- x64` below or use
-  # target universal (requires both engine archs).
+  # Apple Silicon first (build host is arm64). A universal/x64 target is intentionally
+  # NOT built by CI: fetch:pg lays down a single-arch Postgres engine, so a
+  # universal app would ship the arm64 engine to Intel Macs (broken). To add x64,
+  # fetch BOTH engine arches (fetch:pg --arch=x64 then --arch=arm64 into the same
+  # tree) and have resolvePostgresBinaries pick by process.arch at runtime, then add
+  # `- x64` here or use target universal. See desktop/README.md.
   target:
     - target: dmg
       arch:
