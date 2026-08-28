@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
 import { useToast } from "@/lib/hooks/use-toast";
@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 import {
   Upload,
   FileText,
-  Image,
+  Image as ImageIcon,
   Loader2,
   CheckCircle2,
   XCircle,
@@ -253,12 +253,12 @@ export default function ExtractPage() {
     }
   }
 
-  const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setDragOver(false);
     const file = e.dataTransfer.files[0];
     if (file) handleFileSelect(file);
-  }, []);
+    };
 
   async function handleUpload() {
     if (!selectedFile) return;
@@ -383,7 +383,7 @@ export default function ExtractPage() {
                   </div>
                   <div className="flex gap-2 mt-1">
                     <Badge variant="secondary" className="text-[10px]">
-                      <Image className="h-2.5 w-2.5 mr-1" />JPEG
+                       <ImageIcon className="h-2.5 w-2.5 mr-1" />JPEG
                     </Badge>
                     <Badge variant="secondary" className="text-[10px]">PNG</Badge>
                     <Badge variant="secondary" className="text-[10px]">WebP</Badge>

@@ -257,7 +257,7 @@ async function runOllama(params: {
       options: { temperature: 0.2, num_predict: 8192 },
     }),
     signal: AbortSignal.timeout(180000),
-  }).catch((err) => {
+  }).catch(() => {
     // Connection refused / DNS / timeout → the local Ollama isn't up yet.
     throw new NeedsSetupError(
       "The local AI assistant (Ollama + Gemma) isn't running. Set it up in Settings → AI Assistant, then try again."
