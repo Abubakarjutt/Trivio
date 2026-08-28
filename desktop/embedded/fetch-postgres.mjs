@@ -408,10 +408,18 @@ function run() {
   for (const s of order) {
     try {
       handlers[s]();
-      break;
     } catch (e) {
       log(`(source ${s} failed: ${e.message})`);
     }
+    // A handler either lays the engine down or returns because its source is
+    // unavailable on this host. Only stop the chain when the engine actually
+    // materialised — otherwise fall through to the next source. The old code
+    // broke on *any* return, so the very first "skip" aborted the whole chain.
+    if (existsSync(join(BIN, "postgres" + EXE))) {
+      log(`'${s}' produced the engine — stopping the source chain.`);
+      break;
+    }
+    log(`'${s}' did not produce an engine — trying next source.`);
   }
   if (!existsSync(join(BIN, "postgres" + EXE)))
     die(
