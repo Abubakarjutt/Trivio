@@ -43,7 +43,11 @@ if (existsSync(join(distServer, "server.js"))) {
 } else if (existsSync(standalone)) {
   log(`.next/standalone present — will be assembled into dist-server`);
 } else {
-  err("no .next/standalone and no desktop/dist-server — run `npm run build` first.");
+  // `build:desktop` runs this preflight *before* the slow `next build`, so on a
+  // clean checkout the tree does not exist yet — that is expected, not a failure.
+  // `npm run build` (next in the chain) produces it and electron-builder fails
+  // loudly if it is still missing. Keep this check informational.
+  warn("no .next/standalone yet — `npm run build` (next in the chain) will produce it");
 }
 
 // ── 2. Code-signing + notarization / SmartScreen posture ──────────────────────
