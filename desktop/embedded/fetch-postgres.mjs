@@ -25,6 +25,8 @@
 //   node desktop/embedded/fetch-postgres.mjs --source=local --force
 //   TRIVIO_PG_BIN=/opt/homebrew/opt/postgresql/bin npm run fetch:pg
 //   TRIVIO_PG_VERSION=17 node desktop/embedded/fetch-postgres.mjs --source=edb
+//   TRIVIO_PG_SOURCE=edb npm run fetch:pg                    # force a source (env or --source=)
+//   TRIVIO_PG_DOWNLOAD_URL=https://.../pg.zip npm run fetch:pg # pin one EDB archive
 //
 // `postgres --version` is run after every fetch to prove the engine is real.
 
@@ -57,7 +59,7 @@ function flag(name, fallback) {
   return fallback;
 }
 const FORCE = argv.includes("--force");
-const sourceArg = flag("source", "auto");
+const sourceArg = flag("source", process.env.TRIVIO_PG_SOURCE || "auto");
 const outOverride = flag("out", EMBEDDED);
 const archOverride = flag("arch", null);
 const versionArg = flag("version", process.env.TRIVIO_PG_VERSION || "16");
@@ -201,21 +203,25 @@ function detectLocal() {
   return null;
 }
 
-function fromLocal() {
-  const found = detectLocal();
-  if (!found)
-    die(
-      "no local Postgres found",
-      "install one (e.g. `brew install postgresql`) or use --source=edb"
-    );
-  log(`using local engine at ${found.bindir}`);
-  normalizeEngine(found.bindir, found.libdir, found.source, found.version);
-}
+// ── Source handlers ───────────────────────────────────────────────────────────
+// Each handler EITHER lays the engine down (and the dispatch loop breaks) OR the
+// source is not available on this host, in which case it RETURNS so the loop can
+// try the next source. A hard die() happens only at the end of run(), once no
+// source produced an engine — never inside a handler: a handler calling
+// process.exit() (which die() does) kills the whole auto-fallback chain, so the
+// very first "not available" source would abort the rest.
 
+// 1. TRIVIO_PG_BIN — an explicit bin dir (+ sibling lib/). Unset ⇒ skip.
 function fromEnvBin() {
   const dir = process.env.TRIVIO_PG_BIN;
-  if (!dir) die("TRIVIO_PG_BIN is not set");
-  if (!existsSync(join(dir, "initdb"))) die(`TRIVIO_PG_BIN=${dir} has no initdb`);
+  if (!dir) {
+    log("TRIVIO_PG_BIN is not set — skipping 'env' source.");
+    return;
+  }
+  if (!existsSync(join(dir, "initdb" + EXE))) {
+    log(`TRIVIO_PG_BIN=${dir} has no initdb${EXE} — skipping 'env' source.`);
+    return;
+  }
   log(`copying engine from TRIVIO_PG_BIN=${dir}`);
   normalizeEngine(
     dir,
@@ -225,61 +231,160 @@ function fromEnvBin() {
   );
 }
 
+// 2. local — a system Postgres (pg_config / Homebrew keg / PATH). None ⇒ skip.
+function fromLocal() {
+  const found = detectLocal();
+  if (!found) {
+    log("no local Postgres found — skipping 'local' source.");
+    return;
+  }
+  log(`using local engine at ${found.bindir}`);
+  normalizeEngine(found.bindir, found.libdir, found.source, found.version);
+}
+
+// 3. brew (macOS) — `brew install postgresql@<ver>` then copy the keg. Not
+// available (no brew / install fails / nothing detected) ⇒ skip.
 function fromBrew() {
   const brew = spawnSync("which", ["brew"], { encoding: "utf8" });
-  if (brew.status !== 0) die("brew not found on PATH");
-  const name = "postgresql";
-  log(`brew install ${name}…`);
+  if (brew.status !== 0) {
+    log("brew not found on PATH — skipping 'brew' source.");
+    return;
+  }
+  // Pin to the requested major so the engine matches PG_VERSION: the default
+  // `postgresql` formula now tracks a newer major than the app targets.
+  const name = `postgresql@${PG_VERSION}`;
+  log(`brew install ${name} ...`);
   const install = spawnSync("brew", ["install", name], { stdio: "inherit" });
-  if (install.status !== 0) die(`brew install ${name} failed`);
+  if (install.status !== 0) {
+    log(`brew install ${name} failed — skipping 'brew' source.`);
+    return;
+  }
   const found = detectLocal();
-  if (!found) die("brew install succeeded but no engine was detected");
+  if (!found) {
+    log("brew install succeeded but no engine was detected — skipping 'brew' source.");
+    return;
+  }
   normalizeEngine(found.bindir, found.libdir, "brew", PG_VERSION);
 }
 
-// EDB "binaries" archive (portable). The URL is version-stamped; override with
-// TRIVIO_PG_DOWNLOAD_URL for a pinned build. Requires `unzip` on the host.
+// 4. edb — EnterpriseDB "binaries" archive (portable, shippable). EDB has renamed
+// its archives several times, so we try a matrix of current + legacy URL shapes
+// (and the full installerVersion, e.g. 16.15, not just the bare major "16").
+// TRIVIO_PG_DOWNLOAD_URL pins one exact archive (tried first). Any download or
+// extract failure ⇒ skip; the loop + final guard in run() report the real cause.
+// Requires `curl` plus (`unzip` on POSIX / `tar` on Windows 10+).
+function candidateEdbUrls() {
+  const base = "https://get.enterprisedb.com/postgresql/postgresql-";
+  // EDB's "binaries" archives are named by installerVersion (16.15, 17.11, ...);
+  // when the caller gave a bare major, also try the latest known minor.
+  const known = {
+    16: "16.15",
+    17: "17.11",
+    18: "18.6",
+    15: "15.19",
+    14: "14.24",
+    13: "13.23",
+  };
+  const versions = new Set([PG_VERSION, PG_VERSION.split(".")[0]]);
+  const minor = known[PG_VERSION];
+  if (minor) versions.add(minor);
+
+  // Per-platform OS/Arch tokens. macOS: macos13+arch, or universal "osx" (newer
+  // EDB builds carry no arch suffix). Windows is x64-only; Linux uses x64/aarch64.
+  const arch = wantArch === "arm64" ? "aarch64" : "x64";
+  let tokens = [];
+  if (wantPlatform === "darwin") {
+    tokens = [
+      { os: "macos13", arch },
+      { os: "osx", arch: "" },
+    ];
+  } else if (wantPlatform === "win32") {
+    tokens = [{ os: "windows", arch: "x64" }];
+  } else {
+    tokens = [{ os: "linux", arch }];
+  }
+
+  const urls = [];
+  for (const v of versions) {
+    for (const { os, arch: a } of tokens) {
+      // Current shape: postgresql-<ver>-<os>[-<arch>]-binaries.zip
+      urls.push(a ? `${base}${v}-${os}-${a}-binaries.zip` : `${base}${v}-${os}-binaries.zip`);
+      // Legacy shape: postgresql-<ver>-binaries-<os>[-<arch>].zip
+      urls.push(a ? `${base}${v}-binaries-${os}-${a}.zip` : `${base}${v}-binaries-${os}.zip`);
+    }
+  }
+  // A pinned URL always wins (tried first, exactly once).
+  const pinned = process.env.TRIVIO_PG_DOWNLOAD_URL;
+  return pinned ? [pinned, ...urls] : urls;
+}
+
+// Recursively find the directory holding initdb[.exe] (the bindir). EDB archives
+// extract to <root>/pgsql/{bin,lib} (newer) or a flat bin/ (older); a shallow DFS
+// covers both without hard-coding the layout.
+function findBindir(root) {
+  let found = null;
+  const walk = (dir, depth) => {
+    if (found || depth > 4) return;
+    let entries = [];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (found) return;
+      if (e.isFile() && e.name === "initdb" + EXE) {
+        found = dir;
+        return;
+      }
+    }
+    for (const e of entries) {
+      if (found || !e.isDirectory()) continue;
+      walk(join(dir, e.name), depth + 1);
+    }
+  };
+  walk(root, 0);
+  return found;
+}
+
 function fromEdb() {
-  const archPart = wantArch === "arm64" ? "aarch64" : "x64";
-  // EDB archive names: macos13 (macOS), linux, or windows. Windows is x64 only.
-  const osPart =
-    wantPlatform === "darwin" ? "macos13" : wantPlatform === "win32" ? "windows" : "linux";
-  const url =
-    process.env.TRIVIO_PG_DOWNLOAD_URL ||
-    `https://get.enterprisedb.com/postgresql/postgresql-${PG_VERSION}-binaries-${osPart}-${archPart}.zip`;
-  log(`downloading EDB engine: ${url}`);
   const tmp = resolve(EMBEDDED, ".dl");
   rmSync(tmp, { recursive: true, force: true });
   mkdirSync(tmp, { recursive: true });
+  const xDir = join(tmp, "x");
   const zipPath = join(tmp, "pg.zip");
-  const dl = spawnSync("curl", ["-fL", "-o", zipPath, url], { stdio: "inherit" });
-  if (dl.status !== 0)
-    die(
-      `download failed: ${url}`,
-      "set TRIVIO_PG_DOWNLOAD_URL to a pinned EDB archive, or use --source=local/brew"
-    );
-  // Windows 10+ ships `tar` (libarchive) which extracts .zip; POSIX uses unzip.
-  const uz =
-    wantPlatform === "win32"
-      ? spawnSync("tar", ["-xf", zipPath, "-C", join(tmp, "x")], { stdio: "inherit" })
-      : spawnSync("unzip", ["-q", zipPath, "-d", join(tmp, "x")], { stdio: "inherit" });
-  if (uz.status !== 0) die("archive extraction failed (need 'unzip' on POSIX or 'tar' on Windows)");
-  // EDB layout: <root>/pgsql/{bin,lib}. Windows keeps its DLLs under bin/, so a
-  // separate lib/ may be absent — that is fine (the engine is self-contained).
-  const extracted = readdirSync(join(tmp, "x"), { withFileTypes: true })
-    .map((e) => join(tmp, "x", e.name))
-    .find(
-      (p) =>
-        existsSync(join(p, "bin", "initdb" + EXE)) ||
-        existsSync(join(p, "pgsql", "bin", "initdb" + EXE))
-    );
-  if (!extracted) die("could not locate pgsql/bin inside the EDB archive");
-  const pgsql = existsSync(join(extracted, "pgsql")) ? join(extracted, "pgsql") : extracted;
-  const bindir = join(pgsql, "bin");
-  const libdir = existsSync(join(pgsql, "lib")) ? join(pgsql, "lib") : undefined;
-  rmSync(tmp, { recursive: true, force: true });
-  log(`using EDB engine at ${bindir}`);
-  normalizeEngine(bindir, libdir, "edb", PG_VERSION);
+
+  for (const url of candidateEdbUrls()) {
+    log(`trying EDB engine: ${url}`);
+    const dl = spawnSync("curl", ["-fL", "-o", zipPath, url], { stdio: "inherit" });
+    if (dl.status !== 0) {
+      log(`  download failed (exit ${dl.status}) — trying next URL.`);
+      continue;
+    }
+    // Windows 10+ ships `tar` (libarchive) which extracts .zip; POSIX uses unzip.
+    const uz =
+      wantPlatform === "win32"
+        ? spawnSync("tar", ["-xf", zipPath, "-C", xDir], { stdio: "inherit" })
+        : spawnSync("unzip", ["-q", zipPath, "-d", xDir], { stdio: "inherit" });
+    if (uz.status !== 0) {
+      log("  extraction failed — trying next URL.");
+      continue;
+    }
+    // Windows keeps its DLLs under bin/ (self-contained), so a sibling lib/ may be
+    // absent — that is fine. A portable engine finds libs via a sibling lib/ on
+    // POSIX (the rpath/LD_LIBRARY_PATH in embedded-db.ts handles the rest).
+    const bindir = findBindir(xDir);
+    if (!bindir) {
+      log("  could not locate initdb inside the archive — trying next URL.");
+      continue;
+    }
+    const libdir = existsSync(join(bindir, "..", "lib")) ? join(bindir, "..", "lib") : undefined;
+    rmSync(tmp, { recursive: true, force: true });
+    log(`using EDB engine at ${bindir} (${url})`);
+    normalizeEngine(bindir, libdir, "edb", PG_VERSION);
+    return;
+  }
+  log("no EDB archive could be downloaded/extracted — skipping 'edb' source.");
 }
 
 // ── Dispatch ─────────────────────────────────────────────────────────────────
@@ -308,10 +413,10 @@ function run() {
       log(`(source ${s} failed: ${e.message})`);
     }
   }
-  if (!existsSync(join(BIN, "postgres")))
+  if (!existsSync(join(BIN, "postgres" + EXE)))
     die(
       "no Postgres engine could be obtained",
-      "try: --source=local (install one first), --source=brew (macOS), or --source=edb (network)"
+      "try --source=local, --source=brew (macOS), or --source=edb (needs a working EDB URL — pin one with TRIVIO_PG_DOWNLOAD_URL, or set TRIVIO_PG_BIN to a local engine)"
     );
   verify();
   log(`✓ embedded PostgreSQL ready at ${EMBEDDED}`);

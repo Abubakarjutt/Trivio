@@ -60,6 +60,10 @@ jobs:
       APPLE_ID: ${{ secrets.APPLE_ID }}
       APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      # Embedded Postgres engine source. On this macos-15 runner `auto` probes
+      # env/local/brew and Homebrew's postgresql@16 keg is reliable, so we let it
+      # fall through to brew; edb (a network download) is only the last resort.
+      TRIVIO_PG_SOURCE: auto
 
     steps:
       - name: Checkout
@@ -212,6 +216,11 @@ jobs:
       # electron-builder reads CSC_LINK / CSC_KEY_PASSWORD for Authenticode.
       CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
       CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+      # Windows runners have no Homebrew and no system Postgres, so force the
+      # EDB download. fetch-postgres.mjs tries current + legacy EDB "binaries"
+      # URLs (and the installerVersion); pin one with TRIVIO_PG_DOWNLOAD_URL if
+      # EDB renames the archive again.
+      TRIVIO_PG_SOURCE: edb
 
     steps:
       - name: Checkout
