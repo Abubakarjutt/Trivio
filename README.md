@@ -1,27 +1,28 @@
 <p align="center">
-  <img src="./docs/assets/trivio-banner.svg" alt="Trivio — Accounting, made simple" width="100%" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./docs/assets/trivio-banner-dark.svg" />
+    <img src="./docs/assets/trivio-banner-light.svg" alt="Trivio — Accounting, made simple" width="100%" />
+  </picture>
 </p>
-
-<h3 align="center">Accounting, made simple.</h3>
 
 <p align="center">
   <a href="https://github.com/Abubakarjutt/Trivio/releases/latest">
-    <img src="https://img.shields.io/badge/release-latest-blue" alt="Release" />
+    <img src="https://img.shields.io/badge/release-latest-blue?style=flat-square" alt="Release" />
   </a>
   <a href="https://github.com/Abubakarjutt/Trivio/actions/workflows/ci.yml">
     <img src="https://github.com/Abubakarjutt/Trivio/actions/workflows/ci.yml/badge.svg" alt="CI" />
   </a>
   <a href="./LICENSE">
-    <img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT" />
+    <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License: MIT" />
   </a>
   <a href="https://nextjs.org">
-    <img src="https://img.shields.io/badge/Next.js-15-black" alt="Next.js 15" />
+    <img src="https://img.shields.io/badge/Next.js-15-black?style=flat-square" alt="Next.js 15" />
   </a>
   <a href="https://nodejs.org">
-    <img src="https://img.shields.io/badge/node-20%2B-green" alt="Node 20+" />
+    <img src="https://img.shields.io/badge/node-20%2B-green?style=flat-square" alt="Node 20+" />
   </a>
   <a href="#two-products-one-codebase">
-    <img src="https://img.shields.io/badge/platform-Web%20·%20macOS-cyan" alt="Platform: Web and macOS" />
+    <img src="https://img.shields.io/badge/platform-Web%20·%20macOS-cyan?style=flat-square" alt="Platform: Web and macOS" />
   </a>
 </p>
 
@@ -37,20 +38,20 @@ that runs your entire stack offline. No accounting degree required.
 
 It's **free and open source** ([MIT](./LICENSE)). Self-host it, extend it, or use it as-is.
 
-## ✨ Why Trivio
+## Why Trivio
 
 - **No learning curve** — a modern UI built for people who _run_ a business, not accountants.
 - **Always balanced** — every transaction is a balanced journal entry (debits = credits). It's enforced in code.
 - **Privacy by default** — AI extraction runs on a local model by default, so your financial documents never leave your machine.
 - **Runs anywhere** — the web app deploys to any host; the desktop app bundles its own database and a local AI model, so it works offline after a one-time model download.
 
-## 🚀 How it works
+## How it works
 
 1. **Set up in minutes** — pick a business type; Trivio builds a ready-to-go chart of accounts and tax regime.
 2. **Feed it documents** — drop in receipts, invoices, or a bank statement; AI drafts the entry.
 3. **Review & post** — you confirm every entry, and your books stay mathematically correct.
 
-## ✨ Features
+## Features
 
 | Feature                      | What you get                                                                       |
 | ---------------------------- | ---------------------------------------------------------------------------------- |
@@ -68,7 +69,7 @@ It's **free and open source** ([MIT](./LICENSE)). Self-host it, extend it, or us
 | **AI chat assistant**        | Ask questions about your books, grounded in your own data.                         |
 | **Audit trail**              | Every action is logged for accountability and compliance.                          |
 
-## 🧠 Privacy-first AI
+## Privacy-first AI
 
 Trivio's AI reads receipts, invoices, and bank statements, and it's built to keep
 your data where you want it:
@@ -81,7 +82,7 @@ your data where you want it:
 - **You always confirm.** Extracted data is presented for review before anything is
   saved. Trivio never auto-posts an AI-suggested entry.
 
-## 💻 Two products, one codebase
+## Two products, one codebase
 
 Trivio ships as two products that **share 100% of the application code**:
 
@@ -152,7 +153,7 @@ git push origin main v1.2.3
 > The certificate in `CSC_LINK` must be a **Developer ID Application** identity (not
 > "Apple Development"), or Gatekeeper will block the `.dmg` on other machines.
 
-## 🏁 Quick start
+## Quick start
 
 ### Prerequisites
 
@@ -218,7 +219,7 @@ npx tsx server/workers/extraction.worker.ts   # in a second terminal — the Bul
 
 Now you can upload receipts and invoices and have the AI extract the data for you.
 
-## 🧱 Tech stack
+## Tech stack
 
 | Layer         | Choice                                                                                         |
 | ------------- | ---------------------------------------------------------------------------------------------- |
@@ -237,7 +238,7 @@ Now you can upload receipts and invoices and have the AI extract the data for yo
 | **Testing**   | [Vitest](https://vitest.dev/) (unit/integration) · [Playwright](https://playwright.dev/) (E2E) |
 | **Desktop**   | Electron · electron-builder (macOS)                                                            |
 
-## 🏛️ Design principles
+## Design principles
 
 These invariants are enforced in the codebase and are the reason the books are always
 trustworthy. Please preserve them when contributing.
@@ -255,7 +256,7 @@ trustworthy. Please preserve them when contributing.
 - **Privacy-first AI.** Extraction runs on a local model by default, keeping sensitive
   documents on the user's own hardware.
 
-## 🧰 Local development
+## Local development
 
 ### Services
 
@@ -306,7 +307,7 @@ The full list lives in [`.env.example`](./.env.example). The core ones:
 | `npm run test:e2e`                   | Run the Playwright E2E suite          |
 | `npm run typecheck` / `npm run lint` | Type-check / lint                     |
 
-## 🧪 Testing
+## Testing
 
 ```bash
 npm run test          # unit + integration (Vitest)
@@ -317,7 +318,7 @@ npm run typecheck     # TypeScript check
 CI runs the full suite on every push and pull request — see
 [`.github/workflows/ci.yml`](./.github/workflows/ci.yml).
 
-## 📁 Project structure
+## Project structure
 
 ```
 .
@@ -337,7 +338,7 @@ CI runs the full suite on every push and pull request — see
 └── docs/                    # Requirements, architecture, and this README's assets
 ```
 
-## 📚 Documentation
+## Documentation
 
 | Document                                                     | What it covers                               |
 | ------------------------------------------------------------ | -------------------------------------------- |
@@ -346,7 +347,7 @@ CI runs the full suite on every push and pull request — see
 | [docs/IMPLEMENTATION_PLAN.md](./docs/IMPLEMENTATION_PLAN.md) | Sprint-by-sprint roadmap                     |
 | [desktop/README.md](./desktop/README.md)                     | Building, signing & notarizing the macOS app |
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome!
 
@@ -358,7 +359,7 @@ Contributions are welcome!
 Please respect the [design principles](#design-principles) above — especially the
 double-entry and multi-tenancy invariants.
 
-## 📜 License
+## License
 
 Trivio is open source under the **[MIT License](./LICENSE)**. Use it, fork it,
 self-host it, and build commercial products on top of it.

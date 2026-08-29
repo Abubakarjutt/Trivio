@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-label="Trivio — Accounting, made simple">
+  <defs>
+    <linearGradient id="bg-l" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f8fafc"/>
+      <stop offset="0.55" stop-color="#eef2f8"/>
+      <stop offset="1" stop-color="#f4f6fb"/>
+    </linearGradient>
+    <radialGradient id="glowBlue-l" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#3b82f6" stop-opacity="0.14"/>
+      <stop offset="1" stop-color="#3b82f6" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowIndigo-l" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#6366f1" stop-opacity="0.10"/>
+      <stop offset="1" stop-color="#6366f1" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="accent-l" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#2563eb"/>
+      <stop offset="1" stop-color="#4f46e5"/>
+    </linearGradient>
+    <pattern id="grid-l" width="56" height="56" patternUnits="userSpaceOnUse">
+      <path d="M56 0H0V56" fill="none" stroke="#0f172a" stroke-opacity="0.045" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <rect width="1200" height="300" fill="url(#bg-l)"/>
+  <rect width="1200" height="300" fill="url(#grid-l)"/>
+  <ellipse cx="170" cy="115" rx="520" ry="360" fill="url(#glowBlue-l)"/>
+  <ellipse cx="1050" cy="255" rx="460" ry="320" fill="url(#glowIndigo-l)"/>
+
+  <!-- mark: a two-column ledger, balanced at its base -->
+  <g transform="translate(490,90)">
+    <rect x="0" y="0" width="52" height="52" rx="14" fill="#3b82f6" fill-opacity="0.08" stroke="#3b82f6" stroke-opacity="0.35"/>
+    <line x1="26" y1="10" x2="26" y2="40" stroke="#1e293b" stroke-opacity="0.20" stroke-width="1.5"/>
+    <g stroke-linecap="round">
+      <path d="M10 17h11" stroke="#2563eb" stroke-width="2.2"/>
+      <path d="M10 24h11" stroke="#2563eb" stroke-width="2.2"/>
+      <path d="M10 31h8" stroke="#2563eb" stroke-width="2.2"/>
+      <path d="M31 17h11" stroke="#4f46e5" stroke-width="2.2"/>
+      <path d="M31 24h11" stroke="#4f46e5" stroke-width="2.2"/>
+      <path d="M31 31h8" stroke="#4f46e5" stroke-width="2.2"/>
+    </g>
+    <circle cx="26" cy="45" r="2.3" fill="#4f46e5"/>
+    <text x="70" y="42" font-family="-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="52" font-weight="700" letter-spacing="-1.5" fill="#0f172a">Trivio</text>
+    <rect x="71" y="52" width="150" height="3" rx="1.5" fill="url(#accent-l)"/>
+  </g>
+
+  <text x="600" y="196" text-anchor="middle" font-family="-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="22" font-weight="400" fill="#475569">Accounting, made simple.</text>
+
+  <g font-family="-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="13" font-weight="500" fill="#334155">
+    <g transform="translate(350,236)">
+      <rect x="0" y="0" width="108" height="30" rx="15" fill="#ffffff" stroke="#3b82f6" stroke-opacity="0.30"/>
+      <text x="54" y="19.5" text-anchor="middle">Open source</text>
+    </g>
+    <g transform="translate(472,236)">
+      <rect x="0" y="0" width="116" height="30" rx="15" fill="#ffffff" stroke="#3b82f6" stroke-opacity="0.30"/>
+      <text x="58" y="19.5" text-anchor="middle">Double-entry</text>
+    </g>
+    <g transform="translate(602,236)">
+      <rect x="0" y="0" width="124" height="30" rx="15" fill="#ffffff" stroke="#3b82f6" stroke-opacity="0.30"/>
+      <text x="62" y="19.5" text-anchor="middle">AI extraction</text>
+    </g>
+    <g transform="translate(740,236)">
+      <rect x="0" y="0" width="110" height="30" rx="15" fill="#ffffff" stroke="#3b82f6" stroke-opacity="0.30"/>
+      <text x="55" y="19.5" text-anchor="middle">Web + macOS</text>
+    </g>
+  </g>
+</svg>
