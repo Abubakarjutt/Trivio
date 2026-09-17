@@ -129,6 +129,13 @@ jobs:
             npm run build:desktop:ship
           else
             echo "Building UNSIGNED (ad-hoc signed -- Gatekeeper will warn on other Macs)."
+            # An absent secret still sets CSC_LINK/CSC_KEY_PASSWORD to an EMPTY
+            # STRING at the job-env level (GitHub Actions has no "unset" for a
+            # missing secret). electron-builder treats a non-null CSC_LINK="" as
+            # "identity provided" and tries to resolve it as a file path, which
+            # resolves to the checkout dir itself and hard-fails ("not a file")
+            # instead of falling back to ad-hoc signing. Unset them for real here.
+            unset CSC_LINK CSC_KEY_PASSWORD CSC_NAME
             npm run build:desktop
           fi
 
@@ -277,6 +284,12 @@ jobs:
             npm run build:desktop:win:ship
           else
             echo "Building UNSIGNED Windows app (SmartScreen 'Run anyway' until signed)."
+            # Same empty-secret gotcha as the macOS job: an absent WIN_CSC_LINK
+            # secret still sets CSC_LINK/CSC_KEY_PASSWORD to "" (not unset) at
+            # the job-env level, which electron-builder treats as a provided
+            # (but unresolvable) identity path instead of "no signing". Unset
+            # them for real before the unsigned build.
+            unset CSC_LINK CSC_KEY_PASSWORD WIN_CSC_LINK WIN_CSC_KEY_PASSWORD
             npm run build:desktop:win
           fi
 
