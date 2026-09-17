@@ -238,11 +238,20 @@ jobs:
       # electron-builder reads CSC_LINK / CSC_KEY_PASSWORD for Authenticode.
       CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
       CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-      # Windows runners have no Homebrew and no system Postgres, so force the
-      # EDB download. fetch-postgres.mjs tries current + legacy EDB "binaries"
-      # URLs (and the installerVersion); pin one with TRIVIO_PG_DOWNLOAD_URL if
-      # EDB renames the archive again.
-      TRIVIO_PG_SOURCE: edb
+      # get.enterprisedb.com now hard-blocks direct binary downloads (blanket
+      # 403 AccessDenied on every current version, from any client -- an
+      # EDB-side policy change, not a URL-shape mismatch: see
+      # github.com/EnterpriseDB/edb-installers/issues/321). Forcing
+      # TRIVIO_PG_SOURCE=edb therefore always fails. windows-latest ships a
+      # pre-installed PostgreSQL (currently 14.x under
+      # C:\Program Files\PostgreSQL\<ver>, PGBIN env var already set by the
+      # runner image) -- point TRIVIO_PG_BIN at it and use auto so fetch:pg's
+      # env -> local -> brew -> edb chain picks it up directly, with edb kept
+      # only as a last-resort fallback if a future runner image drops it.
+      # TRIVIO_PG_BIN is resolved from $PGBIN in the build step below (a
+      # GitHub Actions `env:` block can't see runner-image OS env vars, only
+      # ones set via workflow `env:`/$GITHUB_ENV -- so it must be read in bash).
+      TRIVIO_PG_SOURCE: auto
 
     steps:
       - name: Checkout
@@ -297,6 +306,17 @@ jobs:
       - name: Build Windows (NSIS + portable, embedded Postgres)
         shell: bash
         run: |
+          # windows-latest ships a pre-installed PostgreSQL (image docs: currently
+          # 14.x under "C:\Program Files\PostgreSQL\<ver>", with $PGBIN already set
+          # by the runner image). Point fetch:pg's 'env' source at it directly so
+          # the (now permanently 403'ing) EDB download is never the only option --
+          # see the TRIVIO_PG_SOURCE comment above for the root cause.
+          if [ -n "${PGBIN:-}" ]; then
+            export TRIVIO_PG_BIN="$PGBIN"
+          else
+            export TRIVIO_PG_BIN='C:\Program Files\PostgreSQL\14\bin'
+          fi
+          echo "TRIVIO_PG_BIN=$TRIVIO_PG_BIN"
           if [ "${{ steps.wsign.outputs.signed }}" = "true" ]; then
             echo "Building SIGNED Windows app."
             npm run build:desktop:win:ship
