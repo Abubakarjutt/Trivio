@@ -96,6 +96,12 @@ jobs:
             ver="${GITHUB_REF_NAME#v}"
             echo "Syncing package.json version to $ver (tag $GITHUB_REF_NAME)"
             npm pkg set version="$ver"
+            # electron-builder resolves ${version} (artifact filenames, latest-mac.yml)
+            # from desktop/package.json (directories.app: desktop in electron-builder.yml),
+            # NOT the root package.json -- both must be synced or the shipped .dmg name
+            # and electron-updater's update feed stay pinned to whatever desktop/package.json
+            # last had, regardless of the tag.
+            npm pkg set version="$ver" --prefix desktop
           else
             echo "Manual dispatch -- keeping package.json version as-is."
           fi
@@ -253,6 +259,9 @@ jobs:
             ver="${GITHUB_REF_NAME#v}"
             echo "Syncing package.json version to $ver (tag $GITHUB_REF_NAME)"
             npm pkg set version="$ver"
+            # electron-builder resolves ${version} from desktop/package.json
+            # (directories.app: desktop) -- see the macOS job for why both matter.
+            npm pkg set version="$ver" --prefix desktop
           else
             echo "Manual dispatch -- keeping package.json version as-is."
           fi
