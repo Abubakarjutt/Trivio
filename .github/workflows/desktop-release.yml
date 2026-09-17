@@ -199,9 +199,18 @@ jobs:
               notes="Trivio desktop -- macOS (arm64), UNSIGNED (ad-hoc). Open the .dmg, drag Trivio.app to Applications. If macOS blocks it, right-click the app -> Open (or 'xattr -d com.apple.quarantine Trivio.app'). Set the Apple Developer ID + notary repo secrets for a Gatekeeper-clean build. Update feed: https://github.com/${{ github.repository }}/releases/latest"
             fi
             echo "Publishing GitHub Release $tag ${prerelease_flag:+(prerelease)}"
+            # --clobber is a `gh release upload` flag, not `gh release create` --
+            # passing it here is a hard CLI error. Re-runs of the same tag need
+            # idempotent replace semantics, so delete any existing release first
+            # (this only removes the release object, not the git tag) then create
+            # fresh -- matches the "re-runs use --clobber" intent without the
+            # invalid flag.
+            if gh release view "$tag" >/dev/null 2>&1; then
+              echo "Release $tag already exists -- deleting before re-creating."
+              gh release delete "$tag" --yes
+            fi
             gh release create "$tag" \
               release/*.dmg release/*.zip release/*.blockmap release/latest-mac.yml \
-              --clobber \
               --title "Trivio $tag" \
               --notes "$notes" \
               $prerelease_flag
