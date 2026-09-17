@@ -18,11 +18,12 @@ appId: com.trivio.desk
 productName: Trivio
 copyright: Copyright © 2025 Trivio
 
-# desktop-release.yml owns publishing (gh release create/upload, with hand-written
-# honest signed/unsigned notes + prerelease detection). Without this, electron-builder
-# auto-detects the CI tag and tries to self-publish via the GitHub API, which needs a
-# GH_TOKEN the build step never sets and hard-fails the whole build.
-publish: never
+# Publishing is disabled via the `--publish never` CLI flag on every electron-builder
+# invocation in package.json, not here: the config-level `publish: never` value routes
+# through app-builder-lib's provider-class resolution and requires an
+# `electron-publisher-never` package that isn't installed, hard-failing the build.
+# The CLI flag short-circuits before that path. desktop-release.yml owns the actual
+# publish (gh release create/upload, with hand-written signed/unsigned notes).
 
 # Register the trivio:// deep-link scheme in the macOS app so the OS routes
 # trivio://... URLs (e.g. trivio://settings, trivio://update) to Trivio. main.ts
