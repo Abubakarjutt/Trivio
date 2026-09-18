@@ -386,7 +386,6 @@ export async function startEmbeddedDatabase(opts: StartEmbeddedOptions): Promise
   const port = await (opts.pickPortImpl ?? pickPort)();
   const cfg = buildConfig(opts.env, { userDataDir: opts.userDataDir, port, binaries });
   mkdir(cfg.dataDir, { recursive: true });
-  mkdir(cfg.unixSocketDir, { recursive: true });
 
   // A portable engine finds its shared libs via a sibling lib/ dir; surface it to
   // the loader so a copied EDB/keg engine runs even without a baked-in rpath.
@@ -437,7 +436,16 @@ export async function startEmbeddedDatabase(opts: StartEmbeddedOptions): Promise
     }
   }
 
-  // 2. Start the server.
+  // 2. Start the server. unixSocketDir is created here, not up front with dataDir --
+  // it must exist only once initdb (and any stale-dir clearing above) is done: it's a
+  // child of dataDir, so creating it earlier made a truly fresh dataDir look
+  // non-empty to the stale-data check above (false-positive "stale" clear on every
+  // first run), and after a real clear-and-retry it was deleted along with the rest
+  // of dataDir and never recreated, so the server always failed with "could not
+  // create lock file ... No such file or directory" -- a crash so fast it hid
+  // behind the full 30s readiness timeout until the server's own output was
+  // captured (see below).
+  mkdir(cfg.unixSocketDir, { recursive: true });
   log(`[db] starting embedded Postgres on ${cfg.host}:${cfg.port}`);
   const server = spawnImpl(cfg.postgresBinary, renderServerArgs(cfg), {
     stdio: ["ignore", "pipe", "pipe"],

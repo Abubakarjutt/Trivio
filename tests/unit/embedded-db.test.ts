@@ -545,6 +545,57 @@ describe("startEmbeddedDatabase", () => {
     expect(children).toHaveLength(2);
   });
 
+  // Regression for the actual root cause behind "timed out waiting for embedded
+  // Postgres on host:port": unixSocketDir (a *child* of dataDir) used to be
+  // created up front, before the stale-data check below. That made a
+  // genuinely fresh, never-used dataDir look non-empty on literally every
+  // first run (it contained the just-created "sockets" dir), triggering a
+  // bogus "clear and retry" that deleted "sockets" along with everything else
+  // and never recreated it -- so the server always failed to bind with
+  // "could not create lock file ... No such file or directory" on a clean
+  // install, hidden behind the full 30s readiness timeout. unixSocketDir must
+  // only be created right before the server starts, using a fake filesystem
+  // (not a canned readdir stub) so this test actually catches the ordering.
+  it("does not create the unix socket dir before the stale-data check, so a fresh install is never falsely treated as stale", async () => {
+    const madeDirs: string[] = [];
+    const mkdirSyncImpl: any = (p: string) => {
+      madeDirs.push(p);
+    };
+    const readdirSyncImpl: any = (dir: string) =>
+      madeDirs
+        .filter(
+          (p) => p !== dir && p.startsWith(`${dir}/`) && !p.slice(dir.length + 1).includes("/")
+        )
+        .map((p) => p.slice(dir.length + 1));
+    const children: any[] = [];
+    const spawnImpl: any = (_c: string, _a: string[], _o: any) => {
+      const child = fakeChild();
+      children.push(child);
+      if (children.length === 1) process.nextTick(() => child.emit("exit", 0)); // initdb succeeds
+      return child;
+    };
+    const logs: string[] = [];
+    const rmSyncImpl = vi.fn();
+    await startEmbeddedDatabase(
+      opts({
+        spawnImpl,
+        existsSyncImpl: () => false, // fresh install, no PG_VERSION yet
+        mkdirSyncImpl,
+        rmSyncImpl,
+        readdirSyncImpl,
+        pickPortImpl: async () => 5432,
+        waitForReady: async () => {},
+        ensureMigrated: async () => {},
+        log: (m: string) => logs.push(m),
+      })
+    );
+    expect(rmSyncImpl).not.toHaveBeenCalled();
+    expect(logs.some((m) => m.includes("clearing stale"))).toBe(false);
+    // initdb ran exactly once -- a bogus clear-and-retry would spawn it twice.
+    expect(children).toHaveLength(2); // initdb, then the server
+    expect(madeDirs).toContain("/userdata/database/sockets");
+  });
+
   // Regression for "timed out waiting for embedded Postgres on host:port" with
   // zero further detail: the server's stdout/stderr were captured for the
   // console log only, never surfaced in the thrown error, so a real startup
@@ -556,10 +607,7 @@ describe("startEmbeddedDatabase", () => {
     const spawnImpl: any = (_c: string, _a: string[], _o: any) => {
       const child = fakeChild();
       process.nextTick(() => {
-        child.stderr.emit(
-          "data",
-          Buffer.from('FATAL:  could not create any Unix-domain sockets')
-        );
+        child.stderr.emit("data", Buffer.from("FATAL:  could not create any Unix-domain sockets"));
         child.emit("exit", 1);
       });
       return child;
