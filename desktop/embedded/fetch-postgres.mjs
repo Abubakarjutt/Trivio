@@ -42,7 +42,7 @@ import {
   realpathSync,
   copyFileSync,
 } from "node:fs";
-import { join, resolve, dirname } from "node:path";
+import { join, resolve, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { platform, arch } from "node:os";
 
@@ -142,6 +142,160 @@ function dereferenceSymlinksInPlace(dir) {
   }
 }
 
+// A Homebrew keg's binaries and dylibs hardcode ABSOLUTE paths to their
+// dependencies right in the Mach-O load commands (e.g. `postgres` linked
+// against `/opt/homebrew/opt/openssl@3/lib/libssl.3.dylib`), not
+// @rpath-relative ones. This is a separate, more severe problem than the
+// dangling-symlink issue dereferenceSymlinksInPlace() fixes: those absolute
+// dependencies are NOT copied into the shipped lib/ at all, so dyld fails
+// with "Library not loaded" at process launch on any Mac that doesn't
+// happen to have the exact same Homebrew formulae installed at the exact
+// same paths -- true even after codesign/Gatekeeper are satisfied.
+//
+// Fix: walk every Mach-O file under bin/ and lib/, and for each dependency
+// that resolves to a Homebrew-style absolute path (/opt/homebrew/... or
+// /usr/local/..., i.e. NOT a guaranteed-present macOS system path under
+// /usr/lib or /System), copy the real dependency file into lib/ (following
+// the recursive closure -- libssl depends on libcrypto, etc.) and rewrite
+// the load command to a path relative to the binary itself:
+// @executable_path/../lib/<name> from bin/, @loader_path/<name> from lib/
+// (siblings). System paths (/usr/lib/*, /System/*) are left alone -- they
+// are present on every Mac by definition.
+function relocateMachO(binOrigin, libOrigin) {
+  if (wantPlatform !== "darwin") return; // otool/install_name_tool are macOS-only
+
+  const HOMEBREW_ABS = /^\/(opt\/homebrew|usr\/local)\//;
+  const isSystemPath = (p) => /^\/usr\/lib\//.test(p) || /^\/System\//.test(p);
+
+  function readDeps(file) {
+    const out = spawnSync("otool", ["-L", file], { encoding: "utf8" });
+    if (out.status !== 0) return null; // not a Mach-O file
+    return String(out.stdout)
+      .split("\n")
+      .slice(1)
+      .map((l) => l.trim().match(/^(\S+)\s+\(compatibility/))
+      .filter(Boolean)
+      .map((m) => m[1]);
+  }
+  function readOwnId(file) {
+    const out = spawnSync("otool", ["-D", file], { encoding: "utf8" });
+    if (out.status !== 0) return null;
+    const lines = String(out.stdout).trim().split("\n");
+    return lines.length > 1 ? lines[1].trim() : null;
+  }
+
+  const queue = [];
+  for (const dir of [BIN, LIB]) {
+    if (!existsSync(dir)) continue;
+    for (const name of readdirSync(dir)) queue.push(join(dir, name));
+  }
+  const queued = new Set(queue);
+  const touched = new Set(); // files that need a fresh ad-hoc signature afterward
+  let changed = false;
+  // Which real Homebrew directory each copied file came from, so an
+  // already-relative (@loader_path/@rpath) dependency of THAT file -- e.g.
+  // icu4c's libicuuc.dylib depending on its own sibling libicudata.dylib --
+  // can still be found and copied in, not just absolute-path dependencies.
+  const originDir = new Map();
+  for (const name of existsSync(BIN) ? readdirSync(BIN) : []) originDir.set(join(BIN, name), binOrigin);
+  for (const name of existsSync(LIB) ? readdirSync(LIB) : []) originDir.set(join(LIB, name), libOrigin);
+
+  while (queue.length) {
+    const file = queue.shift();
+    const deps = readDeps(file);
+    if (deps === null) continue; // not a Mach-O file (e.g. a script, a data file)
+    spawnSync("chmod", ["u+w", file]); // Cellar copies are read-only
+
+    const ownId = readOwnId(file);
+    if (ownId && HOMEBREW_ABS.test(ownId)) {
+      const rel = relativeRef(false /* isBin */, basename(ownId));
+      const idResult = spawnSync("install_name_tool", ["-id", rel, file]);
+      if (idResult.status !== 0) die(`install_name_tool -id failed on ${file}`, idResult.stderr);
+      changed = true;
+      touched.add(file);
+    }
+
+    for (const dep of deps) {
+      if (dep === ownId || isSystemPath(dep)) continue;
+
+      // Already relative (@loader_path/<name> or @rpath/<name>): correct once its
+      // sibling actually exists next to it in our shipped lib/ -- no install_name_tool
+      // rewrite needed, just make sure the sibling got copied in too.
+      if (dep.startsWith("@loader_path/") || dep.startsWith("@rpath/")) {
+        const libname = basename(dep);
+        const destLib = join(LIB, libname);
+        if (existsSync(destLib)) continue; // sibling already present -- satisfied as-is
+        const origin = originDir.get(file);
+        if (!origin) {
+          die(
+            `Mach-O dependency ${dep} referenced by ${file}, but no known source directory to find its sibling ${libname} in`
+          );
+        }
+        const src = join(origin, libname);
+        if (!existsSync(src)) {
+          die(
+            `Mach-O dependency ${dep} referenced by ${file}: expected sibling at ${src}, but it does not exist`,
+            "the Homebrew formula providing it may have been removed/upgraded since the engine was fetched -- re-run `npm run fetch:pg --source=brew --force`"
+          );
+        }
+        copyFileSync(realpathSync(src), destLib);
+        spawnSync("chmod", ["u+w", destLib]);
+        originDir.set(destLib, dirname(realpathSync(src)));
+        if (!queued.has(destLib)) {
+          queued.add(destLib);
+          queue.push(destLib);
+        }
+        continue;
+      }
+
+      if (dep.startsWith("@") || !HOMEBREW_ABS.test(dep)) continue;
+
+      const libname = basename(dep);
+      const destLib = join(LIB, libname);
+      if (!existsSync(destLib)) {
+        if (!existsSync(dep)) {
+          die(
+            `Mach-O dependency referenced by ${file} does not exist on disk: ${dep}`,
+            "the Homebrew formula providing it may have been removed/upgraded since the engine was fetched -- re-run `npm run fetch:pg --source=brew --force`"
+          );
+        }
+        copyFileSync(realpathSync(dep), destLib);
+        spawnSync("chmod", ["u+w", destLib]);
+        originDir.set(destLib, dirname(realpathSync(dep)));
+        if (!queued.has(destLib)) {
+          queued.add(destLib);
+          queue.push(destLib);
+        }
+      }
+      const inLibDir = dirname(file) === LIB;
+      const newRef = relativeRef(!inLibDir, libname);
+      const changeResult = spawnSync("install_name_tool", ["-change", dep, newRef, file]);
+      if (changeResult.status !== 0)
+        die(`install_name_tool -change failed on ${file}`, changeResult.stderr);
+      changed = true;
+      touched.add(file);
+    }
+  }
+
+  // install_name_tool invalidates whatever signature was already on the file, and
+  // its own automatic re-sign is NOT reliable enough to trust (verified empirically:
+  // it can leave a signature that `codesign --verify` itself rejects as "invalid
+  // signature (code or signature have been modified)" -- which the arm64 kernel
+  // then enforces at exec time as a silent SIGKILL, not a normal error). Every
+  // touched file gets an explicit, fresh ad-hoc signature. This is not the final
+  // signature (electron-builder's own afterSign hook re-signs the whole .app when
+  // it's packaged) -- it just needs to be valid enough for `postgres --version`
+  // to run during this script's own verify() step, immediately below.
+  for (const file of touched) {
+    const sign = spawnSync("codesign", ["--force", "--sign", "-", file]);
+    if (sign.status !== 0) die(`codesign --force --sign - failed on ${file}`, sign.stderr);
+  }
+  if (changed) log("relocated Homebrew-absolute dylib references to @executable_path/@loader_path.");
+}
+function relativeRef(isBin, libname) {
+  return isBin ? `@executable_path/../lib/${libname}` : `@loader_path/${libname}`;
+}
+
 function normalizeEngine(binDir, libDir, source, version) {
   rmSync(BIN, { recursive: true, force: true });
   rmSync(LIB, { recursive: true, force: true });
@@ -159,6 +313,10 @@ function normalizeEngine(binDir, libDir, source, version) {
       } catch {}
     }
   }
+  relocateMachO(
+    existsSync(binDir) ? realpathSync(binDir) : binDir,
+    existsSync(candidateLib) ? realpathSync(candidateLib) : candidateLib
+  );
   const manifest = {
     source,
     version,
