@@ -57,6 +57,7 @@ storage/
 # the source tooling stays tracked, only the binary is ignored.
 /desktop/embedded/bin/
 /desktop/embedded/lib/
+/desktop/embedded/share/
 /desktop/embedded/VERSION
 /desktop/embedded/MANIFEST.json
 /desktop/embedded/.dl/

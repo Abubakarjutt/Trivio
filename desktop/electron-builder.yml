@@ -64,12 +64,18 @@ extraResources:
       - "!**/.env"
       # The embedded PostgreSQL engine (fetched by `npm run fetch:pg`).
       # resolvePostgresBinaries looks for <resourcesPath>/postgres/bin at runtime,
-      # so this must mirror the on-disk engine layout (bin/ + lib/ siblings).
+      # so this must mirror the on-disk engine layout (bin/ + lib/ + share/
+      # siblings). share/ is required, not optional: initdb needs it to create
+      # a cluster at all (postgres.bki, timezone data, …) -- without it every
+      # packaged build fails with "initdb failed (exit 1)" on first launch, on
+      # any machine that doesn't happen to have the exact same Homebrew
+      # Postgres formula installed at its exact original path.
   - from: desktop/embedded
     to: postgres
     filter:
       - "bin/**/*"
       - "lib/**/*"
+      - "share/**/*"
       - "VERSION"
       - "MANIFEST.json"
       - "!**/.DS_Store"

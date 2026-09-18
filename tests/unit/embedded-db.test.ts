@@ -173,6 +173,23 @@ describe("renderInitdbArgs", () => {
     expect(args).toContain("--no-locale");
     expect(args).toContain("/tmp/pgdata");
   });
+
+  it("omits -L when no shareDir was resolved", () => {
+    const args = renderInitdbArgs(baseConfig());
+    expect(args).not.toContain("-L");
+  });
+
+  // Regression: a Homebrew-built initdb hardcodes the ABSOLUTE path to its
+  // "share" data dir (postgres.bki, timezone data, …) at compile time. That
+  // path only exists on a machine with that exact Homebrew formula installed
+  // -- on any other machine (i.e. every real user's Mac), initdb fails with
+  // "initdb failed (exit 1)" and no further detail unless told explicitly
+  // where to find its input files via -L.
+  it("passes -L <shareDir> when a shareDir was resolved, so initdb does not depend on its compiled-in absolute path", () => {
+    const args = renderInitdbArgs(baseConfig({ shareDir: "/app/postgres/share/postgresql@16" }));
+    expect(args).toContain("-L");
+    expect(args[args.indexOf("-L") + 1]).toBe("/app/postgres/share/postgresql@16");
+  });
 });
 
 describe("renderServerArgs", () => {
@@ -238,6 +255,46 @@ describe("resolvePostgresBinaries", () => {
   it("yields .exe names for the PATH fallback on Windows", () => {
     const res = resolvePostgresBinaries({}, "/res", fakeExists([]), true, "win32");
     expect(res).toEqual({ initdb: "initdb.exe", postgres: "postgres.exe", libDir: undefined });
+  });
+
+  // Regression for "initdb failed (exit 1)" on a real (non-Homebrew-dev) Mac:
+  // fetch-postgres.mjs now ships Postgres's "share" data dir as a sibling of
+  // bin/. A Homebrew-sourced engine nests it one level further under a
+  // version-qualified name (share/postgresql@16) -- that exact nesting is
+  // preserved because it's what lets the *running* postgres server (no CLI
+  // flag available to it, unlike initdb's -L) find it via Postgres's own
+  // relative-path relocation.
+  it("resolves shareDir from a Homebrew-style versioned share/postgresql@16 sibling", () => {
+    const res = resolvePostgresBinaries(
+      { TRIVIO_PG_BIN: "/data/pg/bin" },
+      "/res",
+      fakeExists(["/data/pg/bin/initdb", "/data/pg/lib", "/data/pg/share"]),
+      false,
+      "darwin",
+      (p) => (p === "/data/pg/share" ? ["postgresql@16"] : [])
+    );
+    expect(res?.shareDir).toBe("/data/pg/share/postgresql@16");
+  });
+
+  it("resolves shareDir directly from share/ when it holds the input files flat (portable/EDB archives)", () => {
+    const res = resolvePostgresBinaries(
+      { TRIVIO_PG_BIN: "/data/pg/bin" },
+      "/res",
+      fakeExists(["/data/pg/bin/initdb", "/data/pg/share"]),
+      false,
+      "darwin",
+      (p) => (p === "/data/pg/share" ? ["postgres.bki", "errcodes.txt"] : [])
+    );
+    expect(res?.shareDir).toBe("/data/pg/share");
+  });
+
+  it("leaves shareDir undefined when no share/ sibling exists", () => {
+    const res = resolvePostgresBinaries(
+      { TRIVIO_PG_BIN: "/data/pg/bin" },
+      "/res",
+      fakeExists(["/data/pg/bin/initdb"])
+    );
+    expect(res?.shareDir).toBeUndefined();
   });
 });
 
@@ -368,6 +425,37 @@ describe("startEmbeddedDatabase", () => {
     expect(children).toHaveLength(2);
     await handle.stop();
     expect(children[1].kill).toHaveBeenCalled();
+  });
+
+  // Regression: initdb's stdout/stderr were spawned with stdio:"pipe" but
+  // never read, so a real failure only ever surfaced as the bare
+  // "initdb failed (exit 1)" wrapper -- exactly what the user saw, with no
+  // way to diagnose it without re-running the build manually. initdb's own
+  // output (e.g. the "could not access file ..." error a missing share dir
+  // produces) must reach the thrown Error so it reaches the user-facing
+  // dialog (desktop/main.ts renders err.message verbatim).
+  it("includes initdb's captured stderr in the thrown error on failure", async () => {
+    const spawnImpl: any = (_c: string, _a: string[], _o: any) => {
+      const child = fakeChild();
+      process.nextTick(() => {
+        child.stderr.emit("data", Buffer.from("could not access file \"postgres.bki\": No such file"));
+        child.emit("exit", 1);
+      });
+      return child;
+    };
+    const call = startEmbeddedDatabase(
+      opts({
+        spawnImpl,
+        existsSyncImpl: () => false, // first run -> initdb runs
+        mkdirSyncImpl: () => {},
+        pickPortImpl: async () => 5432,
+        waitForReady: async () => {},
+        ensureMigrated: async () => {},
+        log: () => {},
+      })
+    );
+    await expect(call).rejects.toThrow(/initdb failed \(exit 1\)/);
+    await expect(call).rejects.toThrow(/could not access file "postgres\.bki"/);
   });
 
   it("skips initdb when the cluster already exists", async () => {

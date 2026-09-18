@@ -31,7 +31,7 @@
 // can be unit-tested without a real engine, a socket, or a GUI.
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import net from "node:net";
 
@@ -50,14 +50,23 @@ export interface EmbeddedDbConfig {
   initdbBinary: string; // path to the `initdb` executable
   postgresBinary: string; // path to the `postgres` executable
   libDir?: string; // shared-library dir (libpq/libicu etc.) next to bin/, if present
+  shareDir?: string; // Postgres's "share" data dir (postgres.bki, timezone data, …), if present
   unixSocketDir: string; // where the unix-domain socket lives
 }
 
-// A located engine: the two executables plus an optional shared-library dir.
+// A located engine: the two executables plus optional shared-library/data dirs.
 export interface PostgresBinaries {
   initdb: string;
   postgres: string;
   libDir?: string;
+  // Postgres's "share" data dir (postgres.bki, system_views.sql, timezone
+  // data, …). initdb hardcodes its compiled source location's ABSOLUTE path
+  // to this at build time (e.g. Homebrew bakes in
+  // /opt/homebrew/opt/postgresql@16/share/postgresql@16), which does not
+  // exist on a machine without that exact same Homebrew formula installed.
+  // Passed explicitly via initdb's `-L` flag so cluster creation does not
+  // depend on that absolute path existing.
+  shareDir?: string;
 }
 
 // The running engine, plus how to tear it down.
@@ -121,6 +130,7 @@ export function buildConfig(
     initdbBinary: opts.binaries.initdb,
     postgresBinary: opts.binaries.postgres,
     libDir: opts.binaries.libDir,
+    shareDir: opts.binaries.shareDir,
     unixSocketDir: env.TRIVIO_DB_SOCKET_DIR || join(dataDir, "sockets"),
   };
 }
@@ -129,7 +139,7 @@ export function buildConfig(
 // auth is safe here because the server is bound to 127.0.0.1 only and is a
 // single-user local install — there is no off-machine network surface.
 export function renderInitdbArgs(cfg: EmbeddedDbConfig): string[] {
-  return [
+  const args = [
     "--username",
     cfg.user,
     "--auth-local",
@@ -141,8 +151,14 @@ export function renderInitdbArgs(cfg: EmbeddedDbConfig): string[] {
     "--locale",
     "C",
     "--no-locale",
-    cfg.dataDir,
   ];
+  // Without this, initdb falls back to the absolute PGSHAREDIR it was
+  // compiled with (e.g. Homebrew's /opt/homebrew/opt/postgresql@16/share/…),
+  // which does not exist on a machine that doesn't have that exact Homebrew
+  // formula installed — the shipped, portable engine's own share/ dir instead.
+  if (cfg.shareDir) args.push("-L", cfg.shareDir);
+  args.push(cfg.dataDir);
+  return args;
 }
 
 // `postgres` server args: bind loopback only, keep the unix socket in a
@@ -176,12 +192,38 @@ export function renderServerArgs(
 // A packaged app (isPackaged) must NOT fall back to a mismatched system engine,
 // so when allowPathFallback is false and nothing is found we return null and the
 // caller loud-fails with guidance instead of starting the wrong binary.
+// Find Postgres's "share" data dir next to a resolved bin/ dir. Homebrew kegs
+// nest it one level further under a version-qualified name (share/postgresql@16)
+// — that exact nesting matters: it is not just cosmetic, it is what lets
+// Postgres's OWN relative-path relocation (used by the running `postgres`
+// server, which has no CLI flag to point it at a share dir explicitly) find it
+// again once the engine is copied somewhere other than its compile-time
+// prefix. Portable archives (EDB) instead put the input files directly under
+// share/.
+function findShareDir(
+  dir: string,
+  exists: (p: string) => boolean,
+  readDir: (p: string) => string[]
+): string | undefined {
+  const shareParent = join(dir, "..", "share");
+  if (!exists(shareParent)) return undefined;
+  const pgSub = readDir(shareParent).find((n) => n.startsWith("postgresql"));
+  return pgSub ? join(shareParent, pgSub) : shareParent;
+}
+
 export function resolvePostgresBinaries(
   env: NodeJS.ProcessEnv,
   resourcesDir: string,
   exists: (p: string) => boolean = existsSync,
   allowPathFallback = false,
-  platform: NodeJS.Platform = process.platform
+  platform: NodeJS.Platform = process.platform,
+  readDir: (p: string) => string[] = (p) => {
+    try {
+      return readdirSync(p);
+    } catch {
+      return [];
+    }
+  }
 ): PostgresBinaries | null {
   // Windows executables carry a .exe suffix; the EDB Windows engine is
   // self-contained (DLLs live in bin/, no sibling lib/ dir to locate).
@@ -200,6 +242,7 @@ export function resolvePostgresBinaries(
         initdb,
         postgres: join(dir, "postgres" + exe),
         libDir: libDir && exists(libDir) ? libDir : undefined,
+        shareDir: findShareDir(dir, exists, readDir),
       };
     }
   }
@@ -352,9 +395,22 @@ export async function startEmbeddedDatabase(opts: StartEmbeddedOptions): Promise
       stdio: "pipe",
       env: childEnv,
     });
+    // initdb's own stderr names the actual failure (e.g. a missing share-dir
+    // input file) — surface it instead of a bare exit code, or the only
+    // diagnostic a user ever sees is "initdb failed (exit 1)".
+    let initOutput = "";
+    init.stdout?.on("data", (d: Buffer) => {
+      initOutput += String(d);
+    });
+    init.stderr?.on("data", (d: Buffer) => {
+      initOutput += String(d);
+    });
     const { code } = await waitForExit(init);
     if (code !== 0) {
-      throw new Error(`initdb failed (exit ${code}); data dir: ${cfg.dataDir}`);
+      const detail = initOutput.trim();
+      throw new Error(
+        `initdb failed (exit ${code}); data dir: ${cfg.dataDir}` + (detail ? `\n${detail}` : "")
+      );
     }
   }
 

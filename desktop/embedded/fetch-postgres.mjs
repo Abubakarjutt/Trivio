@@ -296,6 +296,22 @@ function relativeRef(isBin, libname) {
   return isBin ? `@executable_path/../lib/${libname}` : `@loader_path/${libname}`;
 }
 
+// initdb needs its "share" data dir (postgres.bki, system_views.sql, timezone
+// data, …) to create a cluster at all -- this is separate from, and just as
+// required as, the dylibs relocateMachO() fixes. A Homebrew keg nests it one
+// level further under a version-qualified name (share/postgresql@16); THAT
+// exact nesting is what lets the running `postgres` server (which has no CLI
+// flag to point it at a share dir, unlike initdb's `-L`) find it again via
+// Postgres's own compiled-relative-offset relocation once the engine is
+// copied out from under its original Homebrew prefix. A portable EDB archive
+// instead puts the input files directly under share/ already.
+function findShareSource(binDir) {
+  const shareParent = join(dirname(binDir), "share");
+  if (!existsSync(shareParent)) return null;
+  const pgSub = readdirSync(shareParent).find((n) => n.startsWith("postgresql"));
+  return pgSub ? join(shareParent, pgSub) : shareParent;
+}
+
 function normalizeEngine(binDir, libDir, source, version) {
   rmSync(BIN, { recursive: true, force: true });
   rmSync(LIB, { recursive: true, force: true });
@@ -303,6 +319,15 @@ function normalizeEngine(binDir, libDir, source, version) {
   // A portable engine carries its own shared libs; copy them as a sibling of bin/.
   const candidateLib = libDir || join(dirname(binDir), "lib");
   if (existsSync(candidateLib)) copyDir(candidateLib, LIB);
+  const realBinDir = existsSync(binDir) ? realpathSync(binDir) : binDir;
+  const shareSrc = findShareSource(realBinDir);
+  let shareDirName = null;
+  if (shareSrc) {
+    shareDirName = basename(shareSrc) === "share" ? null : basename(shareSrc);
+    const shareDest = shareDirName ? join(EMBEDDED, "share", shareDirName) : join(EMBEDDED, "share");
+    copyDir(shareSrc, shareDest);
+    log(`copied Postgres share dir from ${shareSrc}`);
+  }
   for (const exe of ["initdb", "postgres"]) {
     const p = join(BIN, exe + EXE);
     if (existsSync(p) && wantPlatform !== "win32") {
@@ -313,10 +338,7 @@ function normalizeEngine(binDir, libDir, source, version) {
       } catch {}
     }
   }
-  relocateMachO(
-    existsSync(binDir) ? realpathSync(binDir) : binDir,
-    existsSync(candidateLib) ? realpathSync(candidateLib) : candidateLib
-  );
+  relocateMachO(realBinDir, existsSync(candidateLib) ? realpathSync(candidateLib) : candidateLib);
   const manifest = {
     source,
     version,
@@ -324,6 +346,7 @@ function normalizeEngine(binDir, libDir, source, version) {
     arch: wantArch,
     binDir: "bin",
     libDir: existsSync(LIB) ? "lib" : null,
+    shareDir: shareSrc ? (shareDirName ? `share/${shareDirName}` : "share") : null,
     fetchedAt: new Date().toISOString(),
   };
   writeFileSync(MANIFEST_FILE, JSON.stringify(manifest, null, 2) + "\n");
