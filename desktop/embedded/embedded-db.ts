@@ -31,7 +31,7 @@
 // can be unit-tested without a real engine, a socket, or a GUI.
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import net from "node:net";
 
@@ -348,6 +348,8 @@ export interface StartEmbeddedOptions {
   spawnImpl?: typeof spawn;
   existsSyncImpl?: typeof existsSync;
   mkdirSyncImpl?: typeof mkdirSync;
+  rmSyncImpl?: typeof rmSync;
+  readdirSyncImpl?: typeof readdirSync;
   pickPortImpl?: () => Promise<number>;
   waitForReady?: (host: string, port: number, timeoutMs?: number) => Promise<void>;
   ensureMigrated?: (
@@ -363,6 +365,8 @@ export async function startEmbeddedDatabase(opts: StartEmbeddedOptions): Promise
   const spawnImpl = opts.spawnImpl ?? spawn;
   const exists = opts.existsSyncImpl ?? existsSync;
   const mkdir = opts.mkdirSyncImpl ?? mkdirSync;
+  const rm = opts.rmSyncImpl ?? rmSync;
+  const readDir = opts.readdirSyncImpl ?? readdirSync;
   const log = opts.log ?? ((m: string) => console.log(m));
 
   const binaries = resolvePostgresBinaries(
@@ -390,6 +394,25 @@ export async function startEmbeddedDatabase(opts: StartEmbeddedOptions): Promise
 
   // 1. Create the cluster on first run. PG_VERSION marks an initialised data dir.
   if (!exists(join(cfg.dataDir, "PG_VERSION"))) {
+    // cfg.dataDir is exclusively owned by this engine (nothing else ever
+    // writes here), so if it's non-empty without a PG_VERSION marker, the
+    // only way that happens is a PREVIOUS initdb run that died partway
+    // through (crash, disk full, an earlier buggy build, …) before reaching
+    // the point where it writes PG_VERSION. initdb refuses to run again into
+    // a non-empty directory ("exists but is not empty"), which otherwise
+    // fails every subsequent launch forever with no way to recover short of
+    // a user manually deleting an app-data folder. Safe to clear and retry.
+    let hasStaleContents = false;
+    try {
+      hasStaleContents = readDir(cfg.dataDir).length > 0;
+    } catch {
+      hasStaleContents = false;
+    }
+    if (hasStaleContents) {
+      log(`[db] clearing stale/partial data dir at ${cfg.dataDir} (no PG_VERSION — likely a previously failed initdb run)`);
+      rm(cfg.dataDir, { recursive: true, force: true });
+      mkdir(cfg.dataDir, { recursive: true });
+    }
     log(`[db] initialising embedded Postgres data dir at ${cfg.dataDir}`);
     const init = spawnImpl(cfg.initdbBinary, renderInitdbArgs(cfg), {
       stdio: "pipe",

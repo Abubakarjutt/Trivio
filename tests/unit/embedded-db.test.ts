@@ -438,7 +438,10 @@ describe("startEmbeddedDatabase", () => {
     const spawnImpl: any = (_c: string, _a: string[], _o: any) => {
       const child = fakeChild();
       process.nextTick(() => {
-        child.stderr.emit("data", Buffer.from("could not access file \"postgres.bki\": No such file"));
+        child.stderr.emit(
+          "data",
+          Buffer.from('could not access file "postgres.bki": No such file')
+        );
         child.emit("exit", 1);
       });
       return child;
@@ -478,6 +481,68 @@ describe("startEmbeddedDatabase", () => {
     );
     // Only the server was spawned (no initdb).
     expect(children).toHaveLength(1);
+  });
+
+  // Regression for "initdb: error: directory ... exists but is not empty":
+  // a previous initdb run (an earlier buggy build, a crash, disk full, …)
+  // can die partway through, leaving PGDATA non-empty but without the
+  // PG_VERSION marker initdb only writes on success. Since that directory is
+  // exclusively owned by this engine, it must be safe to clear stale
+  // contents and retry rather than fail forever.
+  it("clears a stale/partial data dir (non-empty, no PG_VERSION) before running initdb", async () => {
+    const children: any[] = [];
+    const spawnImpl: any = (_c: string, _a: string[], _o: any) => {
+      const child = fakeChild();
+      children.push(child);
+      if (children.length === 1) process.nextTick(() => child.emit("exit", 0));
+      return child;
+    };
+    const rmSyncImpl = vi.fn();
+    await startEmbeddedDatabase(
+      opts({
+        spawnImpl,
+        existsSyncImpl: (p: string) => !p.endsWith("PG_VERSION"), // dir exists, no marker
+        mkdirSyncImpl: () => {},
+        rmSyncImpl,
+        readdirSyncImpl: () => ["base", "global", "postmaster.pid"] as any, // stale leftovers
+        pickPortImpl: async () => 5432,
+        waitForReady: async () => {},
+        ensureMigrated: async () => {},
+        log: () => {},
+      })
+    );
+    expect(rmSyncImpl).toHaveBeenCalledWith(
+      expect.stringContaining("database"),
+      expect.objectContaining({ recursive: true, force: true })
+    );
+    // initdb still runs afterward (against the now-cleared dir), then the server.
+    expect(children).toHaveLength(2);
+  });
+
+  it("does NOT clear the data dir when it is empty (nothing stale to remove)", async () => {
+    const children: any[] = [];
+    const spawnImpl: any = (_c: string, _a: string[], _o: any) => {
+      const child = fakeChild();
+      children.push(child);
+      if (children.length === 1) process.nextTick(() => child.emit("exit", 0));
+      return child;
+    };
+    const rmSyncImpl = vi.fn();
+    await startEmbeddedDatabase(
+      opts({
+        spawnImpl,
+        existsSyncImpl: (p: string) => !p.endsWith("PG_VERSION"),
+        mkdirSyncImpl: () => {},
+        rmSyncImpl,
+        readdirSyncImpl: () => [] as any, // empty — freshly created dir
+        pickPortImpl: async () => 5432,
+        waitForReady: async () => {},
+        ensureMigrated: async () => {},
+        log: () => {},
+      })
+    );
+    expect(rmSyncImpl).not.toHaveBeenCalled();
+    expect(children).toHaveLength(2);
   });
 
   it("threads the engine lib dir into the spawned environment", async () => {
