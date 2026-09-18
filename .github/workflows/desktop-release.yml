@@ -342,7 +342,7 @@ jobs:
           path: |
             release/*.exe
             release/*.blockmap
-            release/latest-win.yml
+            release/latest.yml
           if-no-files-found: error
 
       - name: Publish GitHub Release
@@ -361,7 +361,7 @@ jobs:
             # (upload --clobber only touches same-named files, so the .dmg/.zip stay).
             echo "Uploading Windows artifacts to GitHub Release $tag ${prerelease_flag:+(prerelease)}"
             gh release upload "$tag" \
-              release/*.exe release/*.blockmap release/latest-win.yml \
+              release/*.exe release/*.blockmap release/latest.yml \
               --clobber \
               $prerelease_flag
           else
