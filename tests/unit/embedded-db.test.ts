@@ -545,6 +545,72 @@ describe("startEmbeddedDatabase", () => {
     expect(children).toHaveLength(2);
   });
 
+  // Regression for "timed out waiting for embedded Postgres on host:port" with
+  // zero further detail: the server's stdout/stderr were captured for the
+  // console log only, never surfaced in the thrown error, so a real startup
+  // failure (bad config, permissions, a crash) was indistinguishable from a
+  // slow-but-healthy server -- both just produced the same generic timeout
+  // after the full 30s wait. The server dying should be reported immediately,
+  // with whatever it actually printed.
+  it("reports the server's captured output when it exits before becoming ready", async () => {
+    const spawnImpl: any = (_c: string, _a: string[], _o: any) => {
+      const child = fakeChild();
+      process.nextTick(() => {
+        child.stderr.emit(
+          "data",
+          Buffer.from('FATAL:  could not create any Unix-domain sockets')
+        );
+        child.emit("exit", 1);
+      });
+      return child;
+    };
+    const call = startEmbeddedDatabase(
+      opts({
+        spawnImpl,
+        existsSyncImpl: (p: string) => p.endsWith("PG_VERSION"), // skip initdb
+        mkdirSyncImpl: () => {},
+        pickPortImpl: async () => 5432,
+        waitForReady: () => new Promise(() => {}), // never resolves -- exit must win the race
+        ensureMigrated: async () => {},
+        log: () => {},
+      })
+    );
+    await expect(call).rejects.toThrow(/exited unexpectedly \(code 1\)/);
+    await expect(call).rejects.toThrow(/could not create any Unix-domain sockets/);
+  });
+
+  it("appends the server's captured output to a plain readiness-timeout error", async () => {
+    const spawnImpl: any = (_c: string, _a: string[], _o: any) => {
+      const child = fakeChild();
+      process.nextTick(() => {
+        child.stdout.emit("data", Buffer.from("LOG:  database system is starting up"));
+      });
+      return child; // never exits, never becomes ready
+    };
+    const call = startEmbeddedDatabase(
+      opts({
+        spawnImpl,
+        existsSyncImpl: (p: string) => p.endsWith("PG_VERSION"),
+        mkdirSyncImpl: () => {},
+        pickPortImpl: async () => 5432,
+        // A real timeout fires on a macrotask, well after any same-cycle
+        // nextTick/microtask output has already been captured -- reproduce
+        // that ordering here instead of an immediately-rejected promise.
+        waitForReady: () =>
+          new Promise((_resolve, reject) => {
+            setTimeout(
+              () => reject(new Error("timed out waiting for embedded Postgres on 127.0.0.1:5432")),
+              0
+            );
+          }),
+        ensureMigrated: async () => {},
+        log: () => {},
+      })
+    );
+    await expect(call).rejects.toThrow(/timed out waiting for embedded Postgres/);
+    await expect(call).rejects.toThrow(/database system is starting up/);
+  });
+
   it("threads the engine lib dir into the spawned environment", async () => {
     const spawnedEnvs: any[] = [];
     const spawnImpl: any = (_c: string, _a: string[], o: any) => {

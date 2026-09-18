@@ -443,11 +443,42 @@ export async function startEmbeddedDatabase(opts: StartEmbeddedOptions): Promise
     stdio: ["ignore", "pipe", "pipe"],
     env: childEnv,
   });
-  server.stdout?.on("data", (d: Buffer) => log(`[db:out] ${String(d).trimEnd()}`));
-  server.stderr?.on("data", (d: Buffer) => log(`[db:err] ${String(d).trimEnd()}`));
+  // Same "swallowed diagnostics" fix already applied to initdb above: the server
+  // can log real, specific reasons for failing on stderr (bad config, permission
+  // errors, a socket path problem, ...) and this is the only place that output
+  // is ever produced -- without capturing it, a startup failure surfaces to the
+  // user as a bare, generic timeout with zero information about the real cause.
+  let serverOutput = "";
+  server.stdout?.on("data", (d: Buffer) => {
+    const text = String(d);
+    serverOutput += text;
+    log(`[db:out] ${text.trimEnd()}`);
+  });
+  server.stderr?.on("data", (d: Buffer) => {
+    const text = String(d);
+    serverOutput += text;
+    log(`[db:err] ${text.trimEnd()}`);
+  });
 
-  // 3. Wait for it to accept connections.
-  await (opts.waitForReady ?? waitForPort)(cfg.host, cfg.port, 30000);
+  // 3. Wait for it to accept connections. The server can also die before ever
+  // opening the port (bad config, permissions, a crash) -- polling the port
+  // alone can't tell that apart from "just slow", so race the wait against the
+  // process's own exit, and turn either failure into one error carrying the
+  // server's actual captured output.
+  const earlyExit = new Promise<never>((_resolve, reject) => {
+    server.once("exit", (code) => {
+      reject(new Error(`embedded Postgres exited unexpectedly (code ${code}) before becoming ready`));
+    });
+    server.once("error", (err) => reject(err));
+  });
+  earlyExit.catch(() => {}); // observed via Promise.race below; prevents an unhandled rejection if it loses the race
+  try {
+    await Promise.race([(opts.waitForReady ?? waitForPort)(cfg.host, cfg.port, 30000), earlyExit]);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const detail = serverOutput.trim();
+    throw new Error(message + (detail ? `\n${detail}` : ""));
+  }
 
   // 4. Apply migrations (idempotent — a no-op when the schema is current).
   const runMigrate: (
