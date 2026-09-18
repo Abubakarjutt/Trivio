@@ -39,6 +39,8 @@ import {
   writeFileSync,
   readFileSync,
   readdirSync,
+  realpathSync,
+  copyFileSync,
 } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -103,11 +105,41 @@ if (!FORCE && installedVersion()) {
 }
 
 // ── Copy helpers ─────────────────────────────────────────────────────────────
+// A Homebrew keg's lib/ is full of convenience symlinks (e.g. libpq.dylib ->
+// /opt/homebrew/Cellar/postgresql@16/16.15/lib/libpq.5.dylib) pointing at
+// ABSOLUTE paths outside the copied tree. Left as symlinks, they are dangling
+// on every machine but the one that built the engine (any other Mac,
+// including one with a different/no Homebrew install, or even the same
+// machine after a `brew upgrade` changes the Cellar version path). A bundle
+// containing dangling symlinks fails `codesign --verify --deep --strict` (and
+// therefore Gatekeeper) with a bare "No such file or directory" -- surfacing
+// to users as "app is damaged", not a missing-file error.
+//
+// NOTE: `cpSync(..., { dereference: true })` looks like the fix but is NOT
+// sufficient -- Node only dereferences a symlink at the top of the copied
+// tree, not ones nested inside it during a recursive directory copy (verified
+// empirically against Node's actual behavior, not just docs). So we do the
+// plain copy, then walk the copied tree ourselves and replace any surviving
+// symlink with a real copy of its fully-resolved target.
 function copyDir(src, dest) {
   if (!existsSync(src)) return;
   mkdirSync(dirname(dest), { recursive: true });
   rmSync(dest, { recursive: true, force: true });
   cpSync(src, dest, { recursive: true });
+  dereferenceSymlinksInPlace(dest);
+}
+
+function dereferenceSymlinksInPlace(dir) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, entry.name);
+    if (entry.isSymbolicLink()) {
+      const target = realpathSync(p); // fully resolves chained/relative symlinks
+      rmSync(p);
+      copyFileSync(target, p);
+    } else if (entry.isDirectory()) {
+      dereferenceSymlinksInPlace(p);
+    }
+  }
 }
 
 function normalizeEngine(binDir, libDir, source, version) {

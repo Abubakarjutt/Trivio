@@ -18,6 +18,14 @@ appId: com.trivio.desk
 productName: Trivio
 copyright: Copyright © 2025 Trivio
 
+# Runs after electron-builder's own (attempted) macOS sign step, before the
+# .dmg/.zip are built. When no Developer ID identity exists, electron-builder
+# SKIPS signing entirely, leaving a stale ad-hoc signature inherited from the
+# raw Electron download that no longer matches the assembled bundle --
+# Gatekeeper then reports the app as "damaged", not just unsigned. See
+# desktop/after-sign.mjs for the full explanation and fix.
+afterSign: desktop/after-sign.mjs
+
 # Publishing is disabled via the `--publish never` CLI flag on every electron-builder
 # invocation in package.json, not here: the config-level `publish: never` value routes
 # through app-builder-lib's provider-class resolution and requires an
