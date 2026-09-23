@@ -15,168 +15,9 @@ import {
 import bcrypt from "bcryptjs";
 import { Prisma } from "@prisma/client";
 import { seedDefaultChartOfAccounts } from "../server/services/chart-of-accounts.service";
+import { seedTaxRegimes } from "../server/services/tax-regime.service";
 
 const db = new PrismaClient();
-
-// ─── Tax Regimes ─────────────────────────────────────────────────────────────
-
-const TAX_REGIMES = [
-  {
-    code: "NONE",
-    name: "No Tax",
-    country: "Global",
-    rates: [{ code: "NONE", name: "No Tax (0%)", rate: 0.0 }],
-  },
-  {
-    code: "UK_VAT",
-    name: "UK VAT",
-    country: "GB",
-    rates: [
-      { code: "STANDARD", name: "Standard Rate (20%)", rate: 0.2 },
-      { code: "REDUCED", name: "Reduced Rate (5%)", rate: 0.05 },
-      { code: "ZERO", name: "Zero Rate (0%)", rate: 0.0 },
-      { code: "EXEMPT", name: "Exempt", rate: 0.0 },
-    ],
-  },
-  {
-    code: "EU_VAT",
-    name: "EU VAT",
-    country: "EU",
-    rates: [
-      { code: "STANDARD", name: "Standard Rate (20%)", rate: 0.2 },
-      { code: "REDUCED", name: "Reduced Rate (10%)", rate: 0.1 },
-      { code: "SUPER_REDUCED", name: "Super Reduced (5%)", rate: 0.05 },
-      { code: "ZERO", name: "Zero Rate (0%)", rate: 0.0 },
-      { code: "EXEMPT", name: "Exempt", rate: 0.0 },
-    ],
-  },
-  {
-    code: "US_SALES_TAX",
-    name: "US Sales Tax",
-    country: "US",
-    rates: [
-      { code: "STANDARD", name: "Sales Tax", rate: 0.0875 },
-      { code: "EXEMPT", name: "Exempt", rate: 0.0 },
-    ],
-  },
-  {
-    code: "AU_GST",
-    name: "Australian GST",
-    country: "AU",
-    rates: [
-      { code: "STANDARD", name: "GST (10%)", rate: 0.1 },
-      { code: "ZERO", name: "GST-Free", rate: 0.0 },
-      { code: "EXEMPT", name: "Input Taxed", rate: 0.0 },
-    ],
-  },
-  {
-    code: "IN_GST",
-    name: "Indian GST",
-    country: "IN",
-    rates: [
-      { code: "STANDARD_28", name: "GST 28%", rate: 0.28 },
-      { code: "STANDARD_18", name: "GST 18%", rate: 0.18 },
-      { code: "STANDARD_12", name: "GST 12%", rate: 0.12 },
-      { code: "STANDARD_5", name: "GST 5%", rate: 0.05 },
-      { code: "ZERO", name: "GST 0%", rate: 0.0 },
-      { code: "EXEMPT", name: "Exempt", rate: 0.0 },
-    ],
-  },
-  {
-    code: "CA_GST_HST",
-    name: "Canadian GST/HST",
-    country: "CA",
-    rates: [
-      { code: "HST", name: "HST (15%)", rate: 0.15 },
-      { code: "GST", name: "GST (5%)", rate: 0.05 },
-      { code: "ZERO", name: "Zero-Rated", rate: 0.0 },
-      { code: "EXEMPT", name: "Exempt", rate: 0.0 },
-    ],
-  },
-  {
-    code: "PK_GST",
-    name: "Pakistan GST/Sales Tax",
-    country: "PK",
-    rates: [
-      { code: "STANDARD", name: "Standard (17%)", rate: 0.17 },
-      { code: "REDUCED", name: "Reduced (5%)", rate: 0.05 },
-      { code: "ZERO", name: "Zero Rate", rate: 0.0 },
-      { code: "EXEMPT", name: "Exempt", rate: 0.0 },
-    ],
-  },
-  {
-    code: "UK_INCOME_TAX",
-    name: "UK Income Tax (PAYE)",
-    country: "GB",
-    rates: [
-      { code: "BASIC", name: "Basic Rate (20%)", rate: 0.20 },
-      { code: "HIGHER", name: "Higher Rate (40%)", rate: 0.40 },
-      { code: "ADDITIONAL", name: "Additional Rate (45%)", rate: 0.45 },
-    ],
-  },
-  {
-    code: "US_INCOME_TAX",
-    name: "US Federal Income Tax",
-    country: "US",
-    rates: [
-      { code: "RATE_10", name: "10% Bracket", rate: 0.10 },
-      { code: "RATE_12", name: "12% Bracket", rate: 0.12 },
-      { code: "RATE_22", name: "22% Bracket", rate: 0.22 },
-      { code: "RATE_24", name: "24% Bracket", rate: 0.24 },
-      { code: "RATE_32", name: "32% Bracket", rate: 0.32 },
-      { code: "RATE_35", name: "35% Bracket", rate: 0.35 },
-      { code: "RATE_37", name: "37% Bracket", rate: 0.37 },
-    ],
-  },
-  {
-    code: "AU_INCOME_TAX",
-    name: "Australian Income Tax",
-    country: "AU",
-    rates: [
-      { code: "RATE_19", name: "19% (A$18,201–45,000)", rate: 0.19 },
-      { code: "RATE_325", name: "32.5% (A$45,001–135,000)", rate: 0.325 },
-      { code: "RATE_37", name: "37% (A$135,001–190,000)", rate: 0.37 },
-      { code: "RATE_45", name: "45% (over A$190,000)", rate: 0.45 },
-    ],
-  },
-  {
-    code: "IN_INCOME_TAX",
-    name: "Indian Income Tax (TDS)",
-    country: "IN",
-    rates: [
-      { code: "TDS_1", name: "TDS 1%", rate: 0.01 },
-      { code: "TDS_2", name: "TDS 2%", rate: 0.02 },
-      { code: "TDS_5", name: "TDS 5%", rate: 0.05 },
-      { code: "TDS_10", name: "TDS 10%", rate: 0.10 },
-      { code: "TDS_30", name: "TDS 30%", rate: 0.30 },
-    ],
-  },
-  {
-    code: "CA_INCOME_TAX",
-    name: "Canadian Income Tax",
-    country: "CA",
-    rates: [
-      { code: "RATE_15", name: "Federal 15% (up to C$55,867)", rate: 0.15 },
-      { code: "RATE_205", name: "Federal 20.5% (C$55,867–111,733)", rate: 0.205 },
-      { code: "RATE_26", name: "Federal 26% (C$111,733–154,906)", rate: 0.26 },
-      { code: "RATE_29", name: "Federal 29% (C$154,906–220,000)", rate: 0.29 },
-      { code: "RATE_33", name: "Federal 33% (over C$220,000)", rate: 0.33 },
-    ],
-  },
-  {
-    code: "PK_INCOME_TAX",
-    name: "Pakistan Income Tax",
-    country: "PK",
-    rates: [
-      { code: "SLAB_1", name: "Up to PKR 600K (0%)", rate: 0.00 },
-      { code: "SLAB_2", name: "PKR 600K–1.2M (5%)", rate: 0.05 },
-      { code: "SLAB_3", name: "PKR 1.2M–2.4M (15%)", rate: 0.15 },
-      { code: "SLAB_4", name: "PKR 2.4M–3.6M (25%)", rate: 0.25 },
-      { code: "SLAB_5", name: "PKR 3.6M–6M (30%)", rate: 0.30 },
-      { code: "SLAB_6", name: "Over PKR 6M (35%)", rate: 0.35 },
-    ],
-  },
-];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -199,18 +40,7 @@ function daysFromNow(n: number): Date {
 async function main() {
   // ── 1. Tax regimes ──────────────────────────────────────────────────────────
   console.log("🌱 Seeding tax regimes...");
-  for (const regime of TAX_REGIMES) {
-    await db.taxRegime.upsert({
-      where: { code: regime.code },
-      update: {},
-      create: {
-        code: regime.code,
-        name: regime.name,
-        country: regime.country,
-        rates: { create: regime.rates },
-      },
-    });
-  }
+  await seedTaxRegimes(db);
   console.log("✅ Tax regimes seeded");
 
   // ── 2. Skip demo org if already present ─────────────────────────────────────
@@ -254,28 +84,84 @@ async function main() {
   // Fetch the accounts we'll need by code
   const accts = await db.chartAccount.findMany({ where: { organisationId: org.id } });
   const acctByCode = Object.fromEntries(accts.map((a) => [a.code, a]));
-  const AR    = acctByCode["1200"]; // Accounts Receivable
-  const CASH  = acctByCode["1100"]; // Cash at Bank
-  const AP    = acctByCode["2100"]; // Accounts Payable
-  const REV   = acctByCode["4200"]; // Service Revenue
+  const AR = acctByCode["1200"]; // Accounts Receivable
+  const CASH = acctByCode["1100"]; // Cash at Bank
+  const AP = acctByCode["2100"]; // Accounts Payable
+  const REV = acctByCode["4200"]; // Service Revenue
   const SALES = acctByCode["4100"]; // Sales Revenue
-  const SAL   = acctByCode["5200"]; // Salaries & Wages
-  const RENT  = acctByCode["5300"]; // Rent & Lease
-  const UTIL  = acctByCode["5400"]; // Utilities
-  const MKT   = acctByCode["5500"]; // Marketing & Advertising
-  const PROF  = acctByCode["5600"]; // Professional Fees
-  const SW    = acctByCode["5700"]; // Software & Subscriptions
+  const SAL = acctByCode["5200"]; // Salaries & Wages
+  const RENT = acctByCode["5300"]; // Rent & Lease
+  const UTIL = acctByCode["5400"]; // Utilities
+  const MKT = acctByCode["5500"]; // Marketing & Advertising
+  const PROF = acctByCode["5600"]; // Professional Fees
+  const SW = acctByCode["5700"]; // Software & Subscriptions
 
   // ── 5. Contacts ──────────────────────────────────────────────────────────────
   console.log("🌱 Seeding contacts...");
   const [acme, beta, gamma, delta, officeDepot, cloudHost, agency] = await Promise.all([
-    db.contact.create({ data: { organisationId: org.id, type: "CUSTOMER", name: "Acme Corp", email: "billing@acmecorp.com", phone: "+1-555-0101", address: "123 Main St, New York, NY 10001" } }),
-    db.contact.create({ data: { organisationId: org.id, type: "CUSTOMER", name: "Beta Solutions", email: "accounts@betasolutions.io", phone: "+1-555-0102", address: "456 Park Ave, San Francisco, CA 94102" } }),
-    db.contact.create({ data: { organisationId: org.id, type: "CUSTOMER", name: "Gamma Industries", email: "finance@gammaindustries.com", phone: "+1-555-0103", address: "789 Oak Blvd, Chicago, IL 60601" } }),
-    db.contact.create({ data: { organisationId: org.id, type: "CUSTOMER", name: "Delta Partners", email: "ap@deltapartners.com", phone: "+1-555-0104" } }),
-    db.contact.create({ data: { organisationId: org.id, type: "SUPPLIER", name: "Office Depot", email: "billing@officedepot.com" } }),
-    db.contact.create({ data: { organisationId: org.id, type: "SUPPLIER", name: "Cloud Hosting Co", email: "invoices@cloudhost.com" } }),
-    db.contact.create({ data: { organisationId: org.id, type: "SUPPLIER", name: "Creative Agency", email: "hello@creativeagency.com" } }),
+    db.contact.create({
+      data: {
+        organisationId: org.id,
+        type: "CUSTOMER",
+        name: "Acme Corp",
+        email: "billing@acmecorp.com",
+        phone: "+1-555-0101",
+        address: "123 Main St, New York, NY 10001",
+      },
+    }),
+    db.contact.create({
+      data: {
+        organisationId: org.id,
+        type: "CUSTOMER",
+        name: "Beta Solutions",
+        email: "accounts@betasolutions.io",
+        phone: "+1-555-0102",
+        address: "456 Park Ave, San Francisco, CA 94102",
+      },
+    }),
+    db.contact.create({
+      data: {
+        organisationId: org.id,
+        type: "CUSTOMER",
+        name: "Gamma Industries",
+        email: "finance@gammaindustries.com",
+        phone: "+1-555-0103",
+        address: "789 Oak Blvd, Chicago, IL 60601",
+      },
+    }),
+    db.contact.create({
+      data: {
+        organisationId: org.id,
+        type: "CUSTOMER",
+        name: "Delta Partners",
+        email: "ap@deltapartners.com",
+        phone: "+1-555-0104",
+      },
+    }),
+    db.contact.create({
+      data: {
+        organisationId: org.id,
+        type: "SUPPLIER",
+        name: "Office Depot",
+        email: "billing@officedepot.com",
+      },
+    }),
+    db.contact.create({
+      data: {
+        organisationId: org.id,
+        type: "SUPPLIER",
+        name: "Cloud Hosting Co",
+        email: "invoices@cloudhost.com",
+      },
+    }),
+    db.contact.create({
+      data: {
+        organisationId: org.id,
+        type: "SUPPLIER",
+        name: "Creative Agency",
+        email: "hello@creativeagency.com",
+      },
+    }),
   ]);
 
   // ── 6. Invoices ──────────────────────────────────────────────────────────────
@@ -297,9 +183,30 @@ async function main() {
       notes: "Website redesign project",
       lines: {
         create: [
-          { description: "UI/UX Design", quantity: 1, unitPrice: 2000, amount: 2000, taxAmount: 0, sortOrder: 0 },
-          { description: "Frontend Development", quantity: 1, unitPrice: 2000, amount: 2000, taxAmount: 0, sortOrder: 1 },
-          { description: "QA & Testing", quantity: 1, unitPrice: 1000, amount: 1000, taxAmount: 0, sortOrder: 2 },
+          {
+            description: "UI/UX Design",
+            quantity: 1,
+            unitPrice: 2000,
+            amount: 2000,
+            taxAmount: 0,
+            sortOrder: 0,
+          },
+          {
+            description: "Frontend Development",
+            quantity: 1,
+            unitPrice: 2000,
+            amount: 2000,
+            taxAmount: 0,
+            sortOrder: 1,
+          },
+          {
+            description: "QA & Testing",
+            quantity: 1,
+            unitPrice: 1000,
+            amount: 1000,
+            taxAmount: 0,
+            sortOrder: 2,
+          },
         ],
       },
     },
@@ -307,21 +214,32 @@ async function main() {
   // Journal: DR AR 5000 / CR Revenue 5000
   await db.journalEntry.create({
     data: {
-      organisationId: org.id, date: daysAgo(65), description: "Invoice INV-001 — Acme Corp", source: "INVOICE", sourceId: inv1.id,
-      lines: { create: [
-        { accountId: AR.id, debit: 5000, credit: null },
-        { accountId: REV.id, debit: null, credit: 5000 },
-      ]},
+      organisationId: org.id,
+      date: daysAgo(65),
+      description: "Invoice INV-001 — Acme Corp",
+      source: "INVOICE",
+      sourceId: inv1.id,
+      lines: {
+        create: [
+          { accountId: AR.id, debit: 5000, credit: null },
+          { accountId: REV.id, debit: null, credit: 5000 },
+        ],
+      },
     },
   });
   // Payment: DR Cash 5000 / CR AR 5000
   await db.journalEntry.create({
     data: {
-      organisationId: org.id, date: daysAgo(32), description: "Payment received — INV-001 Acme Corp", source: "MANUAL",
-      lines: { create: [
-        { accountId: CASH.id, debit: 5000, credit: null },
-        { accountId: AR.id, debit: null, credit: 5000 },
-      ]},
+      organisationId: org.id,
+      date: daysAgo(32),
+      description: "Payment received — INV-001 Acme Corp",
+      source: "MANUAL",
+      lines: {
+        create: [
+          { accountId: CASH.id, debit: 5000, credit: null },
+          { accountId: AR.id, debit: null, credit: 5000 },
+        ],
+      },
     },
   });
 
@@ -341,18 +259,31 @@ async function main() {
       notes: "Monthly retainer — April",
       lines: {
         create: [
-          { description: "Monthly consulting retainer", quantity: 1, unitPrice: 3500, amount: 3500, taxAmount: 0, sortOrder: 0 },
+          {
+            description: "Monthly consulting retainer",
+            quantity: 1,
+            unitPrice: 3500,
+            amount: 3500,
+            taxAmount: 0,
+            sortOrder: 0,
+          },
         ],
       },
     },
   });
   await db.journalEntry.create({
     data: {
-      organisationId: org.id, date: daysAgo(20), description: "Invoice INV-002 — Beta Solutions", source: "INVOICE", sourceId: inv2.id,
-      lines: { create: [
-        { accountId: AR.id, debit: 3500, credit: null },
-        { accountId: REV.id, debit: null, credit: 3500 },
-      ]},
+      organisationId: org.id,
+      date: daysAgo(20),
+      description: "Invoice INV-002 — Beta Solutions",
+      source: "INVOICE",
+      sourceId: inv2.id,
+      lines: {
+        create: [
+          { accountId: AR.id, debit: 3500, credit: null },
+          { accountId: REV.id, debit: null, credit: 3500 },
+        ],
+      },
     },
   });
 
@@ -372,29 +303,61 @@ async function main() {
       notes: "Data migration & integration project",
       lines: {
         create: [
-          { description: "Database migration", quantity: 1, unitPrice: 3600, amount: 3600, taxAmount: 0, sortOrder: 0 },
-          { description: "API integration", quantity: 1, unitPrice: 2400, amount: 2400, taxAmount: 0, sortOrder: 1 },
-          { description: "Testing & deployment", quantity: 1, unitPrice: 1200, amount: 1200, taxAmount: 0, sortOrder: 2 },
+          {
+            description: "Database migration",
+            quantity: 1,
+            unitPrice: 3600,
+            amount: 3600,
+            taxAmount: 0,
+            sortOrder: 0,
+          },
+          {
+            description: "API integration",
+            quantity: 1,
+            unitPrice: 2400,
+            amount: 2400,
+            taxAmount: 0,
+            sortOrder: 1,
+          },
+          {
+            description: "Testing & deployment",
+            quantity: 1,
+            unitPrice: 1200,
+            amount: 1200,
+            taxAmount: 0,
+            sortOrder: 2,
+          },
         ],
       },
     },
   });
   await db.journalEntry.create({
     data: {
-      organisationId: org.id, date: daysAgo(45), description: "Invoice INV-003 — Gamma Industries", source: "INVOICE", sourceId: inv3.id,
-      lines: { create: [
-        { accountId: AR.id, debit: 7200, credit: null },
-        { accountId: REV.id, debit: null, credit: 7200 },
-      ]},
+      organisationId: org.id,
+      date: daysAgo(45),
+      description: "Invoice INV-003 — Gamma Industries",
+      source: "INVOICE",
+      sourceId: inv3.id,
+      lines: {
+        create: [
+          { accountId: AR.id, debit: 7200, credit: null },
+          { accountId: REV.id, debit: null, credit: 7200 },
+        ],
+      },
     },
   });
   await db.journalEntry.create({
     data: {
-      organisationId: org.id, date: daysAgo(20), description: "Part payment received — INV-003 Gamma Industries", source: "MANUAL",
-      lines: { create: [
-        { accountId: CASH.id, debit: 3600, credit: null },
-        { accountId: AR.id, debit: null, credit: 3600 },
-      ]},
+      organisationId: org.id,
+      date: daysAgo(20),
+      description: "Part payment received — INV-003 Gamma Industries",
+      source: "MANUAL",
+      lines: {
+        create: [
+          { accountId: CASH.id, debit: 3600, credit: null },
+          { accountId: AR.id, debit: null, credit: 3600 },
+        ],
+      },
     },
   });
 
@@ -414,7 +377,14 @@ async function main() {
       notes: "SEO audit report",
       lines: {
         create: [
-          { description: "SEO audit and recommendations", quantity: 1, unitPrice: 1800, amount: 1800, taxAmount: 0, sortOrder: 0 },
+          {
+            description: "SEO audit and recommendations",
+            quantity: 1,
+            unitPrice: 1800,
+            amount: 1800,
+            taxAmount: 0,
+            sortOrder: 0,
+          },
         ],
       },
     },
@@ -436,8 +406,22 @@ async function main() {
       notes: "Phase 2 development",
       lines: {
         create: [
-          { description: "Backend API development", quantity: 1, unitPrice: 1500, amount: 1500, taxAmount: 0, sortOrder: 0 },
-          { description: "Admin dashboard", quantity: 1, unitPrice: 1000, amount: 1000, taxAmount: 0, sortOrder: 1 },
+          {
+            description: "Backend API development",
+            quantity: 1,
+            unitPrice: 1500,
+            amount: 1500,
+            taxAmount: 0,
+            sortOrder: 0,
+          },
+          {
+            description: "Admin dashboard",
+            quantity: 1,
+            unitPrice: 1000,
+            amount: 1000,
+            taxAmount: 0,
+            sortOrder: 1,
+          },
         ],
       },
     },
@@ -462,29 +446,61 @@ async function main() {
       notes: "Office supplies Q1",
       lines: {
         create: [
-          { description: "Printer paper (10 reams)", quantity: 10, unitPrice: 45, amount: 450, taxAmount: 0, sortOrder: 0 },
-          { description: "Ink cartridges", quantity: 3, unitPrice: 85, amount: 255, taxAmount: 0, sortOrder: 1 },
-          { description: "Stationery & misc", quantity: 1, unitPrice: 495, amount: 495, taxAmount: 0, sortOrder: 2 },
+          {
+            description: "Printer paper (10 reams)",
+            quantity: 10,
+            unitPrice: 45,
+            amount: 450,
+            taxAmount: 0,
+            sortOrder: 0,
+          },
+          {
+            description: "Ink cartridges",
+            quantity: 3,
+            unitPrice: 85,
+            amount: 255,
+            taxAmount: 0,
+            sortOrder: 1,
+          },
+          {
+            description: "Stationery & misc",
+            quantity: 1,
+            unitPrice: 495,
+            amount: 495,
+            taxAmount: 0,
+            sortOrder: 2,
+          },
         ],
       },
     },
   });
   await db.journalEntry.create({
     data: {
-      organisationId: org.id, date: daysAgo(60), description: "Bill OD-44821 — Office Depot", source: "BILL", sourceId: bill1.id,
-      lines: { create: [
-        { accountId: PROF.id, debit: 1200, credit: null, description: "Office supplies" },
-        { accountId: AP.id, debit: null, credit: 1200 },
-      ]},
+      organisationId: org.id,
+      date: daysAgo(60),
+      description: "Bill OD-44821 — Office Depot",
+      source: "BILL",
+      sourceId: bill1.id,
+      lines: {
+        create: [
+          { accountId: PROF.id, debit: 1200, credit: null, description: "Office supplies" },
+          { accountId: AP.id, debit: null, credit: 1200 },
+        ],
+      },
     },
   });
   await db.journalEntry.create({
     data: {
-      organisationId: org.id, date: daysAgo(28), description: "Payment to Office Depot — OD-44821", source: "MANUAL",
-      lines: { create: [
-        { accountId: AP.id, debit: 1200, credit: null },
-        { accountId: CASH.id, debit: null, credit: 1200 },
-      ]},
+      organisationId: org.id,
+      date: daysAgo(28),
+      description: "Payment to Office Depot — OD-44821",
+      source: "MANUAL",
+      lines: {
+        create: [
+          { accountId: AP.id, debit: 1200, credit: null },
+          { accountId: CASH.id, debit: null, credit: 1200 },
+        ],
+      },
     },
   });
 
@@ -503,7 +519,14 @@ async function main() {
       amountPaid: 0,
       lines: {
         create: [
-          { description: "Cloud hosting — June 2026", quantity: 1, unitPrice: 450, amount: 450, taxAmount: 0, sortOrder: 0 },
+          {
+            description: "Cloud hosting — June 2026",
+            quantity: 1,
+            unitPrice: 450,
+            amount: 450,
+            taxAmount: 0,
+            sortOrder: 0,
+          },
         ],
       },
     },
@@ -525,9 +548,30 @@ async function main() {
       notes: "Brand refresh campaign",
       lines: {
         create: [
-          { description: "Logo redesign", quantity: 1, unitPrice: 1200, amount: 1200, taxAmount: 0, sortOrder: 0 },
-          { description: "Social media graphics pack", quantity: 1, unitPrice: 800, amount: 800, taxAmount: 0, sortOrder: 1 },
-          { description: "Brand guidelines document", quantity: 1, unitPrice: 1000, amount: 1000, taxAmount: 0, sortOrder: 2 },
+          {
+            description: "Logo redesign",
+            quantity: 1,
+            unitPrice: 1200,
+            amount: 1200,
+            taxAmount: 0,
+            sortOrder: 0,
+          },
+          {
+            description: "Social media graphics pack",
+            quantity: 1,
+            unitPrice: 800,
+            amount: 800,
+            taxAmount: 0,
+            sortOrder: 1,
+          },
+          {
+            description: "Brand guidelines document",
+            quantity: 1,
+            unitPrice: 1000,
+            amount: 1000,
+            taxAmount: 0,
+            sortOrder: 2,
+          },
         ],
       },
     },
@@ -537,28 +581,33 @@ async function main() {
   console.log("🌱 Seeding journal entries...");
 
   const expenseEntries = [
-    { date: daysAgo(60), desc: "Office rent — April 2026",  dr: RENT.id, cr: CASH.id, amount: 4500 },
-    { date: daysAgo(57), desc: "Salaries — April 2026",      dr: SAL.id,  cr: CASH.id, amount: 12000 },
-    { date: daysAgo(55), desc: "Electricity & utilities",    dr: UTIL.id, cr: CASH.id, amount: 380 },
-    { date: daysAgo(50), desc: "Google Ads campaign",        dr: MKT.id,  cr: CASH.id, amount: 1200 },
-    { date: daysAgo(30), desc: "Office rent — May 2026",     dr: RENT.id, cr: CASH.id, amount: 4500 },
-    { date: daysAgo(27), desc: "Salaries — May 2026",        dr: SAL.id,  cr: CASH.id, amount: 12000 },
-    { date: daysAgo(25), desc: "Internet & phone",           dr: UTIL.id, cr: CASH.id, amount: 220 },
-    { date: daysAgo(22), desc: "LinkedIn advertising",       dr: MKT.id,  cr: CASH.id, amount: 800 },
-    { date: daysAgo(18), desc: "Legal consultation",         dr: PROF.id, cr: CASH.id, amount: 650 },
-    { date: daysAgo(12), desc: "Software subscriptions",     dr: SW.id,   cr: CASH.id, amount: 495 },
-    { date: daysAgo(5),  desc: "Office rent — June 2026",    dr: RENT.id, cr: CASH.id, amount: 4500 },
-    { date: daysAgo(3),  desc: "Salaries — June 2026",       dr: SAL.id,  cr: CASH.id, amount: 12000 },
+    { date: daysAgo(60), desc: "Office rent — April 2026", dr: RENT.id, cr: CASH.id, amount: 4500 },
+    { date: daysAgo(57), desc: "Salaries — April 2026", dr: SAL.id, cr: CASH.id, amount: 12000 },
+    { date: daysAgo(55), desc: "Electricity & utilities", dr: UTIL.id, cr: CASH.id, amount: 380 },
+    { date: daysAgo(50), desc: "Google Ads campaign", dr: MKT.id, cr: CASH.id, amount: 1200 },
+    { date: daysAgo(30), desc: "Office rent — May 2026", dr: RENT.id, cr: CASH.id, amount: 4500 },
+    { date: daysAgo(27), desc: "Salaries — May 2026", dr: SAL.id, cr: CASH.id, amount: 12000 },
+    { date: daysAgo(25), desc: "Internet & phone", dr: UTIL.id, cr: CASH.id, amount: 220 },
+    { date: daysAgo(22), desc: "LinkedIn advertising", dr: MKT.id, cr: CASH.id, amount: 800 },
+    { date: daysAgo(18), desc: "Legal consultation", dr: PROF.id, cr: CASH.id, amount: 650 },
+    { date: daysAgo(12), desc: "Software subscriptions", dr: SW.id, cr: CASH.id, amount: 495 },
+    { date: daysAgo(5), desc: "Office rent — June 2026", dr: RENT.id, cr: CASH.id, amount: 4500 },
+    { date: daysAgo(3), desc: "Salaries — June 2026", dr: SAL.id, cr: CASH.id, amount: 12000 },
   ];
 
   for (const e of expenseEntries) {
     await db.journalEntry.create({
       data: {
-        organisationId: org.id, date: e.date, description: e.desc, source: "MANUAL",
-        lines: { create: [
-          { accountId: e.dr, debit: e.amount, credit: null },
-          { accountId: e.cr, debit: null, credit: e.amount },
-        ]},
+        organisationId: org.id,
+        date: e.date,
+        description: e.desc,
+        source: "MANUAL",
+        lines: {
+          create: [
+            { accountId: e.dr, debit: e.amount, credit: null },
+            { accountId: e.cr, debit: null, credit: e.amount },
+          ],
+        },
       },
     });
   }
@@ -577,14 +626,62 @@ async function main() {
   // Bank statement lines (some matched, some unmatched)
   await db.bankStatementLine.createMany({
     data: [
-      { bankAccountId: bankAccount.id, date: daysAgo(32), description: "ACME CORP PAYMENT", amount: 5000,  status: "MATCHED" },
-      { bankAccountId: bankAccount.id, date: daysAgo(28), description: "OFFICE DEPOT INV", amount: -1200,  status: "MATCHED" },
-      { bankAccountId: bankAccount.id, date: daysAgo(20), description: "GAMMA INDUSTRIES PART PMT", amount: 3600, status: "MATCHED" },
-      { bankAccountId: bankAccount.id, date: daysAgo(15), description: "STRIPE PAYOUT", amount: 1840,  status: "UNMATCHED" },
-      { bankAccountId: bankAccount.id, date: daysAgo(10), description: "AWS CLOUD SERVICES", amount: -312, status: "UNMATCHED" },
-      { bankAccountId: bankAccount.id, date: daysAgo(7),  description: "PAYROLL DIRECT DEPOSIT", amount: -12000, status: "MATCHED" },
-      { bankAccountId: bankAccount.id, date: daysAgo(4),  description: "GOOGLE ADS", amount: -800, status: "UNMATCHED" },
-      { bankAccountId: bankAccount.id, date: daysAgo(2),  description: "BANK INTEREST", amount: 24, status: "UNMATCHED" },
+      {
+        bankAccountId: bankAccount.id,
+        date: daysAgo(32),
+        description: "ACME CORP PAYMENT",
+        amount: 5000,
+        status: "MATCHED",
+      },
+      {
+        bankAccountId: bankAccount.id,
+        date: daysAgo(28),
+        description: "OFFICE DEPOT INV",
+        amount: -1200,
+        status: "MATCHED",
+      },
+      {
+        bankAccountId: bankAccount.id,
+        date: daysAgo(20),
+        description: "GAMMA INDUSTRIES PART PMT",
+        amount: 3600,
+        status: "MATCHED",
+      },
+      {
+        bankAccountId: bankAccount.id,
+        date: daysAgo(15),
+        description: "STRIPE PAYOUT",
+        amount: 1840,
+        status: "UNMATCHED",
+      },
+      {
+        bankAccountId: bankAccount.id,
+        date: daysAgo(10),
+        description: "AWS CLOUD SERVICES",
+        amount: -312,
+        status: "UNMATCHED",
+      },
+      {
+        bankAccountId: bankAccount.id,
+        date: daysAgo(7),
+        description: "PAYROLL DIRECT DEPOSIT",
+        amount: -12000,
+        status: "MATCHED",
+      },
+      {
+        bankAccountId: bankAccount.id,
+        date: daysAgo(4),
+        description: "GOOGLE ADS",
+        amount: -800,
+        status: "UNMATCHED",
+      },
+      {
+        bankAccountId: bankAccount.id,
+        date: daysAgo(2),
+        description: "BANK INTEREST",
+        amount: 24,
+        status: "UNMATCHED",
+      },
     ],
   });
 
@@ -592,10 +689,34 @@ async function main() {
   console.log("🌱 Seeding budgets...");
   await db.budget.createMany({
     data: [
-      { organisationId: org.id, name: "Marketing Budget", category: "Marketing & Advertising", limitAmount: 3000, period: "MONTHLY" },
-      { organisationId: org.id, name: "Software Budget",  category: "Software & Subscriptions", limitAmount: 1000, period: "MONTHLY" },
-      { organisationId: org.id, name: "Travel Budget",    category: "Travel & Entertainment",  limitAmount: 2000, period: "MONTHLY" },
-      { organisationId: org.id, name: "Office Supplies",  category: "Miscellaneous Expenses",  limitAmount: 500,  period: "MONTHLY" },
+      {
+        organisationId: org.id,
+        name: "Marketing Budget",
+        category: "Marketing & Advertising",
+        limitAmount: 3000,
+        period: "MONTHLY",
+      },
+      {
+        organisationId: org.id,
+        name: "Software Budget",
+        category: "Software & Subscriptions",
+        limitAmount: 1000,
+        period: "MONTHLY",
+      },
+      {
+        organisationId: org.id,
+        name: "Travel Budget",
+        category: "Travel & Entertainment",
+        limitAmount: 2000,
+        period: "MONTHLY",
+      },
+      {
+        organisationId: org.id,
+        name: "Office Supplies",
+        category: "Miscellaneous Expenses",
+        limitAmount: 500,
+        period: "MONTHLY",
+      },
     ],
   });
 
@@ -603,9 +724,32 @@ async function main() {
   console.log("🌱 Seeding goals...");
   await db.goal.createMany({
     data: [
-      { organisationId: org.id, name: "Emergency Fund",     description: "6 months of operating expenses", targetAmount: 50000, currentAmount: 24350, targetDate: daysFromNow(180), status: "ACTIVE" },
-      { organisationId: org.id, name: "New Equipment",      description: "MacBook Pros for the team",       targetAmount: 12000, currentAmount: 4500,  targetDate: daysFromNow(90),  status: "ACTIVE" },
-      { organisationId: org.id, name: "Marketing Campaign", description: "Q3 growth campaign budget",       targetAmount: 8000,  currentAmount: 8000,  status: "COMPLETED" },
+      {
+        organisationId: org.id,
+        name: "Emergency Fund",
+        description: "6 months of operating expenses",
+        targetAmount: 50000,
+        currentAmount: 24350,
+        targetDate: daysFromNow(180),
+        status: "ACTIVE",
+      },
+      {
+        organisationId: org.id,
+        name: "New Equipment",
+        description: "MacBook Pros for the team",
+        targetAmount: 12000,
+        currentAmount: 4500,
+        targetDate: daysFromNow(90),
+        status: "ACTIVE",
+      },
+      {
+        organisationId: org.id,
+        name: "Marketing Campaign",
+        description: "Q3 growth campaign budget",
+        targetAmount: 8000,
+        currentAmount: 8000,
+        status: "COMPLETED",
+      },
     ],
   });
 
@@ -613,11 +757,56 @@ async function main() {
   console.log("🌱 Seeding recurring items...");
   await db.recurringItem.createMany({
     data: [
-      { organisationId: org.id, name: "Office Rent",          amount: 4500,  type: "EXPENSE", frequency: "MONTHLY",   category: "Rent & Lease",             nextDueDate: daysFromNow(25), isActive: true },
-      { organisationId: org.id, name: "Cloud Hosting",        amount: 450,   type: "EXPENSE", frequency: "MONTHLY",   category: "Software & Subscriptions", nextDueDate: daysFromNow(25), isActive: true },
-      { organisationId: org.id, name: "Beta Solutions Retainer", amount: 3500, type: "INCOME", frequency: "MONTHLY",  category: "Service Revenue",          nextDueDate: daysFromNow(10), isActive: true },
-      { organisationId: org.id, name: "LinkedIn Ads",         amount: 800,   type: "EXPENSE", frequency: "MONTHLY",   category: "Marketing & Advertising",  nextDueDate: daysFromNow(8),  isActive: true },
-      { organisationId: org.id, name: "Annual Software License", amount: 1200, type: "EXPENSE", frequency: "YEARLY", category: "Software & Subscriptions", nextDueDate: daysFromNow(200), isActive: true },
+      {
+        organisationId: org.id,
+        name: "Office Rent",
+        amount: 4500,
+        type: "EXPENSE",
+        frequency: "MONTHLY",
+        category: "Rent & Lease",
+        nextDueDate: daysFromNow(25),
+        isActive: true,
+      },
+      {
+        organisationId: org.id,
+        name: "Cloud Hosting",
+        amount: 450,
+        type: "EXPENSE",
+        frequency: "MONTHLY",
+        category: "Software & Subscriptions",
+        nextDueDate: daysFromNow(25),
+        isActive: true,
+      },
+      {
+        organisationId: org.id,
+        name: "Beta Solutions Retainer",
+        amount: 3500,
+        type: "INCOME",
+        frequency: "MONTHLY",
+        category: "Service Revenue",
+        nextDueDate: daysFromNow(10),
+        isActive: true,
+      },
+      {
+        organisationId: org.id,
+        name: "LinkedIn Ads",
+        amount: 800,
+        type: "EXPENSE",
+        frequency: "MONTHLY",
+        category: "Marketing & Advertising",
+        nextDueDate: daysFromNow(8),
+        isActive: true,
+      },
+      {
+        organisationId: org.id,
+        name: "Annual Software License",
+        amount: 1200,
+        type: "EXPENSE",
+        frequency: "YEARLY",
+        category: "Software & Subscriptions",
+        nextDueDate: daysFromNow(200),
+        isActive: true,
+      },
     ],
   });
 
@@ -625,8 +814,22 @@ async function main() {
   console.log("🌱 Seeding watchlists...");
   await db.watchlist.createMany({
     data: [
-      { organisationId: org.id, name: "Ad Spend Watch",    category: "Marketing & Advertising",  threshold: 2500, period: "MONTHLY", isActive: true },
-      { organisationId: org.id, name: "SaaS Cost Watch",   category: "Software & Subscriptions", threshold: 800,  period: "MONTHLY", isActive: true },
+      {
+        organisationId: org.id,
+        name: "Ad Spend Watch",
+        category: "Marketing & Advertising",
+        threshold: 2500,
+        period: "MONTHLY",
+        isActive: true,
+      },
+      {
+        organisationId: org.id,
+        name: "SaaS Cost Watch",
+        category: "Software & Subscriptions",
+        threshold: 800,
+        period: "MONTHLY",
+        isActive: true,
+      },
     ],
   });
 
@@ -641,11 +844,11 @@ async function main() {
       isDefault: true,
       stages: {
         create: [
-          { name: "Prospecting",    order: 1, probability: 10 },
-          { name: "Qualification",  order: 2, probability: 25 },
-          { name: "Proposal",       order: 3, probability: 50 },
-          { name: "Negotiation",    order: 4, probability: 75 },
-          { name: "Closed Won",     order: 5, probability: 100 },
+          { name: "Prospecting", order: 1, probability: 10 },
+          { name: "Qualification", order: 2, probability: 25 },
+          { name: "Proposal", order: 3, probability: 50 },
+          { name: "Negotiation", order: 4, probability: 75 },
+          { name: "Closed Won", order: 5, probability: 100 },
         ],
       },
     },
@@ -656,22 +859,106 @@ async function main() {
 
   // CRM Companies
   const [techCo, retailCo] = await Promise.all([
-    db.crmCompany.create({ data: { organisationId: org.id, name: "TechFlow Inc", industry: "Technology", website: "https://techflow.io", size: "MEDIUM", tags: ["saas", "startup"] } }),
-    db.crmCompany.create({ data: { organisationId: org.id, name: "Retail Giant Corp", industry: "Retail", size: "LARGE", tags: ["enterprise", "retail"] } }),
+    db.crmCompany.create({
+      data: {
+        organisationId: org.id,
+        name: "TechFlow Inc",
+        industry: "Technology",
+        website: "https://techflow.io",
+        size: "MEDIUM",
+        tags: ["saas", "startup"],
+      },
+    }),
+    db.crmCompany.create({
+      data: {
+        organisationId: org.id,
+        name: "Retail Giant Corp",
+        industry: "Retail",
+        size: "LARGE",
+        tags: ["enterprise", "retail"],
+      },
+    }),
   ]);
 
   // CRM Contacts (separate from billing contacts)
   const [leadContact1, leadContact2] = await Promise.all([
-    db.contact.create({ data: { organisationId: org.id, type: "CUSTOMER", name: "Sarah Chen", email: "sarah.chen@techflow.io", phone: "+1-555-0201" } }),
-    db.contact.create({ data: { organisationId: org.id, type: "CUSTOMER", name: "Marcus Williams", email: "m.williams@retailgiant.com", phone: "+1-555-0202" } }),
+    db.contact.create({
+      data: {
+        organisationId: org.id,
+        type: "CUSTOMER",
+        name: "Sarah Chen",
+        email: "sarah.chen@techflow.io",
+        phone: "+1-555-0201",
+      },
+    }),
+    db.contact.create({
+      data: {
+        organisationId: org.id,
+        type: "CUSTOMER",
+        name: "Marcus Williams",
+        email: "m.williams@retailgiant.com",
+        phone: "+1-555-0202",
+      },
+    }),
   ]);
 
   // Leads
   await Promise.all([
-    db.crmLead.create({ data: { organisationId: org.id, firstName: "Sarah", lastName: "Chen", email: "sarah.chen@techflow.io", companyName: "TechFlow Inc", jobTitle: "CTO", estimatedValue: 15000, source: "WEBSITE", status: "QUALIFIED", assignedToId: user.id, tags: ["hot-lead", "saas"] } }),
-    db.crmLead.create({ data: { organisationId: org.id, firstName: "Marcus", lastName: "Williams", email: "m.williams@retailgiant.com", companyName: "Retail Giant Corp", jobTitle: "VP Operations", estimatedValue: 45000, source: "REFERRAL", status: "CONTACTED", assignedToId: user.id, tags: ["enterprise"] } }),
-    db.crmLead.create({ data: { organisationId: org.id, firstName: "Priya", lastName: "Patel", email: "priya@newstartup.com", companyName: "New Startup Co", estimatedValue: 8000, source: "SOCIAL_MEDIA", status: "NEW" } }),
-    db.crmLead.create({ data: { organisationId: org.id, firstName: "James", lastName: "Morrison", email: "j.morrison@oldcorp.com", companyName: "Old Corp Ltd", estimatedValue: 5000, source: "COLD_OUTREACH", status: "UNQUALIFIED", notes: "Not the right fit — too small" } }),
+    db.crmLead.create({
+      data: {
+        organisationId: org.id,
+        firstName: "Sarah",
+        lastName: "Chen",
+        email: "sarah.chen@techflow.io",
+        companyName: "TechFlow Inc",
+        jobTitle: "CTO",
+        estimatedValue: 15000,
+        source: "WEBSITE",
+        status: "QUALIFIED",
+        assignedToId: user.id,
+        tags: ["hot-lead", "saas"],
+      },
+    }),
+    db.crmLead.create({
+      data: {
+        organisationId: org.id,
+        firstName: "Marcus",
+        lastName: "Williams",
+        email: "m.williams@retailgiant.com",
+        companyName: "Retail Giant Corp",
+        jobTitle: "VP Operations",
+        estimatedValue: 45000,
+        source: "REFERRAL",
+        status: "CONTACTED",
+        assignedToId: user.id,
+        tags: ["enterprise"],
+      },
+    }),
+    db.crmLead.create({
+      data: {
+        organisationId: org.id,
+        firstName: "Priya",
+        lastName: "Patel",
+        email: "priya@newstartup.com",
+        companyName: "New Startup Co",
+        estimatedValue: 8000,
+        source: "SOCIAL_MEDIA",
+        status: "NEW",
+      },
+    }),
+    db.crmLead.create({
+      data: {
+        organisationId: org.id,
+        firstName: "James",
+        lastName: "Morrison",
+        email: "j.morrison@oldcorp.com",
+        companyName: "Old Corp Ltd",
+        estimatedValue: 5000,
+        source: "COLD_OUTREACH",
+        status: "UNQUALIFIED",
+        notes: "Not the right fit — too small",
+      },
+    }),
   ]);
 
   // Deals
@@ -708,10 +995,43 @@ async function main() {
   // CRM Activities
   await db.crmActivity.createMany({
     data: [
-      { organisationId: org.id, type: "CALL",    subject: "Discovery call with Sarah Chen", notes: "Discussed platform needs, budget confirmed at $15k", contactId: leadContact1.id, dealId: deal1.id, completedAt: daysAgo(10), createdById: user.id },
-      { organisationId: org.id, type: "EMAIL",   subject: "Sent proposal to TechFlow", notes: "Proposal sent covering integration timeline and deliverables", contactId: leadContact1.id, dealId: deal1.id, completedAt: daysAgo(5), createdById: user.id },
-      { organisationId: org.id, type: "MEETING", subject: "Follow-up with Marcus Williams", notes: "In-person meeting at their office. Very positive, awaiting internal approval", contactId: leadContact2.id, completedAt: daysAgo(3), createdById: user.id },
-      { organisationId: org.id, type: "TASK",    subject: "Send revised contract to Retail Giant", dueDate: daysFromNow(2), contactId: leadContact2.id, createdById: user.id },
+      {
+        organisationId: org.id,
+        type: "CALL",
+        subject: "Discovery call with Sarah Chen",
+        notes: "Discussed platform needs, budget confirmed at $15k",
+        contactId: leadContact1.id,
+        dealId: deal1.id,
+        completedAt: daysAgo(10),
+        createdById: user.id,
+      },
+      {
+        organisationId: org.id,
+        type: "EMAIL",
+        subject: "Sent proposal to TechFlow",
+        notes: "Proposal sent covering integration timeline and deliverables",
+        contactId: leadContact1.id,
+        dealId: deal1.id,
+        completedAt: daysAgo(5),
+        createdById: user.id,
+      },
+      {
+        organisationId: org.id,
+        type: "MEETING",
+        subject: "Follow-up with Marcus Williams",
+        notes: "In-person meeting at their office. Very positive, awaiting internal approval",
+        contactId: leadContact2.id,
+        completedAt: daysAgo(3),
+        createdById: user.id,
+      },
+      {
+        organisationId: org.id,
+        type: "TASK",
+        subject: "Send revised contract to Retail Giant",
+        dueDate: daysFromNow(2),
+        contactId: leadContact2.id,
+        createdById: user.id,
+      },
     ],
   });
 
@@ -722,10 +1042,24 @@ async function main() {
   });
   await db.chatMessage.createMany({
     data: [
-      { conversationId: conversation.id, role: "user",      content: "Can you give me an overview of this month's profit and loss?" },
-      { conversationId: conversation.id, role: "assistant", content: "Sure! Based on your records for June 2026:\n\n**Income:** $10,700 (service revenue)\n**Expenses:** $17,570 (salaries $12,000, rent $4,500, marketing $800, utilities $220, software $50)\n\n**Net Loss: -$6,870** this month. Note that your outstanding AR of $12,500 (INV-002 and balance of INV-003) when collected will significantly improve the picture. The overdue INV-004 of $1,800 should be followed up." },
-      { conversationId: conversation.id, role: "user",      content: "Which invoice is most overdue?" },
-      { conversationId: conversation.id, role: "assistant", content: "**INV-004** issued to Delta Partners for $1,800 is your most overdue invoice — it was due 20 days ago (May 26th) and remains fully unpaid. I'd recommend sending a payment reminder immediately." },
+      {
+        conversationId: conversation.id,
+        role: "user",
+        content: "Can you give me an overview of this month's profit and loss?",
+      },
+      {
+        conversationId: conversation.id,
+        role: "assistant",
+        content:
+          "Sure! Based on your records for June 2026:\n\n**Income:** $10,700 (service revenue)\n**Expenses:** $17,570 (salaries $12,000, rent $4,500, marketing $800, utilities $220, software $50)\n\n**Net Loss: -$6,870** this month. Note that your outstanding AR of $12,500 (INV-002 and balance of INV-003) when collected will significantly improve the picture. The overdue INV-004 of $1,800 should be followed up.",
+      },
+      { conversationId: conversation.id, role: "user", content: "Which invoice is most overdue?" },
+      {
+        conversationId: conversation.id,
+        role: "assistant",
+        content:
+          "**INV-004** issued to Delta Partners for $1,800 is your most overdue invoice — it was due 20 days ago (May 26th) and remains fully unpaid. I'd recommend sending a payment reminder immediately.",
+      },
     ],
   });
 
