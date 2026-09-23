@@ -14,6 +14,7 @@ import {
   renderServerArgs,
   resolvePostgresBinaries,
   resolveMigrateCommand,
+  ensureMigrated,
   withEngineLibPath,
   startEmbeddedDatabase,
   stopDatabaseProcess,
@@ -326,6 +327,67 @@ describe("resolveMigrateCommand", () => {
   it("falls back to npx prisma", () => {
     const cmd = resolveMigrateCommand({}, "/srv", "node", () => false);
     expect(cmd).toEqual({ cmd: "npx", args: ["prisma", "migrate", "deploy"], cwd: "/srv" });
+  });
+});
+
+describe("ensureMigrated", () => {
+  const cfg = buildConfig(
+    {},
+    { userDataDir: "/userdata", port: 5432, binaries: { initdb: "i", postgres: "p" } }
+  );
+
+  it("sets ELECTRON_RUN_AS_NODE when running the bundled package entry with the current executable, so a packaged Electron binary runs the script instead of relaunching its own GUI", async () => {
+    let capturedEnv: any;
+    const spawnImpl: any = (_cmd: string, _args: string[], opts: any) => {
+      capturedEnv = opts.env;
+      const child = fakeChild();
+      process.nextTick(() => child.emit("exit", 0));
+      return child;
+    };
+    // Only the package-entry path (prisma/build/index.js) exists -- no
+    // .bin/prisma -- so resolveMigrateCommand picks the execPath fallback.
+    const exists = (p: string) => p.includes("prisma/build/index.js");
+    await ensureMigrated(cfg, "/srv", {}, spawnImpl, exists);
+    expect(capturedEnv.ELECTRON_RUN_AS_NODE).toBe("1");
+  });
+
+  it("does not set ELECTRON_RUN_AS_NODE when a bundled .bin/prisma is used directly", async () => {
+    let capturedEnv: any;
+    const spawnImpl: any = (_cmd: string, _args: string[], opts: any) => {
+      capturedEnv = opts.env;
+      const child = fakeChild();
+      process.nextTick(() => child.emit("exit", 0));
+      return child;
+    };
+    const exists = (p: string) => p.includes(".bin/prisma");
+    await ensureMigrated(cfg, "/srv", {}, spawnImpl, exists);
+    expect(capturedEnv.ELECTRON_RUN_AS_NODE).toBeUndefined();
+  });
+
+  it("does not set ELECTRON_RUN_AS_NODE when falling back to npx", async () => {
+    let capturedEnv: any;
+    const spawnImpl: any = (_cmd: string, _args: string[], opts: any) => {
+      capturedEnv = opts.env;
+      const child = fakeChild();
+      process.nextTick(() => child.emit("exit", 0));
+      return child;
+    };
+    await ensureMigrated(cfg, "/srv", {}, spawnImpl, () => false);
+    expect(capturedEnv.ELECTRON_RUN_AS_NODE).toBeUndefined();
+  });
+
+  it("surfaces the migrate process's own captured output on failure, instead of a bare exit code", async () => {
+    const spawnImpl: any = () => {
+      const child = fakeChild();
+      process.nextTick(() => {
+        child.stderr.emit("data", Buffer.from("Error: Cannot find module '@prisma/debug'\n"));
+        child.emit("exit", 1);
+      });
+      return child;
+    };
+    await expect(ensureMigrated(cfg, "/srv", {}, spawnImpl, () => false)).rejects.toThrow(
+      /Cannot find module '@prisma\/debug'/
+    );
   });
 });
 

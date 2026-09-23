@@ -17,7 +17,7 @@
 // Run after `npm run build` (or `npm run next dev` is NOT sufficient — you need
 // a production build). Usage: node desktop/assemble-server.mjs
 
-import { cpSync, existsSync, rmSync, mkdirSync, readdirSync } from "node:fs";
+import { cpSync, existsSync, rmSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -93,6 +93,49 @@ if (existsSync(join(root, "public"))) {
 if (existsSync(join(root, "prisma"))) {
   console.log(`  · copying prisma/       → dist-server/prisma`);
   cpSync(join(root, "prisma"), join(out, "prisma"), { recursive: true });
+}
+
+// 4b. The `prisma` CLI package itself (not @prisma/client, which the app code
+// imports and Next's standalone tracer already bundles), plus its own full
+// transitive dependency closure (@prisma/engines for the schema-engine binary
+// `migrate deploy` needs, @prisma/config, and whatever those in turn depend
+// on). Next never traces any of this in because no server code imports it --
+// the CLI is only ever invoked as a subprocess, via resolveMigrateCommand()
+// in embedded-db.ts. Without it, a packaged app finds no bundled CLI on every
+// fresh install and falls back to `npx prisma`, which needs network access
+// and is slow (or fails outright offline) -- defeating the point of shipping
+// a fully embedded, local Postgres.
+//
+// Walking package.json `dependencies` recursively (rather than hand-listing
+// the current set of @prisma/* packages) is deliberate: that set has already
+// changed once between prisma versions (@prisma/config didn't always exist)
+// and a hand-picked list would silently rot -- missing a new dependency only
+// surfaces as a MODULE_NOT_FOUND at runtime on a user's machine.
+function copyDependencyClosure(pkgDir, copied) {
+  const pkgJsonPath = join(pkgDir, "package.json");
+  if (!existsSync(pkgJsonPath)) return;
+  const pkg = JSON.parse(readFileSync(pkgJsonPath, "utf8"));
+  const deps = { ...pkg.dependencies, ...pkg.optionalDependencies };
+  for (const name of Object.keys(deps)) {
+    if (copied.has(name)) continue;
+    copied.add(name);
+    // Resolve the way Node would: a nested copy under the dependent package
+    // wins (npm nests on version conflicts), else the hoisted root copy.
+    const nested = join(pkgDir, "node_modules", name);
+    const hoisted = join(root, "node_modules", name);
+    const src = existsSync(nested) ? nested : existsSync(hoisted) ? hoisted : null;
+    if (!src) continue; // e.g. a type-only or platform-specific optional dep not installed here
+    cpSync(src, join(out, "node_modules", name), { recursive: true });
+    copyDependencyClosure(src, copied);
+  }
+}
+const prismaCliSrc = join(root, "node_modules", "prisma");
+if (existsSync(prismaCliSrc)) {
+  console.log(`  · copying node_modules/prisma → dist-server/node_modules/prisma (+ its dependency closure)`);
+  cpSync(prismaCliSrc, join(out, "node_modules", "prisma"), { recursive: true });
+  copyDependencyClosure(prismaCliSrc, new Set());
+} else {
+  console.warn("  ! no node_modules/prisma found; migrate deploy will need network (npx) at runtime");
 }
 
 // 5. Ship a *template* (.env.example), never a real .env, so first-run can seed

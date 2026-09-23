@@ -517,12 +517,36 @@ export async function ensureMigrated(
 ): Promise<void> {
   const cmd = resolveMigrateCommand(env, serverDir, process.execPath, exists);
   const url = buildDatabaseUrl(cfg);
-  const childEnv = { ...withEngineLibPath(env, cfg.libDir), DATABASE_URL: url };
+  const childEnv = {
+    ...withEngineLibPath(env, cfg.libDir),
+    DATABASE_URL: url,
+    // resolveMigrateCommand's package-entry fallback runs the current
+    // executable as its own interpreter (no system `node` required). In a
+    // packaged app that executable IS Electron, so without this it launches
+    // a second full GUI instance instead of running the script — the same
+    // reason main.ts sets this for the app-server spawn. A no-op outside
+    // Electron (plain `node` ignores the variable).
+    ...(cmd.cmd === process.execPath ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
+  };
   log(`[db] applying migrations: ${cmd.cmd} ${cmd.args.join(" ")} (DATABASE_URL=${url})`);
   const child = spawnImpl(cmd.cmd, cmd.args, { cwd: cmd.cwd, env: childEnv, stdio: "pipe" });
+  // Same "swallowed diagnostics" fix already applied to initdb and the server
+  // spawn: without capturing this, a migration failure (a missing bundled
+  // dependency, a schema error, ...) surfaces as a bare, uninformative
+  // "(exit 1)" with no way to tell what actually went wrong.
+  let migrateOutput = "";
+  child.stdout?.on("data", (d: Buffer) => {
+    migrateOutput += String(d);
+  });
+  child.stderr?.on("data", (d: Buffer) => {
+    migrateOutput += String(d);
+  });
   const { code } = await waitForExit(child);
   if (code !== 0) {
-    throw new Error(`prisma migrate deploy failed (exit ${code}) for ${url}`);
+    const detail = migrateOutput.trim();
+    throw new Error(
+      `prisma migrate deploy failed (exit ${code}) for ${url}` + (detail ? `\n${detail}` : "")
+    );
   }
 }
 
