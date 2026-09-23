@@ -789,10 +789,17 @@ if (!gotLock) {
               ? "local"
               : "dev";
 
-    let url =
-      runMode === "remote"
-        ? process.env.ELECTRON_REMOTE_URL || process.env.TARGET_URL || "https://app.trivio-ai.com"
-        : devUrl();
+    if (runMode === "remote" && !process.env.ELECTRON_REMOTE_URL && !process.env.TARGET_URL) {
+      dialog.showErrorBox(
+        "Trivio",
+        "DESKTOP_MODE=remote requires ELECTRON_REMOTE_URL (or TARGET_URL) to be set.\n\n" +
+          "There is no default remote server — set one of those env vars, or run in the default (embedded/local) mode."
+      );
+      app.quit();
+      return;
+    }
+
+    let url = runMode === "remote" ? (process.env.ELECTRON_REMOTE_URL || process.env.TARGET_URL)! : devUrl();
 
     if (runMode === "local") {
       try {
