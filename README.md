@@ -9,9 +9,6 @@
   <a href="https://github.com/Abubakarjutt/Trivio/releases/latest">
     <img src="https://img.shields.io/badge/release-latest-blue?style=flat-square" alt="Release" />
   </a>
-  <a href="https://github.com/Abubakarjutt/Trivio/actions/workflows/ci.yml">
-    <img src="https://github.com/Abubakarjutt/Trivio/actions/workflows/ci.yml/badge.svg" alt="CI" />
-  </a>
   <a href="./LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License: MIT" />
   </a>
@@ -235,7 +232,7 @@ Now you can upload receipts and invoices and have the AI extract the data for yo
 | **Email**     | Resend (MailHog for local development)                                                         |
 | **Payments**  | Stripe · Lemon Squeezy                                                                         |
 | **PDF**       | `@react-pdf/renderer` · `pdfjs-dist`                                                           |
-| **Testing**   | [Vitest](https://vitest.dev/) (unit/integration) · [Playwright](https://playwright.dev/) (E2E) |
+| **Testing**   | [Vitest](https://vitest.dev/) (unit)                                                           |
 | **Desktop**   | Electron · electron-builder (macOS)                                                            |
 
 ## Design principles
@@ -303,20 +300,15 @@ The full list lives in [`.env.example`](./.env.example). The core ones:
 | `npx prisma migrate dev`             | Create & apply a dev migration        |
 | `npm run db:seed`                    | Seed a demo organisation              |
 | `npm run db:studio`                  | Open the Prisma Studio GUI            |
-| `npm test`                           | Run the Vitest unit/integration suite |
-| `npm run test:e2e`                   | Run the Playwright E2E suite          |
+| `npm test`                           | Run the Vitest unit suite             |
 | `npm run typecheck` / `npm run lint` | Type-check / lint                     |
 
 ## Testing
 
 ```bash
-npm run test          # unit + integration (Vitest)
-npm run test:e2e      # end-to-end (Playwright)
+npm run test          # unit (Vitest)
 npm run typecheck     # TypeScript check
 ```
-
-CI runs the full suite on every push and pull request — see
-[`.github/workflows/ci.yml`](./.github/workflows/ci.yml).
 
 ## Project structure
 
@@ -335,17 +327,14 @@ CI runs the full suite on every push and pull request — see
 ├── lib/                     # Shared utilities, Prisma client, auth
 ├── prisma/                  # Schema, migrations, seed
 ├── desktop/                 # Electron shell for the macOS app
-└── docs/                    # Requirements, architecture, and this README's assets
+└── docs/assets/             # This README's banner images
 ```
 
 ## Documentation
 
-| Document                                                     | What it covers                               |
-| ------------------------------------------------------------ | -------------------------------------------- |
-| [docs/REQUIREMENTS.md](./docs/REQUIREMENTS.md)               | Functional & non-functional requirements     |
-| [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)               | System design and domain model               |
-| [docs/IMPLEMENTATION_PLAN.md](./docs/IMPLEMENTATION_PLAN.md) | Sprint-by-sprint roadmap                     |
-| [desktop/README.md](./desktop/README.md)                     | Building, signing & notarizing the macOS app |
+| Document                                 | What it covers                               |
+| ----------------------------------------- | --------------------------------------------- |
+| [desktop/README.md](./desktop/README.md) | Building, signing & notarizing the macOS app |
 
 ## Contributing
 

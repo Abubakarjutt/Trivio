@@ -4,12 +4,6 @@
 
 AutoAccounts is a SaaS accounting web app for non-accountants (freelancers, solopreneurs, small businesses). It provides double-entry bookkeeping behind a simple UI, AI-powered receipt/invoice extraction, bank reconciliation, AR/AP management, and financial reporting.
 
-## Key Documents
-
-- [Requirements](docs/REQUIREMENTS.md) — functional and non-functional requirements
-- [Architecture](docs/ARCHITECTURE.md) — tech stack, system design, domain model
-- [Implementation Plan](docs/IMPLEMENTATION_PLAN.md) — sprint-by-sprint task list
-
 ## Tech Stack (quick reference)
 
 - **Framework**: Next.js 15 (App Router) + TypeScript
@@ -45,13 +39,14 @@ npm run dev
 npx prisma migrate dev
 
 # Tests
-npm run test          # Vitest unit/integration
-npm run test:e2e      # Playwright E2E
+npm run test          # Vitest unit
 ```
 
-## Current Sprint
+## Distribution
 
-See [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) — Sprint 0 (scaffold) is next.
+The product ships as a local macOS/Windows desktop app (Electron + embedded Postgres,
+see `desktop/`) — not a hosted web app. VPS/SaaS deployment infrastructure has been
+removed; see `git log` for that history if it's ever needed again.
 
 ---
 
