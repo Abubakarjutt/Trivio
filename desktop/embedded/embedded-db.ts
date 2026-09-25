@@ -250,6 +250,36 @@ export function resolvePostgresBinaries(
   return null;
 }
 
+// A packaged Electron app's main executable IS the dock-visible app -- its
+// Info.plist carries no LSUIElement. Any child process that re-launches it
+// (the ELECTRON_RUN_AS_NODE trick, used both here for `prisma migrate deploy`
+// and in main.ts for the app-server) gets its own Dock tile too, shown with a
+// generic icon since it wasn't opened through LaunchServices. electron-builder
+// already ships GPU/renderer/network-utility helper apps right alongside the
+// main one with LSUIElement=1 set, and they're functionally identical
+// binaries once ELECTRON_RUN_AS_NODE takes over -- so Node-runtime children
+// redirect to one of them ("Trivio Helper.app", the network-utility helper)
+// to stay out of the Dock. No-op outside a packaged macOS build.
+export function resolveHiddenNodeExecPath(
+  isPackaged: boolean,
+  resourcesDir: string,
+  platformName: NodeJS.Platform = process.platform,
+  exists: (p: string) => boolean = existsSync,
+  fallback: string = process.execPath
+): string {
+  if (!isPackaged || platformName !== "darwin") return fallback;
+  const helperPath = join(
+    resourcesDir,
+    "..",
+    "Frameworks",
+    "Trivio Helper.app",
+    "Contents",
+    "MacOS",
+    "Trivio Helper"
+  );
+  return exists(helperPath) ? helperPath : fallback;
+}
+
 // Locate the command to run `prisma migrate deploy`. Resolution order:
 //   1. TRIVIO_PRISMA_BIN   — explicit (dev/test)
 //   2. <serverDir>/node_modules/.bin/prisma — the CLI shipped with the app
@@ -292,6 +322,24 @@ export function withEngineLibPath(
   const key = platform === "darwin" ? "DYLD_LIBRARY_PATH" : "LD_LIBRARY_PATH";
   const prev = env[key];
   return { ...env, [key]: prev ? `${libDir}:${prev}` : libDir };
+}
+
+// A GUI app launched from the Dock/Finder (not a Terminal) is started directly
+// by launchd, which does NOT source the user's shell rc files -- so LANG/LC_ALL
+// are typically unset in its environment, unlike a Terminal-launched process.
+// On macOS this triggers a real Postgres startup failure: some system
+// framework lazily spins up a thread while resolving an unset/invalid locale,
+// and postgres's own post-fork safety check then aborts with "FATAL: postmaster
+// became multithreaded during startup" (its own HINT: "Set the LC_ALL
+// environment variable to a valid locale."). The cluster itself is always
+// initialised with `--locale C` (see renderInitdbArgs), so forcing the same C
+// locale here for initdb/the server process is both the fix and the
+// consistent choice -- and C is guaranteed available on any POSIX system,
+// unlike e.g. en_US.UTF-8. Only fills in when absent, so an explicit user
+// override of LC_ALL/LANG is respected. Pure + injectable.
+export function withSafeLocale(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  if (env.LC_ALL && env.LANG) return env;
+  return { ...env, LC_ALL: env.LC_ALL ?? "C", LANG: env.LANG ?? "C" };
 }
 
 // ── Injectable helpers ────────────────────────────────────────────────────────
@@ -389,7 +437,7 @@ export async function startEmbeddedDatabase(opts: StartEmbeddedOptions): Promise
 
   // A portable engine finds its shared libs via a sibling lib/ dir; surface it to
   // the loader so a copied EDB/keg engine runs even without a baked-in rpath.
-  const childEnv = withEngineLibPath(opts.env, cfg.libDir);
+  const childEnv = withSafeLocale(withEngineLibPath(opts.env, cfg.libDir));
 
   // 1. Create the cluster on first run. PG_VERSION marks an initialised data dir.
   if (!exists(join(cfg.dataDir, "PG_VERSION"))) {
@@ -488,13 +536,24 @@ export async function startEmbeddedDatabase(opts: StartEmbeddedOptions): Promise
     throw new Error(message + (detail ? `\n${detail}` : ""));
   }
 
-  // 4. Apply migrations (idempotent — a no-op when the schema is current).
-  const runMigrate: (
-    cfg: EmbeddedDbConfig,
-    serverDir: string,
-    env: NodeJS.ProcessEnv
-  ) => Promise<void> = opts.ensureMigrated ?? ensureMigrated;
-  await runMigrate(cfg, opts.serverDir, opts.env);
+  // 4. Apply migrations (idempotent — a no-op when the schema is current). A
+  // test-supplied override fully replaces this step (no nodeExecPath resolution
+  // needed); the real implementation additionally needs the resolved
+  // hidden-node path so a packaged macOS build doesn't spawn a second,
+  // generic-icon Dock tile for this child (see resolveHiddenNodeExecPath).
+  if (opts.ensureMigrated) {
+    await opts.ensureMigrated(cfg, opts.serverDir, opts.env);
+  } else {
+    await ensureMigrated(
+      cfg,
+      opts.serverDir,
+      opts.env,
+      undefined,
+      undefined,
+      undefined,
+      resolveHiddenNodeExecPath(opts.isPackaged === true, opts.resourcesDir, process.platform, exists)
+    );
+  }
 
   return {
     mode: "embedded",
@@ -513,20 +572,21 @@ export async function ensureMigrated(
   env: NodeJS.ProcessEnv,
   spawnImpl: typeof spawn = spawn,
   exists: (p: string) => boolean = existsSync,
-  log: (m: string) => void = (m) => console.log(m)
+  log: (m: string) => void = (m) => console.log(m),
+  nodeExecPath: string = process.execPath
 ): Promise<void> {
-  const cmd = resolveMigrateCommand(env, serverDir, process.execPath, exists);
+  const cmd = resolveMigrateCommand(env, serverDir, nodeExecPath, exists);
   const url = buildDatabaseUrl(cfg);
   const childEnv = {
     ...withEngineLibPath(env, cfg.libDir),
     DATABASE_URL: url,
-    // resolveMigrateCommand's package-entry fallback runs the current
+    // resolveMigrateCommand's package-entry fallback runs the resolved node
     // executable as its own interpreter (no system `node` required). In a
-    // packaged app that executable IS Electron, so without this it launches
+    // packaged app that's an Electron binary, so without this it launches
     // a second full GUI instance instead of running the script — the same
     // reason main.ts sets this for the app-server spawn. A no-op outside
     // Electron (plain `node` ignores the variable).
-    ...(cmd.cmd === process.execPath ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
+    ...(cmd.cmd === nodeExecPath ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
   };
   log(`[db] applying migrations: ${cmd.cmd} ${cmd.args.join(" ")} (DATABASE_URL=${url})`);
   const child = spawnImpl(cmd.cmd, cmd.args, { cwd: cmd.cwd, env: childEnv, stdio: "pipe" });

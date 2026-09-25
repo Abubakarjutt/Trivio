@@ -13,9 +13,11 @@ import {
   renderInitdbArgs,
   renderServerArgs,
   resolvePostgresBinaries,
+  resolveHiddenNodeExecPath,
   resolveMigrateCommand,
   ensureMigrated,
   withEngineLibPath,
+  withSafeLocale,
   startEmbeddedDatabase,
   stopDatabaseProcess,
   type EmbeddedDbConfig,
@@ -299,6 +301,53 @@ describe("resolvePostgresBinaries", () => {
   });
 });
 
+describe("resolveHiddenNodeExecPath", () => {
+  it("falls back to the given path when not packaged", () => {
+    const p = resolveHiddenNodeExecPath(
+      false,
+      "/App/Contents/Resources",
+      "darwin",
+      () => true,
+      "/fallback/exec"
+    );
+    expect(p).toBe("/fallback/exec");
+  });
+
+  it("falls back on non-macOS platforms even when packaged", () => {
+    const p = resolveHiddenNodeExecPath(
+      true,
+      "/App/Contents/Resources",
+      "win32",
+      () => true,
+      "/fallback/exec"
+    );
+    expect(p).toBe("/fallback/exec");
+  });
+
+  it("redirects to the LSUIElement helper app when packaged on macOS and it exists", () => {
+    const p = resolveHiddenNodeExecPath(
+      true,
+      "/App.app/Contents/Resources",
+      "darwin",
+      (candidate) =>
+        candidate === "/App.app/Contents/Frameworks/Trivio Helper.app/Contents/MacOS/Trivio Helper",
+      "/fallback/exec"
+    );
+    expect(p).toBe("/App.app/Contents/Frameworks/Trivio Helper.app/Contents/MacOS/Trivio Helper");
+  });
+
+  it("falls back when packaged on macOS but the helper app is missing", () => {
+    const p = resolveHiddenNodeExecPath(
+      true,
+      "/App.app/Contents/Resources",
+      "darwin",
+      () => false,
+      "/fallback/exec"
+    );
+    expect(p).toBe("/fallback/exec");
+  });
+});
+
 describe("resolveMigrateCommand", () => {
   it("honours TRIVIO_PRISMA_BIN", () => {
     const cmd = resolveMigrateCommand(
@@ -406,6 +455,25 @@ describe("withEngineLibPath", () => {
   it("leaves Windows and missing-libDir envs untouched", () => {
     expect(withEngineLibPath({}, "/eng/lib", "win32")).toEqual({});
     expect(withEngineLibPath({}, undefined, "darwin")).toEqual({});
+  });
+});
+
+describe("withSafeLocale", () => {
+  it("fills in LC_ALL and LANG when both are unset", () => {
+    const env = withSafeLocale({});
+    expect(env.LC_ALL).toBe("C");
+    expect(env.LANG).toBe("C");
+  });
+
+  it("respects an explicit LC_ALL/LANG the user already set", () => {
+    const env = withSafeLocale({ LC_ALL: "en_US.UTF-8", LANG: "en_US.UTF-8" });
+    expect(env.LC_ALL).toBe("en_US.UTF-8");
+    expect(env.LANG).toBe("en_US.UTF-8");
+  });
+
+  it("fills in only the missing one when just LC_ALL or LANG is set", () => {
+    expect(withSafeLocale({ LC_ALL: "en_US.UTF-8" }).LANG).toBe("C");
+    expect(withSafeLocale({ LANG: "en_US.UTF-8" }).LC_ALL).toBe("C");
   });
 });
 

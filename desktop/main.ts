@@ -36,6 +36,7 @@ import { join, resolve } from "node:path";
 import net from "node:net";
 import {
   decideDatabaseMode,
+  resolveHiddenNodeExecPath,
   startEmbeddedDatabase,
   stopDatabaseProcess,
   type DatabaseHandle,
@@ -301,6 +302,11 @@ async function startLocalServer(): Promise<string> {
     SKIP_EMAIL_VERIFICATION: "true",
   });
 
+  // Point the server at the desktop-managed Ollama engine by default (only when
+  // the user hasn't explicitly configured AI_PROVIDER/OLLAMA_* themselves) — see
+  // applyOllamaToServerEnv for why this must run before the child process spawns.
+  applyOllamaToServerEnv(env);
+
   // ── Database ──────────────────────────────────────────────────────────────
   // By default the desktop app owns its OWN embedded Postgres inside the user's
   // data dir (see desktop/embedded/embedded-db.ts) — no external server, no
@@ -333,11 +339,16 @@ async function startLocalServer(): Promise<string> {
     console.log("[desktop] using external DATABASE_URL from environment");
   }
 
-  // A packaged Electron app ships no standalone `node` binary, so we launch the
-  // Electron executable itself as a Node runtime (ELECTRON_RUN_AS_NODE) to host
-  // server.js. In dev we use whatever `node` the dev loop is using.
+  // A packaged Electron app ships no standalone `node` binary, so we launch an
+  // Electron executable as a Node runtime (ELECTRON_RUN_AS_NODE) to host
+  // server.js. In dev we use whatever `node` the dev loop is using. See
+  // resolveHiddenNodeExecPath in embedded-db.ts for why this must not be
+  // process.execPath on a packaged macOS build (it would give the child its
+  // own generic-icon Dock tile alongside the real app icon).
   const execArgv = [serverJs];
-  const cmd = app.isPackaged ? process.execPath : "node";
+  const cmd = app.isPackaged
+    ? resolveHiddenNodeExecPath(true, process.resourcesPath)
+    : "node";
   const childEnv: NodeJS.ProcessEnv = { ...env };
   if (app.isPackaged) childEnv.ELECTRON_RUN_AS_NODE = "1";
   // Silence the noisy "localStorage not available" ExperimentalWarning from the
