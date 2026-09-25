@@ -639,6 +639,7 @@ enum StatementFileType {
   CSV
   IMAGE
   EMAIL
+  MANUAL
 }
 
 enum StatementImportStatus {

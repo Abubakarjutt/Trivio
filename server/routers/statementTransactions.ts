@@ -7,24 +7,26 @@ function monthRange(month: string): { gte: Date; lt: Date } {
   const [y, m] = month.split("-").map(Number);
   return {
     gte: new Date(y, m - 1, 1),
-    lt:  new Date(y, m,     1),
+    lt: new Date(y, m, 1),
   };
 }
 
 export const statementTransactionsRouter = createTRPCRouter({
   list: orgProcedure
-    .input(z.object({
-      /** "YYYY-MM" month filter — takes precedence over dateFrom/dateTo when set */
-      month: z.string().optional(),
-      dateFrom: z.string().optional(),
-      dateTo: z.string().optional(),
-      category: z.string().optional(),
-      type: z.enum(["DEBIT", "CREDIT"]).optional(),
-      search: z.string().optional(),
-      includeExcluded: z.boolean().default(false),
-      cursor: z.string().optional(),
-      limit: z.number().min(1).max(100).default(50),
-    }))
+    .input(
+      z.object({
+        /** "YYYY-MM" month filter — takes precedence over dateFrom/dateTo when set */
+        month: z.string().optional(),
+        dateFrom: z.string().optional(),
+        dateTo: z.string().optional(),
+        category: z.string().optional(),
+        type: z.enum(["DEBIT", "CREDIT"]).optional(),
+        search: z.string().optional(),
+        includeExcluded: z.boolean().default(false),
+        cursor: z.string().optional(),
+        limit: z.number().min(1).max(100).default(50),
+      })
+    )
     .query(async ({ ctx, input }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const where: any = { organisationId: ctx.organisationId };
@@ -57,13 +59,69 @@ export const statementTransactionsRouter = createTRPCRouter({
       return { items, nextCursor };
     }),
 
+  create: orgProcedure
+    .input(
+      z.object({
+        date: z.string(),
+        description: z.string().min(1).max(200),
+        merchantName: z.string().min(1).max(200),
+        amount: z.number().positive(),
+        type: z.enum(["DEBIT", "CREDIT"]),
+        category: z.string().min(1),
+        mccCode: z.string().optional(),
+        mccLabel: z.string().optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      // Manually-added transactions still need a batch to belong to
+      // (importBatchId is required) — reuse a single "Manual entries" batch
+      // per organisation instead of creating one per transaction.
+      let batch = await ctx.db.statementImportBatch.findFirst({
+        where: { organisationId: ctx.organisationId, fileType: "MANUAL" },
+      });
+      if (!batch) {
+        batch = await ctx.db.statementImportBatch.create({
+          data: {
+            organisationId: ctx.organisationId,
+            filename: "Manual entries",
+            fileType: "MANUAL",
+            status: "DONE",
+          },
+        });
+      }
+
+      const txn = await ctx.db.statementTransaction.create({
+        data: {
+          organisationId: ctx.organisationId,
+          importBatchId: batch.id,
+          date: new Date(input.date),
+          description: input.description,
+          merchantName: input.merchantName,
+          amount: input.amount,
+          type: input.type,
+          category: input.category,
+          mccCode: input.mccCode ?? "",
+          mccLabel: input.mccLabel ?? "",
+        },
+      });
+
+      await ctx.db.statementImportBatch.update({
+        where: { id: batch.id },
+        data: { transactionCount: { increment: 1 } },
+      });
+
+      return txn;
+    }),
+
   updateCategory: orgProcedure
-    .input(z.object({
-      id: z.string(),
-      category: z.string(),
-      mccCode: z.string().optional(),
-      mccLabel: z.string().optional(),
-    }))
+    .input(
+      z.object({
+        id: z.string(),
+        category: z.string(),
+        mccCode: z.string().optional(),
+        mccLabel: z.string().optional(),
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       const txn = await ctx.db.statementTransaction.findFirst({
         where: { id: input.id, organisationId: ctx.organisationId },
@@ -125,9 +183,13 @@ export const statementTransactionsRouter = createTRPCRouter({
         select: { id: true, pendingDuplicatesJson: true },
       });
       if (!batch) return null;
-      const raw = batch.pendingDuplicatesJson as {
-        date: string; description: string; amount: number;
-      }[] | null;
+      const raw = batch.pendingDuplicatesJson as
+        | {
+            date: string;
+            description: string;
+            amount: number;
+          }[]
+        | null;
       if (!raw || raw.length === 0) return null;
       return {
         batchId: batch.id,
@@ -135,20 +197,21 @@ export const statementTransactionsRouter = createTRPCRouter({
       };
     }),
 
-  listBatches: orgProcedure
-    .query(async ({ ctx }) =>
-      ctx.db.statementImportBatch.findMany({
-        where: { organisationId: ctx.organisationId },
-        orderBy: { createdAt: "desc" },
-        take: 20,
-      })
-    ),
+  listBatches: orgProcedure.query(async ({ ctx }) =>
+    ctx.db.statementImportBatch.findMany({
+      where: { organisationId: ctx.organisationId },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+    })
+  ),
 
   summary: orgProcedure
-    .input(z.object({
-      /** "YYYY-MM" month filter — undefined = all time */
-      month: z.string().optional(),
-    }))
+    .input(
+      z.object({
+        /** "YYYY-MM" month filter — undefined = all time */
+        month: z.string().optional(),
+      })
+    )
     .query(async ({ ctx, input }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const baseWhere: any = { organisationId: ctx.organisationId, isExcluded: false };
