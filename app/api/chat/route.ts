@@ -13,8 +13,11 @@ import { resolveProvider } from "@/server/services/ai-status";
 
 const chatBodySchema = z.object({
   message: z.string().min(1).max(4000),
-  conversationId: z.string().uuid().optional(),
-  attachmentId: z.string().uuid().optional(),
+  // ChatConversation.id / Attachment.id are Prisma cuid()s, not UUIDs — a plain
+  // non-empty check is enough; ownership is verified separately below (IDOR
+  // guard), so this isn't a security boundary.
+  conversationId: z.string().min(1).optional(),
+  attachmentId: z.string().min(1).optional(),
 });
 
 // ── Provider configuration ─────────────────────────────────────────────────────
