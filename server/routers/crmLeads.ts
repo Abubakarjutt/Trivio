@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, orgProcedure } from "@/server/trpc";
+import { assertOwnCrmRefs } from "@/server/services/ownership";
 import { convertLeadToContact } from "@/server/services/crm.service";
 
 const LeadSourceEnum = z.enum(["WEBSITE", "REFERRAL", "SOCIAL_MEDIA", "COLD_OUTREACH", "EVENT", "ADVERTISING", "OTHER"]);
@@ -65,6 +66,7 @@ export const crmLeadsRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const { estimatedValue, email, ...rest } = input;
+      await assertOwnCrmRefs(ctx.db, ctx.organisationId, { userId: input.assignedToId });
       return ctx.db.crmLead.create({
         data: {
           organisationId: ctx.organisationId,
@@ -98,11 +100,13 @@ export const crmLeadsRouter = createTRPCRouter({
       const { id, estimatedValue, email, ...rest } = input;
       const existing = await ctx.db.crmLead.findFirst({ where: { id, organisationId: ctx.organisationId } });
       if (!existing) throw new TRPCError({ code: "NOT_FOUND" });
+      await assertOwnCrmRefs(ctx.db, ctx.organisationId, { userId: input.assignedToId });
       return ctx.db.crmLead.update({
         where: { id },
         data: {
           ...rest,
-          ...(email !== undefined ? { email: email || undefined } : {}),
+          // "" clears the email; undefined leaves it alone.
+          ...(email !== undefined ? { email: email || null } : {}),
           ...(estimatedValue !== undefined ? { estimatedValue } : {}),
         },
       });

@@ -27,9 +27,7 @@ export const contactsRouter = createTRPCRouter({
           organisationId: ctx.organisationId,
           isArchived: input.includeArchived ? undefined : false,
           type: input.type === "all" ? undefined : input.type,
-          ...(input.search
-            ? { name: { contains: input.search, mode: "insensitive" } }
-            : {}),
+          ...(input.search ? { name: { contains: input.search, mode: "insensitive" } } : {}),
         },
         orderBy: { name: "asc" },
         include: {
@@ -38,44 +36,40 @@ export const contactsRouter = createTRPCRouter({
       });
     }),
 
-  getById: orgProcedure
-    .input(z.object({ id: z.string() }))
-    .query(async ({ ctx, input }) => {
-      const contact = await ctx.db.contact.findFirst({
-        where: { id: input.id, organisationId: ctx.organisationId },
-        include: {
-          invoices: { orderBy: { date: "desc" }, take: 5 },
-          bills: { orderBy: { date: "desc" }, take: 5 },
-        },
-      });
-      if (!contact) throw new TRPCError({ code: "NOT_FOUND" });
-      return contact;
-    }),
+  getById: orgProcedure.input(z.object({ id: z.string() })).query(async ({ ctx, input }) => {
+    const contact = await ctx.db.contact.findFirst({
+      where: { id: input.id, organisationId: ctx.organisationId },
+      include: {
+        invoices: { orderBy: { date: "desc" }, take: 5 },
+        bills: { orderBy: { date: "desc" }, take: 5 },
+      },
+    });
+    if (!contact) throw new TRPCError({ code: "NOT_FOUND" });
+    return contact;
+  }),
 
-  create: orgProcedure
-    .input(contactSchema)
-    .mutation(async ({ ctx, input }) => {
-      const contact = await ctx.db.contact.create({
-        data: {
-          organisationId: ctx.organisationId,
-          type: input.type,
-          name: input.name,
-          email: input.email || null,
-          phone: input.phone || null,
-          address: input.address || null,
-          taxNumber: input.taxNumber || null,
-        },
-      });
-      await writeAuditLog(ctx.db, {
+  create: orgProcedure.input(contactSchema).mutation(async ({ ctx, input }) => {
+    const contact = await ctx.db.contact.create({
+      data: {
         organisationId: ctx.organisationId,
-        userId: ctx.session.user.id,
-        action: "CREATE",
-        entityType: "Contact",
-        entityId: contact.id,
-        after: contact,
-      });
-      return contact;
-    }),
+        type: input.type,
+        name: input.name,
+        email: input.email || null,
+        phone: input.phone || null,
+        address: input.address || null,
+        taxNumber: input.taxNumber || null,
+      },
+    });
+    await writeAuditLog(ctx.db, {
+      organisationId: ctx.organisationId,
+      userId: ctx.session.user.id,
+      action: "CREATE",
+      entityType: "Contact",
+      entityId: contact.id,
+      after: contact,
+    });
+    return contact;
+  }),
 
   update: orgProcedure
     .input(z.object({ id: z.string() }).merge(contactSchema.partial()))
@@ -86,14 +80,16 @@ export const contactsRouter = createTRPCRouter({
       if (!existing) throw new TRPCError({ code: "NOT_FOUND" });
 
       const { id, ...data } = input;
+      // Omitted fields stay as they are; an empty string clears the field.
+      const optional = (v: string | undefined) => (v === undefined ? undefined : v || null);
       const updated = await ctx.db.contact.update({
         where: { id },
         data: {
           ...data,
-          email: data.email || null,
-          phone: data.phone || null,
-          address: data.address || null,
-          taxNumber: data.taxNumber || null,
+          email: optional(data.email),
+          phone: optional(data.phone),
+          address: optional(data.address),
+          taxNumber: optional(data.taxNumber),
         },
       });
 

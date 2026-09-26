@@ -11,7 +11,8 @@ vi.mock("@/lib/db", () => ({
   db: {
     user: { findUnique: vi.fn() },
     chatConversation: { create: vi.fn(), findFirst: vi.fn() },
-    chatMessage: { create: vi.fn() },
+    chatMessage: { create: vi.fn(), findFirst: vi.fn() },
+    chatPendingAction: { create: vi.fn() },
   },
 }));
 
@@ -20,6 +21,9 @@ vi.mock("@/server/services/chat.service", () => ({
   parseToolCalls: vi.fn().mockReturnValue({ text: "AI response", toolCalls: [] }),
   executeToolCall: vi.fn(),
   formatToolResultsForModel: vi.fn().mockReturnValue("TOOL_RESULTS"),
+    localDateString: () => "2026-09-26",
+    resolvePfCategory: (c: unknown) => (c ? String(c) : "Other"),
+    NAMED_TOOLS: new Set(["add_pf_transaction", "create_journal_entry", "list_invoices"]),
 }));
 
 vi.mock("@/server/middleware/rateLimit", () => ({
@@ -85,7 +89,7 @@ function setupDefaultMocks() {
   } as never);
   vi.mocked(db.chatConversation.create).mockResolvedValue({ id: CONV_ID } as never);
   vi.mocked(db.chatConversation.findFirst).mockResolvedValue({ id: CONV_ID } as never);
-  vi.mocked(db.chatMessage.create).mockResolvedValue({} as never);
+  vi.mocked(db.chatMessage.create).mockResolvedValue({ id: "msg-1" } as never);
   vi.mocked(chatRateLimiter).mockResolvedValue(undefined);
   vi.mocked(parseToolCalls).mockReturnValue({ text: "AI response", toolCalls: [] });
   mockFetch.mockResolvedValue({
@@ -319,6 +323,9 @@ describe("POST /api/chat (with GEMINI_API_KEY configured)", () => {
     // Reset modules so the route re-evaluates with GEMINI_API_KEY set
     vi.resetModules();
     process.env.GEMINI_API_KEY = "fake-key-123";
+    // .env pins AI_PROVIDER=ollama and gets loaded as a side effect of the
+    // app router import — pin the provider these tests exercise.
+    process.env.AI_PROVIDER = "gemini";
 
     // Re-mock all dependencies after resetModules
     vi.mock("@/lib/auth", () => ({ auth: vi.fn() }));
@@ -326,7 +333,8 @@ describe("POST /api/chat (with GEMINI_API_KEY configured)", () => {
       db: {
         user: { findUnique: vi.fn() },
         chatConversation: { create: vi.fn(), findFirst: vi.fn() },
-        chatMessage: { create: vi.fn() },
+        chatMessage: { create: vi.fn(), findFirst: vi.fn() },
+        chatPendingAction: { create: vi.fn() },
       },
     }));
     vi.mock("@/server/services/chat.service", () => ({
@@ -334,6 +342,9 @@ describe("POST /api/chat (with GEMINI_API_KEY configured)", () => {
       parseToolCalls: vi.fn().mockReturnValue({ text: "AI response", toolCalls: [] }),
       executeToolCall: vi.fn(),
       formatToolResultsForModel: vi.fn().mockReturnValue("TOOL_RESULTS"),
+    localDateString: () => "2026-09-26",
+    resolvePfCategory: (c: unknown) => (c ? String(c) : "Other"),
+    NAMED_TOOLS: new Set(["add_pf_transaction", "create_journal_entry", "list_invoices"]),
     }));
     vi.mock("@/server/middleware/rateLimit", () => ({
       chatRateLimiter: vi.fn().mockResolvedValue(undefined),
@@ -355,7 +366,17 @@ describe("POST /api/chat (with GEMINI_API_KEY configured)", () => {
     } as never);
     vi.mocked(dbMod.db.chatConversation.create).mockResolvedValue({ id: CONV_ID } as never);
     vi.mocked(dbMod.db.chatConversation.findFirst).mockResolvedValue({ id: CONV_ID } as never);
-    vi.mocked(dbMod.db.chatMessage.create).mockResolvedValue({} as never);
+    vi.mocked(dbMod.db.chatMessage.create).mockResolvedValue({ id: "msg-1" } as never);
+    vi.mocked(dbMod.db.chatPendingAction.create).mockImplementation((async (a: {
+      data: Record<string, unknown>;
+    }) => ({
+      id: "pa-1",
+      status: "PENDING",
+      summary: null,
+      error: null,
+      result: null,
+      ...a.data,
+    })) as never);
     vi.mocked(chatSvcMod.parseToolCalls).mockReturnValue({ text: "Hello!", toolCalls: [] });
 
     mockFetch.mockResolvedValue({
@@ -472,20 +493,152 @@ describe("POST /api/chat (with GEMINI_API_KEY configured)", () => {
     expect(done.content).toContain("You have 2 contacts.");
   });
 
-  it("never re-runs a write the model repeats in a follow-up round", async () => {
+  it("never executes a write — it becomes an approval card instead", async () => {
     const svc = await import("@/server/services/chat.service");
+    const { db: dbMod } = await import("@/lib/db");
     const write = { tool: "add_pf_transaction", args: { merchantName: "Imtiaz", amount: 1500 } };
-    vi.mocked(svc.parseToolCalls)
-      .mockReturnValueOnce({ text: "", toolCalls: [write] })
-      .mockReturnValueOnce({ text: "Recorded again!", toolCalls: [write] });
-    vi.mocked(svc.executeToolCall).mockResolvedValue({ tool: "add_pf_transaction", success: true } as never);
+    vi.mocked(svc.parseToolCalls).mockReturnValueOnce({
+      text: "I've recorded it!",
+      toolCalls: [write],
+    });
 
     const res = await POST_WITH_KEY(makeReq({ message: "I spent 1500 at Imtiaz" }));
     const events = await readSSE(res);
 
-    expect(vi.mocked(svc.executeToolCall)).toHaveBeenCalledTimes(1);
-    const done = events.find((e) => e.event === "done")!.data as { toolCalls: unknown[] };
-    expect(done.toolCalls).toHaveLength(1);
+    expect(vi.mocked(svc.executeToolCall)).not.toHaveBeenCalled();
+    expect(vi.mocked(dbMod.chatPendingAction.create)).toHaveBeenCalledTimes(1);
+    const stored = vi.mocked(dbMod.chatPendingAction.create).mock.calls[0][0] as {
+      data: { tool: string; args: Record<string, unknown>; organisationId: string };
+    };
+    expect(stored.data.organisationId).toBe(ORG_ID);
+    // Defaults are fixed at proposal time so the user approves what gets saved.
+    expect(stored.data.args).toMatchObject({ date: "2026-09-26", type: "EXPENSE" });
+    const done = events.find((e) => e.event === "done")!.data as {
+      content: string;
+      pendingActions: { status: string; preview: { title: string } }[];
+    };
+    expect(done.pendingActions).toHaveLength(1);
+    expect(done.pendingActions[0].status).toBe("PENDING");
+    expect(done.pendingActions[0].preview.title).toMatch(/expense/i);
+    // The model claimed it was recorded — it wasn't, so that text is replaced.
+    expect(done.content).not.toMatch(/recorded/i);
+  });
+
+  it("proposes a repeated write only once", async () => {
+    const svc = await import("@/server/services/chat.service");
+    const { db: dbMod } = await import("@/lib/db");
+    const write = { tool: "add_pf_transaction", args: { merchantName: "Imtiaz", amount: 1500 } };
+    vi.mocked(svc.parseToolCalls).mockReturnValueOnce({ text: "", toolCalls: [write, write] });
+
+    const res = await POST_WITH_KEY(makeReq({ message: "I spent 1500 at Imtiaz" }));
+    await readSSE(res);
+    expect(vi.mocked(dbMod.chatPendingAction.create)).toHaveBeenCalledTimes(1);
+  });
+
+  it("feeds an invalid write back to the model instead of proposing it", async () => {
+    const svc = await import("@/server/services/chat.service");
+    const { db: dbMod } = await import("@/lib/db");
+    vi.mocked(svc.parseToolCalls)
+      .mockReturnValueOnce({
+        text: "",
+        toolCalls: [{ tool: "add_pf_transaction", args: { merchantName: "Imtiaz", amount: 0 } }],
+      })
+      .mockReturnValueOnce({ text: "How much did you spend?", toolCalls: [] });
+
+    const res = await POST_WITH_KEY(makeReq({ message: "I shopped at Imtiaz" }));
+    const events = await readSSE(res);
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(dbMod.chatPendingAction.create)).not.toHaveBeenCalled();
+    const done = events.find((e) => e.event === "done")!.data as { content: string };
+    expect(done.content).toBe("How much did you spend?");
+  });
+
+  it("makes the model act when it claims success without an ACTION line", async () => {
+    const svc = await import("@/server/services/chat.service");
+    const { db: dbMod } = await import("@/lib/db");
+    vi.mocked(svc.parseToolCalls)
+      .mockReturnValueOnce({ text: "✓ Expense recorded — Mobile Data: 2000", toolCalls: [] })
+      .mockReturnValueOnce({
+        text: "Please approve.",
+        toolCalls: [
+          { tool: "add_pf_transaction", args: { merchantName: "Mobile Data", amount: 2000 } },
+        ],
+      });
+
+    const res = await POST_WITH_KEY(makeReq({ message: "I paid 2000 for mobile data" }));
+    const events = await readSSE(res);
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    const secondBody = JSON.parse(mockFetch.mock.calls[1][1].body as string);
+    const lastTurn = secondBody.contents[secondBody.contents.length - 1];
+    expect(lastTurn.parts[0].text).toMatch(/NOTHING was saved/);
+    expect(vi.mocked(dbMod.chatPendingAction.create)).toHaveBeenCalledTimes(1);
+    const done = events.find((e) => e.event === "done")!.data as { content: string };
+    expect(done.content).not.toContain("✓");
+  });
+
+  it("tells the user nothing changed when the model keeps faking success", async () => {
+    const svc = await import("@/server/services/chat.service");
+    vi.mocked(svc.parseToolCalls).mockImplementation(() => ({
+      text: "I have recorded your expense of 2000.",
+      toolCalls: [],
+    }));
+    try {
+      const res = await POST_WITH_KEY(makeReq({ message: "I paid 2000 for mobile data" }));
+      const events = await readSSE(res);
+      expect(mockFetch).toHaveBeenCalledTimes(2); // one correction round, no more
+      const done = events.find((e) => e.event === "done")!.data as { content: string };
+      expect(done.content).toMatch(/Nothing was changed/);
+    } finally {
+      vi.mocked(svc.parseToolCalls).mockImplementation(() => ({ text: "AI response", toolCalls: [] }));
+    }
+  });
+
+  it("resume: refuses when the latest reply has no answered proposals", async () => {
+    const { db: dbMod } = await import("@/lib/db");
+    vi.mocked(dbMod.chatMessage.findFirst).mockResolvedValue({
+      role: "assistant",
+      pendingActions: [{ tool: "x", args: {}, status: "PENDING" }],
+    } as never);
+    const res = await POST_WITH_KEY(makeReq({ resume: true, conversationId: CONV_ID }));
+    expect(res.status).toBe(409);
+  });
+
+  it("resume: continues without storing a user message or re-proposing approved actions", async () => {
+    const svc = await import("@/server/services/chat.service");
+    const { db: dbMod } = await import("@/lib/db");
+    const approved = {
+      tool: "add_pf_transaction",
+      args: {
+        merchantName: "Imtiaz",
+        amount: 1500,
+        type: "EXPENSE",
+        category: "Other",
+        date: "2026-09-26",
+      },
+    };
+    vi.mocked(dbMod.chatMessage.findFirst).mockResolvedValue({
+      role: "assistant",
+      pendingActions: [{ ...approved, status: "APPROVED" }],
+    } as never);
+    vi.mocked(svc.parseToolCalls).mockReturnValueOnce({
+      text: "Saved your Imtiaz expense.",
+      toolCalls: [{ tool: "add_pf_transaction", args: { merchantName: "Imtiaz", amount: 1500 } }],
+    });
+
+    const res = await POST_WITH_KEY(makeReq({ resume: true, conversationId: CONV_ID }));
+    await readSSE(res);
+
+    const roles = vi
+      .mocked(dbMod.chatMessage.create)
+      .mock.calls.map((c) => (c[0] as { data: { role: string } }).data.role);
+    expect(roles).toEqual(["assistant"]);
+    expect(vi.mocked(dbMod.chatPendingAction.create)).not.toHaveBeenCalled();
+    expect(vi.mocked(svc.buildChatMessages)).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ userMessage: undefined })
+    );
   });
 
   it("stops the agent loop after a bounded number of rounds", async () => {
@@ -529,13 +682,11 @@ describe("POST /api/chat (with GEMINI_API_KEY configured)", () => {
   it("includes toolCalls and toolResults in the done event when tools are used", async () => {
     const { parseToolCalls: ptc, executeToolCall: etc } =
       await import("@/server/services/chat.service");
-    const toolCall = { tool: "create_contact", args: { name: "Alice" } };
-    const toolResult = {
-      tool: "create_contact",
-      success: true,
-      data: { name: "Alice", type: "CUSTOMER" },
-    };
-    vi.mocked(ptc).mockReturnValue({ text: "Contact created.", toolCalls: [toolCall] });
+    const toolCall = { tool: "list_contacts", args: {} };
+    const toolResult = { tool: "list_contacts", success: true, data: [{ name: "Alice" }] };
+    vi.mocked(ptc)
+      .mockReturnValueOnce({ text: "", toolCalls: [toolCall] })
+      .mockReturnValueOnce({ text: "You have Alice.", toolCalls: [] });
     vi.mocked(etc).mockResolvedValue(toolResult as never);
 
     const res = await POST_WITH_KEY(makeReq({ message: "create contact Alice" }));
@@ -564,7 +715,8 @@ async function loadPost(env: { AI_PROVIDER?: string; GEMINI_API_KEY?: string }) 
     db: {
       user: { findUnique: vi.fn() },
       chatConversation: { create: vi.fn(), findFirst: vi.fn() },
-      chatMessage: { create: vi.fn() },
+      chatMessage: { create: vi.fn(), findFirst: vi.fn() },
+      chatPendingAction: { create: vi.fn() },
     },
   }));
   vi.mock("@/server/services/chat.service", () => ({
@@ -572,6 +724,9 @@ async function loadPost(env: { AI_PROVIDER?: string; GEMINI_API_KEY?: string }) 
     parseToolCalls: vi.fn().mockReturnValue({ text: "AI response", toolCalls: [] }),
     executeToolCall: vi.fn(),
     formatToolResultsForModel: vi.fn().mockReturnValue("TOOL_RESULTS"),
+    localDateString: () => "2026-09-26",
+    resolvePfCategory: (c: unknown) => (c ? String(c) : "Other"),
+    NAMED_TOOLS: new Set(["add_pf_transaction", "create_journal_entry", "list_invoices"]),
   }));
   vi.mock("@/server/middleware/rateLimit", () => ({
     chatRateLimiter: vi.fn().mockResolvedValue(undefined),
@@ -588,7 +743,17 @@ async function loadPost(env: { AI_PROVIDER?: string; GEMINI_API_KEY?: string }) 
   } as never);
   vi.mocked(dbMod.db.chatConversation.create).mockResolvedValue({ id: CONV_ID } as never);
   vi.mocked(dbMod.db.chatConversation.findFirst).mockResolvedValue({ id: CONV_ID } as never);
-  vi.mocked(dbMod.db.chatMessage.create).mockResolvedValue({} as never);
+  vi.mocked(dbMod.db.chatMessage.create).mockResolvedValue({ id: "msg-1" } as never);
+    vi.mocked(dbMod.db.chatPendingAction.create).mockImplementation((async (a: {
+      data: Record<string, unknown>;
+    }) => ({
+      id: "pa-1",
+      status: "PENDING",
+      summary: null,
+      error: null,
+      result: null,
+      ...a.data,
+    })) as never);
   return mod.POST;
 }
 

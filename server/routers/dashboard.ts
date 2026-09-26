@@ -2,20 +2,22 @@ import { createTRPCRouter, orgProcedure } from "@/server/trpc";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 
-const monthInput = z.object({ month: z.string().regex(/^\d{4}-\d{2}$/).optional() });
+const monthInput = z.object({
+  month: z
+    .string()
+    .regex(/^\d{4}-\d{2}$/)
+    .optional(),
+});
 
+// Journal dates are a DATE column and Prisma sends a bound's UTC calendar
+// date, so bounds are UTC midnights — local ones shift the window a day
+// either side of UTC. "This month" is still the user's local month.
 function monthBounds(month: string | undefined): { startOfMonth: Date; endOfMonth: Date } {
-  if (month) {
-    const [y, m] = month.split("-").map(Number);
-    return {
-      startOfMonth: new Date(y, m - 1, 1),
-      endOfMonth: new Date(y, m, 0, 23, 59, 59, 999),
-    };
-  }
   const now = new Date();
+  const [y, m] = month ? month.split("-").map(Number) : [now.getFullYear(), now.getMonth() + 1];
   return {
-    startOfMonth: new Date(now.getFullYear(), now.getMonth(), 1),
-    endOfMonth: new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999),
+    startOfMonth: new Date(Date.UTC(y, m - 1, 1)),
+    endOfMonth: new Date(Date.UTC(y, m, 0)),
   };
 }
 
@@ -23,13 +25,7 @@ export const dashboardRouter = createTRPCRouter({
   getKPIs: orgProcedure.input(monthInput).query(async ({ ctx, input }) => {
     const { startOfMonth, endOfMonth } = monthBounds(input.month);
 
-    const [
-      incomeLines,
-      expenseLines,
-      arAgg,
-      apAgg,
-      cashLines,
-    ] = await Promise.all([
+    const [incomeLines, expenseLines, arAgg, apAgg, cashLines] = await Promise.all([
       // Monthly income
       ctx.db.journalLine.findMany({
         where: {
@@ -141,8 +137,8 @@ export const dashboardRouter = createTRPCRouter({
       });
     }
 
-    const start = new Date(months[0].year, months[0].month, 1);
-    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    const start = new Date(Date.UTC(months[0].year, months[0].month, 1));
+    const end = new Date(Date.UTC(now.getFullYear(), now.getMonth() + 1, 0));
 
     const [incomeLines, expenseLines] = await Promise.all([
       ctx.db.journalLine.findMany({
@@ -178,8 +174,7 @@ export const dashboardRouter = createTRPCRouter({
     }
 
     for (const l of incomeLines) {
-      const d = l.journalEntry.date;
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const key = l.journalEntry.date.toISOString().slice(0, 7); // DATE column → UTC midnight
       const current = incomeMap.get(key);
       if (current !== undefined) {
         incomeMap.set(key, current.plus(l.credit ?? 0).minus(l.debit ?? 0));
@@ -187,8 +182,7 @@ export const dashboardRouter = createTRPCRouter({
     }
 
     for (const l of expenseLines) {
-      const d = l.journalEntry.date;
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const key = l.journalEntry.date.toISOString().slice(0, 7); // DATE column → UTC midnight
       const current = expenseMap.get(key);
       if (current !== undefined) {
         expenseMap.set(key, current.plus(l.debit ?? 0).minus(l.credit ?? 0));
@@ -255,10 +249,7 @@ export const dashboardRouter = createTRPCRouter({
     });
 
     return entries.map((e) => {
-      const totalDebit = e.lines.reduce(
-        (acc, l) => acc.plus(l.debit ?? 0),
-        new Prisma.Decimal(0)
-      );
+      const totalDebit = e.lines.reduce((acc, l) => acc.plus(l.debit ?? 0), new Prisma.Decimal(0));
       return {
         id: e.id,
         date: e.date.toISOString(),

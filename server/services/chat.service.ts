@@ -21,7 +21,9 @@ import { createBill, postBillToLedger, recordBillPayment, voidBill } from "./bil
 import { extractionQueue } from "@/lib/queue";
 import { CATEGORY_NAMES } from "@/lib/categories";
 import { createManualPfTransaction } from "./pf-transaction.service";
+import { getSpentForCategory, periodFrom } from "./easyfinance.service";
 import { buildActionCatalog, findAppAction, runAppAction } from "./chat-actions";
+import { formatActionEvents, stripStatusLines } from "./chat-approval";
 
 export interface ToolCall {
   tool: string;
@@ -198,6 +200,11 @@ Document Extraction:
 Format: TOOL_CALL_\${NONCE}: {"tool":"name","args":{...}}
 `;
 
+/** Names of the built-in chat tools ("add_pf_transaction", …). */
+export const NAMED_TOOLS: ReadonlySet<string> = new Set(
+  [...TOOL_DEFINITIONS.matchAll(/^- ([a-z_]+):/gm)].map((m) => m[1]!)
+);
+
 export function localDateString(): string {
   const now = new Date();
   const y = now.getFullYear();
@@ -216,8 +223,9 @@ export function buildSystemPrompt(
   nonce: string,
   actionCatalog?: string
 ): string {
+  // Every account: a cut-off list (it was the first 15) hid all the expense
+  // accounts, so the model invented codes like 6000 for rent.
   const accountList = orgContext.accounts
-    .slice(0, 15)
     .map((a) => `${a.code}:${a.name}`)
     .join(", ");
 
@@ -247,7 +255,6 @@ Using app actions:
 - Prefer the named actions above when one fits (they accept names/numbers instead of IDs). For anything else, use an app action — never tell the user the chat can't do something the app can do.
 - Actions marked (read) return data to YOU: after you call one you will receive a TOOL_RESULTS message and can then call further actions. Use this to look up ids first (e.g. goals.list → goal id, statementTransactions.list {search} → transaction id, contacts.list → contactId, accounts.listFlat → accountId), then call the write action. Never invent ids and never ask the user for an id.
 - When the user refers to something that already exists ("my Imtiaz transaction", "the Acme invoice", "my Emergency Fund goal"), FIND it yourself with the matching (read) action — search by name/merchant — instead of asking the user for details. Merchants and personal spending live in statementTransactions.
-- Before delete/void/archive actions, confirm with the user first unless they explicitly asked for it in this message.
 `
       : ""
   }
@@ -258,7 +265,10 @@ Rules:
 - When the user asks you to perform a task directly (create, record, void, list, show), output the ACTION line.
 - Uploading a file (receipt, bank statement) must be done in the UI — give the UI steps. Everything else (reconciliation matching, settings, CRM, budgets…) can be done with an action.
 - Personal spending or income (groceries, fuel, salary, "I spent/paid/received…") → use add_pf_transaction. NEVER ask for an account code for these; account codes are only for business journal entries (create_journal_entry).
-- Be concise. Confirm details before creating records.
+- Actions that CHANGE data (create, record, update, delete, void, settings…) are NOT run when you write them: the user gets an Approve/Reject card. So just write the ACTION line — don't ask "shall I?" first — and tell the user in one short sentence what you've prepared for their approval.
+- NEVER say something was recorded, created, saved, updated or done unless an APP_EVENTS message says it was APPROVED. Never write ✓ or ❌ status lines — the app adds those itself.
+- If you did not write an ACTION line, nothing happened — never pretend otherwise.
+- Be concise.
 - IMPORTANT: When the user mentions relative dates (today, yesterday, last week, last month, etc.), resolve them to an explicit YYYY-MM-DD date using today's date above BEFORE passing to any action. Never guess or use a date from your training data.`;
 
   return prompt.replaceAll("${NONCE}", nonce);
@@ -490,13 +500,14 @@ async function toolCreateJournalEntry(
   userId: string,
   args: Record<string, unknown>
 ): Promise<ToolResult> {
-  const date = (args.date as string) || new Date().toISOString().slice(0, 10);
+  // The user's calendar day, not UTC's (evening west of UTC is already "tomorrow").
+  const date = (args.date as string) || localDateString();
   const description = (args.description as string) || "Journal entry from chat";
-  const lines = args.lines as {
-    accountCode: string;
-    debit?: number | null;
-    credit?: number | null;
-  }[];
+  // Small models write `"credit": false` / `"debit": "150"` — normalise to numbers.
+  const amount = (v: unknown) => (Number(v) > 0 ? Number(v) : undefined);
+  const lines = (args.lines as { accountCode: unknown; debit?: unknown; credit?: unknown }[] | undefined)?.map(
+    (l) => ({ accountCode: String(l.accountCode ?? "").trim(), debit: amount(l.debit), credit: amount(l.credit) })
+  );
 
   if (!lines || lines.length < 2) {
     return {
@@ -516,14 +527,20 @@ async function toolCreateJournalEntry(
     };
   }
 
-  const accountCodes = lines.map((l) => l.accountCode);
+  // Accept a code ("5300") or an exact account name ("Rent & Lease").
   const accounts = await db.chartAccount.findMany({
-    where: { organisationId, code: { in: accountCodes } },
+    where: { organisationId, isArchived: false },
+    select: { id: true, code: true, name: true },
   });
-
-  const codeToId = new Map(accounts.map((a) => [a.code, a.id]));
+  const codeToId = new Map<string, string>();
+  for (const a of accounts) {
+    codeToId.set(a.name.toLowerCase(), a.id);
+    codeToId.set(a.code, a.id);
+  }
   for (const line of lines) {
-    if (!codeToId.has(line.accountCode)) {
+    const id = codeToId.get(line.accountCode) ?? codeToId.get(line.accountCode.toLowerCase());
+    if (id) codeToId.set(line.accountCode, id);
+    else {
       return {
         tool: "create_journal_entry",
         success: false,
@@ -1705,6 +1722,24 @@ async function toolSetBudgets(
   return { tool: "set_budgets", success: true, data: { saved: results.length, budgets: results } };
 }
 
+/**
+ * Local models paraphrase categories ("groceries", "Salary") — snap to the
+ * canonical name case-insensitively (exact, then partial), else "Other" so
+ * the row still saves.
+ */
+export function resolvePfCategory(raw: unknown): string {
+  const wanted = String(raw ?? "")
+    .trim()
+    .toLowerCase();
+  return (
+    CATEGORY_NAMES.find((c) => c.toLowerCase() === wanted) ??
+    (wanted.length >= 3
+      ? CATEGORY_NAMES.find((c) => c.toLowerCase().includes(wanted))
+      : undefined) ??
+    "Other"
+  );
+}
+
 async function toolAddPfTransaction(
   db: PrismaClient,
   organisationId: string,
@@ -1723,17 +1758,7 @@ async function toolAddPfTransaction(
   }
   const kind = String(args.type ?? "EXPENSE").toUpperCase();
   const type = kind === "INCOME" || kind === "CREDIT" ? "CREDIT" : "DEBIT";
-  // Local models paraphrase categories ("groceries", "Food") — snap to the
-  // canonical name case-insensitively, else "Other" so the row still saves.
-  const wanted = String(args.category ?? "")
-    .trim()
-    .toLowerCase();
-  const category =
-    CATEGORY_NAMES.find((c) => c.toLowerCase() === wanted) ??
-    (wanted.length >= 3
-      ? CATEGORY_NAMES.find((c) => c.toLowerCase().includes(wanted))
-      : undefined) ??
-    "Other";
+  const category = resolvePfCategory(args.category);
   const date = (args.date as string | undefined) ?? localDateString();
   const description =
     String(args.description ?? merchantName)
@@ -1763,36 +1788,27 @@ async function toolAddPfTransaction(
 }
 
 async function toolListBudgets(db: PrismaClient, organisationId: string): Promise<ToolResult> {
+  // Same numbers as the Budgets page: each budget's own period, counting
+  // both Personal Finance spending and business expenses.
   const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-
   const budgets = await db.budget.findMany({
     where: { organisationId, isArchived: false },
     orderBy: { createdAt: "asc" },
   });
 
-  const thisMonthTxns = await db.statementTransaction.findMany({
-    where: { organisationId, isExcluded: false, type: "DEBIT", date: { gte: monthStart } },
-    select: { category: true, amount: true },
-  });
-
-  const spendByCategory: Record<string, number> = {};
-  for (const t of thisMonthTxns) {
-    const c = t.category ?? "Other";
-    spendByCategory[c] = (spendByCategory[c] ?? 0) + Number(t.amount);
-  }
-
-  const result = budgets.map((b) => {
-    const spent = spendByCategory[b.category] ?? 0;
-    const limit = Number(b.limitAmount);
-    return {
-      category: b.category,
-      limit,
-      spent,
-      remaining: Math.max(0, limit - spent),
-      period: b.period,
-    };
-  });
+  const result = await Promise.all(
+    budgets.map(async (b) => {
+      const spent = await getSpentForCategory(db, organisationId, b.category, periodFrom(b.period, now), now);
+      const limit = Number(b.limitAmount);
+      return {
+        category: b.category,
+        limit,
+        spent,
+        remaining: Math.max(0, limit - spent),
+        period: b.period,
+      };
+    })
+  );
 
   return { tool: "list_budgets", success: true, data: { budgets: result } };
 }
@@ -2596,7 +2612,9 @@ export async function buildChatMessages(
   params: {
     organisationId: string;
     conversationId: string;
-    userMessage: string;
+    // Omitted when resuming after the user approved/rejected actions — the
+    // turn then continues from the APP_EVENTS instead of a new user message.
+    userMessage?: string;
     attachmentId?: string;
   }
 ): Promise<{ messages: { role: string; content: string }[]; nonce: string }> {
@@ -2609,7 +2627,7 @@ export async function buildChatMessages(
   const accounts = await db.chartAccount.findMany({
     where: { organisationId: params.organisationId, isArchived: false },
     orderBy: { code: "asc" },
-    take: 30,
+    take: 200,
   });
 
   const contacts = await db.contact.findMany({
@@ -2625,9 +2643,14 @@ export async function buildChatMessages(
       conversation: { organisationId: params.organisationId },
     },
     orderBy: { createdAt: "desc" },
-    take: 6,
+    take: 7,
+    include: { pendingActions: { orderBy: { createdAt: "asc" } } },
   });
   history.reverse();
+  // The route stores the incoming user message before calling us — don't
+  // send it twice.
+  const last = history[history.length - 1];
+  if (params.userMessage !== undefined && last?.role === "user") history.pop();
 
   const systemPrompt = buildSystemPrompt(
     {
@@ -2640,17 +2663,41 @@ export async function buildChatMessages(
     buildActionCatalog()
   );
 
-  const messages = [
-    { role: "system", content: systemPrompt },
-    // Skip empty assistant messages — Gemini rejects parts with empty text
-    ...history.filter((m) => m.content.trim()).map((m) => ({ role: m.role, content: m.content })),
-    {
+  const turns: { role: string; content: string }[] = [];
+  for (const m of history) {
+    // Older replies carry the app's ✓ lines in their content. Showing those
+    // to the model teaches it to write "✓ Expense recorded" without acting,
+    // so drop them — APP_EVENTS below say what really happened.
+    const content = m.role === "assistant" ? stripStatusLines(m.content) : m.content;
+    if (content.trim()) turns.push({ role: m.role, content });
+    const events = formatActionEvents(m.pendingActions);
+    if (events) turns.push({ role: "user", content: events });
+  }
+  if (params.userMessage === undefined) {
+    turns.push({
+      role: "user",
+      content:
+        "The user has just answered your proposed actions (see APP_EVENTS). If their original request still needs more actions, write the ACTION line(s) now. Otherwise reply with one short sentence — only call something saved if APP_EVENTS says APPROVED.",
+    });
+  } else {
+    turns.push({
       role: "user",
       content: params.attachmentId
         ? `[User attached a file (attachmentId: ${params.attachmentId})]\n\n${params.userMessage}`
         : params.userMessage,
-    },
-  ];
+    });
+  }
 
-  return { messages, nonce };
+  // Providers expect alternating roles — fold back-to-back same-role turns
+  // (e.g. APP_EVENTS followed by the next user message) into one.
+  const merged: { role: string; content: string }[] = [];
+  for (const t of turns) {
+    const prev = merged[merged.length - 1];
+    if (prev && prev.role === t.role) prev.content = `${prev.content}\n\n${t.content}`;
+    else merged.push({ ...t });
+  }
+  // Gemini requires the conversation to start with a user turn.
+  while (merged[0]?.role === "assistant") merged.shift();
+
+  return { messages: [{ role: "system", content: systemPrompt }, ...merged], nonce };
 }

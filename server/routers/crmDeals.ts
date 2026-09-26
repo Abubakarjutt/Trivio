@@ -3,6 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, orgProcedure } from "@/server/trpc";
 import { Prisma } from "@prisma/client";
 import { convertDealToInvoice, calcWeightedForecast, suggestProbability, toNum } from "@/server/services/crm.service";
+import { assertOwnCrmRefs } from "@/server/services/ownership";
 
 export const crmDealsRouter = createTRPCRouter({
   list: orgProcedure
@@ -72,6 +73,12 @@ export const crmDealsRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const { value, expectedCloseDate, probability, ...rest } = input;
+      await assertOwnCrmRefs(ctx.db, ctx.organisationId, {
+        contactId: input.contactId,
+        crmCompanyId: input.crmCompanyId,
+        stageId: input.stageId,
+        pipelineId: input.pipelineId,
+      });
 
       // Determine probability from stage if not provided
       let prob = probability;
@@ -112,6 +119,18 @@ export const crmDealsRouter = createTRPCRouter({
       const { id, value, expectedCloseDate, ...rest } = input;
       const existing = await ctx.db.crmDeal.findFirst({ where: { id, organisationId: ctx.organisationId } });
       if (!existing) throw new TRPCError({ code: "NOT_FOUND" });
+      // Moving pipeline or stage: the resulting stage must sit in the resulting pipeline.
+      const moving = input.stageId !== undefined || input.pipelineId !== undefined;
+      await assertOwnCrmRefs(ctx.db, ctx.organisationId, {
+        contactId: input.contactId,
+        crmCompanyId: input.crmCompanyId,
+        ...(moving
+          ? {
+              stageId: input.stageId ?? existing.stageId,
+              pipelineId: input.pipelineId ?? existing.pipelineId,
+            }
+          : {}),
+      });
       return ctx.db.crmDeal.update({
         where: { id },
         data: {
@@ -135,6 +154,9 @@ export const crmDealsRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.db.crmDeal.findFirst({ where: { id: input.id, organisationId: ctx.organisationId } });
       if (!existing) throw new TRPCError({ code: "NOT_FOUND" });
+      if (existing.closedAt) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "This deal is already closed." });
+      }
 
       // Find terminal stage
       const terminalStage = await ctx.db.crmPipelineStage.findFirst({

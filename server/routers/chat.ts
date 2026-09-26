@@ -7,9 +7,27 @@ export const chatRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
       const conv = await ctx.db.chatConversation.findFirst({
-        where: { id: input.id, organisationId: ctx.organisationId },
+        // A conversation is private to the user who had it, like the list.
+        where: { id: input.id, organisationId: ctx.organisationId, userId: ctx.user.id },
         include: {
-          messages: { orderBy: { createdAt: "asc" } },
+          messages: {
+            orderBy: { createdAt: "asc" },
+            // Approve/Reject cards the assistant attached to each reply
+            include: {
+              pendingActions: {
+                orderBy: { createdAt: "asc" },
+                select: {
+                  id: true,
+                  tool: true,
+                  preview: true,
+                  status: true,
+                  summary: true,
+                  error: true,
+                  result: true,
+                },
+              },
+            },
+          },
         },
       });
       if (!conv) return null;
@@ -35,7 +53,7 @@ export const chatRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       await ctx.db.chatConversation.deleteMany({
-        where: { id: input.id, organisationId: ctx.organisationId },
+        where: { id: input.id, organisationId: ctx.organisationId, userId: ctx.user.id },
       });
       return { success: true };
     }),

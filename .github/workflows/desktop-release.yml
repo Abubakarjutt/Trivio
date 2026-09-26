@@ -47,7 +47,53 @@ permissions:
   contents: write
 
 jobs:
+  # ── Tests ────────────────────────────────────────────────────────────────────
+  # Nothing ships unless the unit suite and the QA suite (every tRPC procedure
+  # plus the AI chat's approve-before-save flow, against a real Postgres) pass.
+  # The live-model eval (npm run test:ai) needs a local Ollama and stays manual.
+  tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: trivio
+          POSTGRES_PASSWORD: trivio
+          POSTGRES_DB: trivio_qa
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U trivio"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Throwaway database: the QA setup resets it before the run.
+      QA_DATABASE_URL: postgresql://trivio:trivio@localhost:5432/trivio_qa
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Unit tests
+        run: npm run test
+
+      - name: QA suite
+        run: npm run test:qa
+
   desktop-macos:
+    needs: [tests]
     # arm64 runner -- matches the app's current arm64-only target. A universal /
     # x64 target is intentionally NOT built here: it requires the x64 Postgres
     # engine to be embedded too (fetch:pg lays down one arch), which this arm64

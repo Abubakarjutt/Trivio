@@ -7,8 +7,9 @@ export const crmReportsRouter = createTRPCRouter({
     .input(z.object({ pipelineId: z.string().optional() }))
     .query(async ({ ctx, input }) => {
       const stages = await ctx.db.crmPipelineStage.findMany({
-        where: input.pipelineId ? { pipelineId: input.pipelineId } : {
+        where: {
           pipeline: { organisationId: ctx.organisationId },
+          ...(input.pipelineId ? { pipelineId: input.pipelineId } : {}),
         },
         include: {
           deals: {

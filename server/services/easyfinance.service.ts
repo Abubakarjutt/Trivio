@@ -30,12 +30,38 @@ export function calcBudgetUtilization(spent: number, limit: number): number {
 }
 
 /**
- * Aggregate expense debit lines for a category within a period window.
- * Shared by both budgets and watchlists.
+ * Spending for a category within a period window: business expense lines
+ * whose account name matches, plus Personal Finance debits in that category
+ * (budgets and watchlists live in the Personal Finance section, so its
+ * transactions must count). Shared by both budgets and watchlists.
  */
 export async function getSpentForCategory(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  db: Pick<PrismaClient, "journalLine"> | any,
+  db: Pick<PrismaClient, "journalLine" | "statementTransaction"> | any,
+  organisationId: string,
+  category: string,
+  from: Date,
+  now: Date
+): Promise<number> {
+  const [ledger, personal] = await Promise.all([
+    getLedgerSpent(db, organisationId, category, from, now),
+    db.statementTransaction.aggregate({
+      where: {
+        organisationId,
+        type: "DEBIT",
+        isExcluded: false,
+        category: { contains: category, mode: "insensitive" },
+        date: { gte: from, lte: now },
+      },
+      _sum: { amount: true },
+    }),
+  ]);
+  return ledger + Number(personal._sum.amount ?? 0);
+}
+
+async function getLedgerSpent(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  db: any,
   organisationId: string,
   category: string,
   from: Date,
@@ -82,29 +108,34 @@ export function isGoalComplete(newAmount: number, targetAmount: number): boolean
  * Mutates a *copy* of `current` — the original is not changed.
  */
 export function nextDueDateAfter(current: Date, frequency: string): Date {
+  // Due dates are stored as UTC midnight, so step in UTC; month steps clamp
+  // to the month's last day (Jan 31 → Feb 28, not Mar 3).
   const d = new Date(current);
+  const addDays = (n: number) => new Date(d.getTime() + n * 86_400_000);
+  const addMonths = (n: number) => {
+    const y = d.getUTCFullYear();
+    const m = d.getUTCMonth() + n;
+    const lastDay = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+    const out = new Date(d);
+    out.setUTCFullYear(y, m, Math.min(d.getUTCDate(), lastDay));
+    return out;
+  };
   switch (frequency) {
     case "DAILY":
-      d.setDate(d.getDate() + 1);
-      break;
+      return addDays(1);
     case "WEEKLY":
-      d.setDate(d.getDate() + 7);
-      break;
+      return addDays(7);
     case "FORTNIGHTLY":
-      d.setDate(d.getDate() + 14);
-      break;
+      return addDays(14);
     case "MONTHLY":
-      d.setMonth(d.getMonth() + 1);
-      break;
+      return addMonths(1);
     case "QUARTERLY":
-      d.setMonth(d.getMonth() + 3);
-      break;
+      return addMonths(3);
     case "YEARLY":
-      d.setFullYear(d.getFullYear() + 1);
-      break;
-    // unknown frequency — return unchanged
+      return addMonths(12);
+    default:
+      return d; // unknown frequency — unchanged
   }
-  return d;
 }
 
 /** Multipliers to convert any frequency to a monthly equivalent. */

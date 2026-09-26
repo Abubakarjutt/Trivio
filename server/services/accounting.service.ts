@@ -19,6 +19,23 @@ export interface CreateJournalEntryInput {
   lines: JournalLineInput[];
 }
 
+// Every line must post to one of the organisation's own accounts — an id from
+// another organisation (or a made-up one) would corrupt someone else's books.
+async function assertAccountsBelongToOrg(
+  db: PrismaClient,
+  organisationId: string,
+  lines: JournalLineInput[]
+): Promise<void> {
+  const ids = [...new Set(lines.map((l) => l.accountId))];
+  const owned = await db.chartAccount.count({ where: { id: { in: ids }, organisationId } });
+  if (owned !== ids.length) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "One or more accounts were not found in this organisation's chart of accounts",
+    });
+  }
+}
+
 // Validates that debits == credits to 4 decimal places
 function assertBalanced(lines: JournalLineInput[]): void {
   if (lines.length < 2) {
@@ -40,6 +57,7 @@ function assertBalanced(lines: JournalLineInput[]): void {
 
 export async function createJournalEntry(db: PrismaClient, input: CreateJournalEntryInput) {
   assertBalanced(input.lines);
+  await assertAccountsBelongToOrg(db, input.organisationId, input.lines);
 
   return db.journalEntry.create({
     data: {
@@ -100,7 +118,7 @@ export async function voidJournalEntry(
       description: `Reversal: ${l.description ?? original.description}`,
     }));
 
-    return createJournalEntry(tx as unknown as PrismaClient, {
+    const reversal = await createJournalEntry(tx as unknown as PrismaClient, {
       organisationId,
       userId,
       date: new Date(),
@@ -109,6 +127,14 @@ export async function voidJournalEntry(
       source: original.source,
       sourceId: original.sourceId ?? undefined,
       lines: reversalLines,
+    });
+    // Reports skip isVoid entries. The reversal must be skipped too — counting
+    // it while the original is hidden would book the voided amount negated.
+    // The pair stays in the ledger (void, don't delete) and still nets to zero.
+    return tx.journalEntry.update({
+      where: { id: reversal.id },
+      data: { isVoid: true, voidedAt: new Date(), voidReason: `Reversal of ${original.id}` },
+      include: { lines: true },
     });
   });
 }

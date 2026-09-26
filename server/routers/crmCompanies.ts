@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, orgProcedure } from "@/server/trpc";
+import { assertOwnContact } from "@/server/services/ownership";
 
 const CompanySizeEnum = z.enum(["SOLO", "SMALL", "MEDIUM", "LARGE", "ENTERPRISE"]);
 
@@ -82,7 +83,7 @@ export const crmCompaniesRouter = createTRPCRouter({
       if (!existing) throw new TRPCError({ code: "NOT_FOUND" });
       return ctx.db.crmCompany.update({
         where: { id },
-        data: { ...rest, ...(website !== undefined ? { website: website || undefined } : {}) },
+        data: { ...rest, ...(website !== undefined ? { website: website || null } : {}) }, // "" clears it
       });
     }),
 
@@ -91,6 +92,7 @@ export const crmCompaniesRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const existing = await ctx.db.crmCompany.findFirst({ where: { id: input.id, organisationId: ctx.organisationId } });
       if (!existing) throw new TRPCError({ code: "NOT_FOUND" });
+      await assertOwnContact(ctx.db, ctx.organisationId, input.contactId);
       return ctx.db.crmCompany.update({
         where: { id: input.id },
         data: { linkedContactId: input.contactId },

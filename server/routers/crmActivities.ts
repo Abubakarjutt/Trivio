@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, orgProcedure } from "@/server/trpc";
+import { assertOwnCrmRefs } from "@/server/services/ownership";
 
 const ActivityTypeEnum = z.enum(["CALL", "EMAIL", "MEETING", "NOTE", "TASK"]);
 
@@ -49,6 +50,7 @@ export const crmActivitiesRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const { dueDate, ...rest } = input;
+      await assertOwnCrmRefs(ctx.db, ctx.organisationId, input);
       return ctx.db.crmActivity.create({
         data: {
           organisationId: ctx.organisationId,
@@ -76,6 +78,7 @@ export const crmActivitiesRouter = createTRPCRouter({
       const { id, dueDate, completedAt, ...rest } = input;
       const existing = await ctx.db.crmActivity.findFirst({ where: { id, organisationId: ctx.organisationId } });
       if (!existing) throw new TRPCError({ code: "NOT_FOUND" });
+      await assertOwnCrmRefs(ctx.db, ctx.organisationId, input);
       return ctx.db.crmActivity.update({
         where: { id },
         data: {

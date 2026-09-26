@@ -113,6 +113,7 @@ export async function convertDealToInvoice(
   });
   if (!deal) throw new Error("Deal not found");
   if (deal.invoiceId) throw new Error("Deal already has a linked invoice");
+  if (deal.closedAt && deal.probability === 0) throw new Error("A lost deal can't be invoiced");
 
   // Generate next invoice number
   const lastInvoice = await db.invoice.findFirst({
@@ -183,8 +184,8 @@ export function calcWeightedForecast(deals: DealLike[]): MonthlyForecast[] {
   const map = new Map<string, MonthlyForecast>();
 
   for (const deal of open) {
-    const d = deal.expectedCloseDate!;
-    const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    // DATE column → UTC midnight; local getters would shift the 1st into the previous month west of UTC.
+    const month = deal.expectedCloseDate!.toISOString().slice(0, 7);
     const value = toNum(deal.value);
     const weighted = value * (deal.probability / 100);
 

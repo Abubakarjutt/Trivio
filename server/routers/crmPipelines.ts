@@ -134,6 +134,12 @@ export const crmPipelinesRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const pipeline = await ctx.db.crmPipeline.findFirst({ where: { id: input.pipelineId, organisationId: ctx.organisationId } });
       if (!pipeline) throw new TRPCError({ code: "NOT_FOUND" });
+      const own = await ctx.db.crmPipelineStage.count({
+        where: { id: { in: input.stageIds }, pipelineId: input.pipelineId },
+      });
+      if (own !== new Set(input.stageIds).size || own !== input.stageIds.length) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Every stage must belong to this pipeline." });
+      }
       await ctx.db.$transaction(
         input.stageIds.map((stageId, index) =>
           ctx.db.crmPipelineStage.update({ where: { id: stageId }, data: { order: index + 1 } })

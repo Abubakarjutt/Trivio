@@ -39,8 +39,22 @@ interface Message {
   content: string;
   toolCalls?: unknown[];
   toolResults?: ToolResult[];
+  pendingActions?: PendingAction[];
   createdAt: Date;
 }
+
+// A data-changing action the assistant proposed — saved only on Approve.
+interface PendingAction {
+  id: string;
+  tool: string;
+  preview: { title: string; fields: { label: string; value: string }[] };
+  status: "PENDING" | "EXECUTING" | "APPROVED" | "REJECTED" | "FAILED";
+  summary?: string | null;
+  error?: string | null;
+  result?: unknown;
+}
+
+type Decide = (actionId: string, decision: "approve" | "reject") => Promise<void>;
 
 interface ToolResult {
   tool: string;
@@ -973,36 +987,136 @@ function ToolResultCard({ result, fmt }: { result: ToolResult; fmt: (v: unknown)
   return null;
 }
 
-function MessageBubble({ message, fmt }: { message: Message; fmt: (v: unknown) => string }) {
+// Tools whose results render as a rich card; the rest show as a summary line.
+const CARD_TOOLS = new Set([
+  "create_invoice",
+  "create_bill",
+  "create_journal_entry",
+  "record_invoice_payment",
+  "record_bill_payment",
+  "void_invoice",
+  "void_bill",
+  "void_transaction",
+  "send_invoice",
+  "approve_bill",
+  "create_contact",
+  "update_contact",
+  "create_account",
+  "list_invoices",
+  "list_bills",
+  "get_invoice",
+  "get_bill",
+  "list_contacts",
+  "list_accounts",
+  "get_account_balance",
+  "search_transactions",
+  "get_profit_and_loss",
+  "get_balance_sheet",
+  "get_trial_balance",
+  "get_ar_aging",
+  "get_ap_aging",
+]);
+
+function ApprovalCard({
+  action,
+  onDecide,
+  disabled,
+  fmt,
+}: {
+  action: PendingAction;
+  onDecide: Decide;
+  disabled: boolean;
+  fmt: (v: unknown) => string;
+}) {
+  const result = action.result as ToolResult | undefined;
+  if (action.status === "APPROVED" && result && CARD_TOOLS.has(result.tool)) {
+    return <ToolResultCard result={result} fmt={fmt} />;
+  }
+
+  const tone =
+    action.status === "APPROVED"
+      ? "border-green-200 bg-green-50"
+      : action.status === "FAILED"
+        ? "border-red-200 bg-red-50"
+        : action.status === "REJECTED"
+          ? "border-slate-200 bg-slate-50 opacity-70"
+          : "border-amber-200 bg-amber-50";
+
+  return (
+    <div
+      className={`w-full rounded-xl border px-3.5 py-2.5 text-xs ${tone}`}
+      data-testid="chat-approval-card"
+      data-status={action.status}
+    >
+      <p className="mb-1.5 font-semibold">{action.preview.title}</p>
+      {action.preview.fields.length > 0 && (
+        <dl className="mb-2 space-y-0.5">
+          {action.preview.fields.map((f) => (
+            <div key={f.label} className="flex items-baseline justify-between gap-3">
+              <dt className="shrink-0 opacity-60">{f.label}</dt>
+              <dd className="text-right font-medium whitespace-pre-wrap tabular-nums">{f.value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {action.status === "PENDING" && (
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            className="h-7 flex-1 text-xs"
+            disabled={disabled}
+            onClick={() => void onDecide(action.id, "approve")}
+          >
+            <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> Approve
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 flex-1 text-xs"
+            disabled={disabled}
+            onClick={() => void onDecide(action.id, "reject")}
+          >
+            <XCircle className="mr-1 h-3.5 w-3.5" /> Reject
+          </Button>
+        </div>
+      )}
+      {action.status === "EXECUTING" && (
+        <p className="flex items-center gap-1.5 text-slate-600">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving…
+        </p>
+      )}
+      {action.status === "APPROVED" && (
+        <p className="flex items-center gap-1.5 text-green-700">
+          <CheckCircle2 className="h-3.5 w-3.5" />
+          {action.summary || "Approved and saved"}
+        </p>
+      )}
+      {action.status === "REJECTED" && (
+        <p className="flex items-center gap-1.5 text-slate-600">
+          <XCircle className="h-3.5 w-3.5" /> Rejected — nothing was saved
+        </p>
+      )}
+      {action.status === "FAILED" && (
+        <p className="flex items-center gap-1.5 text-red-700">
+          <AlertCircle className="h-3.5 w-3.5" /> Not saved — {action.error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function MessageBubble({
+  message,
+  fmt,
+  onDecide,
+  busy,
+}: {
+  message: Message;
+  fmt: (v: unknown) => string;
+  onDecide: Decide;
+  busy: boolean;
+}) {
   const isUser = message.role === "user";
-  const CARD_TOOLS = new Set([
-    "create_invoice",
-    "create_bill",
-    "create_journal_entry",
-    "record_invoice_payment",
-    "record_bill_payment",
-    "void_invoice",
-    "void_bill",
-    "void_transaction",
-    "send_invoice",
-    "approve_bill",
-    "create_contact",
-    "update_contact",
-    "create_account",
-    "list_invoices",
-    "list_bills",
-    "get_invoice",
-    "get_bill",
-    "list_contacts",
-    "list_accounts",
-    "get_account_balance",
-    "search_transactions",
-    "get_profit_and_loss",
-    "get_balance_sheet",
-    "get_trial_balance",
-    "get_ar_aging",
-    "get_ap_aging",
-  ]);
   const toolResults = (message.toolResults ?? []).filter(
     (r) => CARD_TOOLS.has(r.tool) || !r.success
   );
@@ -1015,18 +1129,38 @@ function MessageBubble({ message, fmt }: { message: Message; fmt: (v: unknown) =
         {isUser ? <User className="h-3.5 w-3.5" /> : <Bot className="h-3.5 w-3.5" />}
       </div>
       <div className={`flex max-w-[85%] flex-col gap-2 ${isUser ? "items-end" : "items-start"}`}>
-        {message.content && (stripToolCalls(message.content) || toolResults.length === 0) && (
-          <div
-            className={`rounded-2xl px-3.5 py-2 text-sm leading-relaxed ${isUser ? "bg-primary text-primary-foreground rounded-tr-sm" : "bg-muted rounded-tl-sm"}`}
-          >
-            <p className="whitespace-pre-wrap">
-              {isUser ? message.content : stripToolCalls(message.content)}
-            </p>
-          </div>
-        )}
+        {message.content &&
+          (stripToolCalls(message.content) ||
+            (toolResults.length === 0 && !message.pendingActions?.length)) && (
+            <div
+              className={`rounded-2xl px-3.5 py-2 text-sm leading-relaxed ${isUser ? "bg-primary text-primary-foreground rounded-tr-sm" : "bg-muted rounded-tl-sm"}`}
+            >
+              <p className="whitespace-pre-wrap">
+                {isUser ? message.content : stripToolCalls(message.content)}
+              </p>
+            </div>
+          )}
         {toolResults.map((r, i) => (
           <ToolResultCard key={i} result={r} fmt={fmt} />
         ))}
+        {(message.pendingActions ?? []).map((a) => (
+          <ApprovalCard key={a.id} action={a} onDecide={onDecide} disabled={busy} fmt={fmt} />
+        ))}
+        {(message.pendingActions ?? []).filter((a) => a.status === "PENDING").length > 1 && (
+          <Button
+            size="sm"
+            variant="secondary"
+            className="h-7 text-xs"
+            disabled={busy}
+            onClick={async () => {
+              for (const a of message.pendingActions ?? []) {
+                if (a.status === "PENDING") await onDecide(a.id, "approve");
+              }
+            }}
+          >
+            <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> Approve all
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -1074,6 +1208,7 @@ export function ChatPanel() {
           content: m.content,
           toolCalls: m.toolCalls as unknown[] | undefined,
           toolResults: m.toolResults as unknown as ToolResult[] | undefined,
+          pendingActions: m.pendingActions as unknown as PendingAction[] | undefined,
           createdAt: m.createdAt,
         }))
       );
@@ -1083,7 +1218,9 @@ export function ChatPanel() {
   }, [conversationData, loadConvId]);
 
   const handleStreamMessage = useCallback(
-    async (userMessage: string) => {
+    // userMessage null = continue the turn after the user answered the
+    // assistant's proposed actions (no new user bubble).
+    async (userMessage: string | null) => {
       setIsStreaming(true);
       setIsThinking(true);
       setStreamingContent("");
@@ -1095,10 +1232,11 @@ export function ChatPanel() {
         const res = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            message: userMessage,
-            conversationId: conversationId ?? undefined,
-          }),
+          body: JSON.stringify(
+            userMessage === null
+              ? { resume: true, conversationId }
+              : { message: userMessage, conversationId: conversationId ?? undefined }
+          ),
           signal: controller.signal,
           credentials: "include",
         });
@@ -1113,6 +1251,7 @@ export function ChatPanel() {
         let finalContent = "";
         let finalToolCalls: unknown[] = [];
         let finalToolResults: ToolResult[] = [];
+        let finalPending: PendingAction[] = [];
         let streamConvId = conversationId;
 
         while (true) {
@@ -1163,6 +1302,7 @@ export function ChatPanel() {
                 finalContent = (data.content as string) || finalContent;
                 finalToolCalls = (data.toolCalls as unknown[]) || [];
                 finalToolResults = (data.toolResults as ToolResult[]) || finalToolResults;
+                finalPending = (data.pendingActions as PendingAction[]) || [];
                 break;
               case "error":
                 throw new Error(data.message as string);
@@ -1178,6 +1318,7 @@ export function ChatPanel() {
             content: finalContent,
             toolCalls: finalToolCalls,
             toolResults: finalToolResults,
+            pendingActions: finalPending,
             createdAt: new Date(),
           },
         ]);
@@ -1186,17 +1327,6 @@ export function ChatPanel() {
           setConversationId(streamConvId);
         }
         refetchConversations();
-        // The chat can change anything the UI can — refresh whatever page is
-        // open so a transaction/invoice/etc. it just created shows up.
-        const changedSomething = finalToolResults.some(
-          (r) =>
-            r.success &&
-            !/^(list_|get_|search_)/.test(r.tool) &&
-            !(
-              r.tool === "app_action" && (r.data as { kind?: string } | undefined)?.kind === "query"
-            )
-        );
-        if (changedSomething) void utils.invalidate();
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
           toast({
@@ -1211,7 +1341,54 @@ export function ChatPanel() {
         abortRef.current = null;
       }
     },
-    [conversationId, toast, refetchConversations, utils]
+    [conversationId, toast, refetchConversations]
+  );
+
+  const setActionState = (updated: PendingAction) =>
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.pendingActions?.some((a) => a.id === updated.id)
+          ? {
+              ...m,
+              pendingActions: m.pendingActions.map((a) => (a.id === updated.id ? updated : a)),
+            }
+          : m
+      )
+    );
+
+  const decideAction = useCallback<Decide>(
+    async (actionId, decision) => {
+      const current = messages
+        .flatMap((m) => m.pendingActions ?? [])
+        .find((a) => a.id === actionId);
+      if (current && decision === "approve") setActionState({ ...current, status: "EXECUTING" });
+      try {
+        const res = await fetch("/api/chat/actions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: actionId, decision }),
+          credentials: "include",
+        });
+        if (!res.ok) throw new Error(`Server returned ${res.status}`);
+        const { action, resume } = (await res.json()) as {
+          action: PendingAction;
+          resume: boolean;
+        };
+        setActionState(action);
+        // Refresh whatever page is open so the new transaction/invoice/etc.
+        // shows up right away.
+        if (action.status === "APPROVED") void utils.invalidate();
+        // Multi-step requests carry on (e.g. add stages to the new pipeline).
+        if (resume) void handleStreamMessage(null);
+      } catch (err) {
+        if (current) setActionState(current);
+        toast({
+          variant: "destructive",
+          title: (err as Error).message || "Couldn't update the action",
+        });
+      }
+    },
+    [messages, utils, handleStreamMessage, toast]
   );
 
   const deleteConversation = trpc.chat.deleteConversation.useMutation({
@@ -1262,6 +1439,7 @@ export function ChatPanel() {
     return (
       <button
         onClick={() => setIsOpen(true)}
+        aria-label="Open AI assistant"
         className="bg-primary text-primary-foreground hover:bg-primary/90 fixed right-6 bottom-6 z-50 flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition-all hover:scale-105 active:scale-95"
       >
         <MessageSquare className="h-5 w-5" />
@@ -1390,7 +1568,13 @@ export function ChatPanel() {
               </div>
             )}
             {messages.map((msg) => (
-              <MessageBubble key={msg.id} message={msg} fmt={fmt} />
+              <MessageBubble
+                key={msg.id}
+                message={msg}
+                fmt={fmt}
+                onDecide={decideAction}
+                busy={isStreaming}
+              />
             ))}
             {isStreaming && (
               <div className="flex gap-2.5">

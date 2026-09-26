@@ -2,10 +2,31 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { Prisma } from "@prisma/client";
 import { createTRPCRouter, orgProcedure } from "@/server/trpc";
-import { createJournalEntry } from "@/server/services/accounting.service";
+import { createJournalEntry, voidJournalEntry } from "@/server/services/accounting.service";
 import { autoMatchBankAccount } from "@/server/services/reconciliation.service";
 
 const PAGE_SIZE = 50;
+
+/**
+ * A CREATED line posted its own journal entry. Excluding or restoring it must
+ * void that entry (void, don't delete) — otherwise the money stays in the
+ * books and "Create entry" would post it a second time.
+ */
+async function voidCreatedEntry(
+  db: Parameters<typeof voidJournalEntry>[0],
+  organisationId: string,
+  userId: string,
+  line: { status: string; journalLineId: string | null }
+) {
+  if (line.status !== "CREATED" || !line.journalLineId) return;
+  const jl = await db.journalLine.findUnique({
+    where: { id: line.journalLineId },
+    select: { journalEntry: { select: { id: true, isVoid: true } } },
+  });
+  if (jl && !jl.journalEntry.isVoid) {
+    await voidJournalEntry(db, jl.journalEntry.id, organisationId, userId, "Bank statement line undone");
+  }
+}
 
 export const bankAccountsRouter = createTRPCRouter({
   // ── List bank accounts for the org ─────────────────────────────────────────
@@ -96,7 +117,8 @@ export const bankAccountsRouter = createTRPCRouter({
           z.object({
             date: z.date(),
             description: z.string(),
-            amount: z.string(), // decimal string to avoid float issues
+            // decimal string to avoid float issues
+            amount: z.string().trim().regex(/^-?\d+(\.\d{1,4})?$/, "Amount must be a number like -12.50"),
           })
         ),
       })
@@ -199,21 +221,28 @@ export const bankAccountsRouter = createTRPCRouter({
           id: input.bankStatementLineId,
           bankAccount: { organisationId: ctx.organisationId },
         },
+        include: { bankAccount: { select: { accountId: true } } },
       });
       if (!statementLine) throw new TRPCError({ code: "NOT_FOUND" });
-      if (statementLine.status === "MATCHED") {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "Line is already matched" });
+      if (statementLine.status !== "UNMATCHED") {
+        throw new TRPCError({ code: "BAD_REQUEST", message: `Line is ${statementLine.status.toLowerCase()}, not unmatched` });
       }
 
       // Verify journal line belongs to org
+      // …and must post to this bank's own account, and not already be
+      // reconciled against another statement line (one payment, one match).
       const journalLine = await ctx.db.journalLine.findFirst({
         where: {
           id: input.journalLineId,
+          accountId: statementLine.bankAccount.accountId,
           journalEntry: { organisationId: ctx.organisationId, isVoid: false },
         },
-        select: { id: true },
+        select: { id: true, _count: { select: { bankStatementLines: true } } },
       });
-      if (!journalLine) throw new TRPCError({ code: "NOT_FOUND", message: "Journal line not found" });
+      if (!journalLine) throw new TRPCError({ code: "NOT_FOUND", message: "Journal line not found for this bank account" });
+      if (journalLine._count.bankStatementLines > 0) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "That journal line is already matched to another statement line" });
+      }
 
       return ctx.db.bankStatementLine.update({
         where: { id: input.bankStatementLineId },
@@ -253,6 +282,7 @@ export const bankAccountsRouter = createTRPCRouter({
         },
       });
       if (!statementLine) throw new TRPCError({ code: "NOT_FOUND" });
+      await voidCreatedEntry(ctx.db, ctx.organisationId, ctx.session.user.id, statementLine);
 
       return ctx.db.bankStatementLine.update({
         where: { id: input.bankStatementLineId },
@@ -271,6 +301,7 @@ export const bankAccountsRouter = createTRPCRouter({
         },
       });
       if (!statementLine) throw new TRPCError({ code: "NOT_FOUND" });
+      await voidCreatedEntry(ctx.db, ctx.organisationId, ctx.session.user.id, statementLine);
 
       return ctx.db.bankStatementLine.update({
         where: { id: input.bankStatementLineId },

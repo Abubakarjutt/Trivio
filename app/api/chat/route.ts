@@ -10,17 +10,35 @@ import {
   type ToolCall,
   type ToolResult,
 } from "@/server/services/chat.service";
+import {
+  callKey,
+  canonicalizeCall,
+  checkProposalRefs,
+  claimsUnbackedAction,
+  createProposals,
+  isReadOnlyCall,
+  normalizeToolCall,
+  stripStatusLines,
+  validateProposal,
+} from "@/server/services/chat-approval";
 import { chatRateLimiter } from "@/server/middleware/rateLimit";
 import { resolveProvider } from "@/server/services/ai-status";
 
-const chatBodySchema = z.object({
-  message: z.string().min(1).max(4000),
-  // ChatConversation.id / Attachment.id are Prisma cuid()s, not UUIDs — a plain
-  // non-empty check is enough; ownership is verified separately below (IDOR
-  // guard), so this isn't a security boundary.
-  conversationId: z.string().min(1).optional(),
-  attachmentId: z.string().min(1).optional(),
-});
+const chatBodySchema = z
+  .object({
+    // Absent when `resume` continues a turn after the user approved/rejected
+    // the actions the assistant proposed.
+    message: z.string().min(1).max(4000).optional(),
+    resume: z.boolean().optional(),
+    // ChatConversation.id / Attachment.id are Prisma cuid()s, not UUIDs — a plain
+    // non-empty check is enough; ownership is verified separately below (IDOR
+    // guard), so this isn't a security boundary.
+    conversationId: z.string().min(1).optional(),
+    attachmentId: z.string().min(1).optional(),
+  })
+  .refine((b) => (b.resume === true ? !!b.conversationId : !!b.message), {
+    message: "message is required (or resume with a conversationId)",
+  });
 
 // ── Provider configuration ─────────────────────────────────────────────────────
 //
@@ -64,107 +82,6 @@ class NeedsSetupError extends Error {
 // — so no native function-calling is required or honoured).
 interface ProviderTurn {
   text: string;
-}
-
-// Summarise executed tool results into a human-readable block appended to the
-// assistant's reply. Returns "" when there's nothing worth summarising.
-function buildToolSummary(toolResults: ToolResult[]): string {
-  return toolResults
-    .map((r) => {
-      if (!r.success) return `❌ ${r.tool.replace(/_/g, " ")}: ${r.error}`;
-      const d = r.data as Record<string, unknown> | undefined;
-      switch (r.tool) {
-        case "create_invoice":
-          return `✓ Invoice ${d?.number} created for ${d?.customer} — total $${d?.total}`;
-        case "create_bill":
-          return `✓ Bill ${d?.number} created for ${d?.supplier} — total $${d?.total}`;
-        case "create_journal_entry":
-          return `✓ Journal entry recorded`;
-        case "create_crm_lead":
-          return `✓ Lead ${d?.name} added (${d?.source}, status: ${d?.status})`;
-        case "update_crm_lead_status":
-          return `✓ Lead ${d?.name} updated to ${d?.status}`;
-        case "create_crm_deal":
-          return `✓ Deal "${d?.name}" created for ${d?.contact} — stage: ${d?.stage}, value: $${d?.value}`;
-        case "move_crm_deal":
-          return `✓ Deal "${d?.name}" moved to ${d?.newStage}`;
-        case "create_crm_activity":
-          return `✓ ${d?.type} activity "${d?.subject}" logged${d?.dueDate ? ` (due ${d?.dueDate})` : ""}`;
-        case "create_recurring":
-          return `✓ Recurring ${String(d?.type ?? "").toLowerCase()} "${d?.name}" created — $${d?.amount} ${String(d?.frequency ?? "").toLowerCase()}, next due ${d?.nextDueDate}`;
-        case "mark_recurring_paid":
-          return `✓ "${d?.name}" marked paid — next due ${d?.nextDueDate}`;
-        case "create_goal":
-          return `✓ Goal "${d?.name}" created — target $${d?.targetAmount}${d?.targetDate ? `, by ${d?.targetDate}` : ""}`;
-        case "update_goal_progress":
-          return `✓ Goal "${d?.name}" progress updated to $${d?.currentAmount} / $${d?.targetAmount} (${d?.progress}%)${d?.status === "COMPLETED" ? " — 🎉 Goal achieved!" : ""}`;
-        case "send_invoice":
-          return `✓ Invoice ${d?.number} marked as sent`;
-        case "void_invoice":
-          return `✓ Invoice ${d?.number} voided`;
-        case "record_invoice_payment":
-          return `✓ Payment of $${d?.amountPaid} recorded on invoice ${d?.number} — now ${d?.newStatus} (via ${d?.cashAccount})`;
-        case "approve_bill":
-          return `✓ Bill ${d?.number} approved`;
-        case "void_bill":
-          return `✓ Bill ${d?.number} voided`;
-        case "record_bill_payment":
-          return `✓ Payment of $${d?.amountPaid} recorded on bill ${d?.number} — now ${d?.newStatus} (via ${d?.cashAccount})`;
-        case "void_transaction":
-          return `✓ Journal entry voided: "${d?.description}"`;
-        case "create_contact":
-          return `✓ Contact "${d?.name}" (${d?.type}) created`;
-        case "update_contact":
-          return `✓ Contact "${d?.name}" updated`;
-        case "create_account":
-          return `✓ Account ${d?.code} — ${d?.name} (${String(d?.type ?? "").toLowerCase()}) created`;
-        case "set_budget":
-          return `✓ Budget ${d?.action === "updated" ? "updated" : "created"} — ${d?.category}: $${d?.limitAmount}/${String(d?.period ?? "MONTHLY").toLowerCase()}`;
-        case "set_budgets":
-          return `✓ ${d?.saved} budget(s) saved`;
-        case "extract_document":
-          return `✓ Document queued for extraction — check Attachments for results`;
-        case "create_crm_company":
-          return `✓ Company "${d?.name}" added (${d?.size}, ${d?.industry ?? "no industry set"})`;
-        case "list_invoices":
-        case "list_bills":
-        case "get_invoice":
-        case "get_bill":
-        case "list_contacts":
-        case "list_accounts":
-        case "get_account_balance":
-        case "search_transactions":
-        case "get_profit_and_loss":
-        case "get_balance_sheet":
-        case "get_trial_balance":
-        case "get_ar_aging":
-        case "get_ap_aging":
-          return "";
-        case "add_pf_transaction":
-          return `✓ ${d?.type === "INCOME" ? "Income" : "Expense"} recorded — ${d?.merchantName}: ${d?.amount} (${d?.category}, ${d?.date})`;
-        case "app_action": {
-          const a = d as { action?: string; kind?: string } | undefined;
-          if (a?.kind === "query") return "";
-          const [area, proc] = String(a?.action ?? "").split(".");
-          return `✓ ${proc?.replace(/([A-Z])/g, " $1").toLowerCase()} (${area}) done`;
-        }
-        case "create_watchlist":
-          return `✓ Watchlist "${d?.name}" created — alert when ${d?.category} exceeds $${d?.threshold} per ${String(d?.period ?? "").toLowerCase()}`;
-        case "list_budgets":
-        case "list_crm_leads":
-        case "list_crm_deals":
-        case "list_crm_activities":
-        case "list_crm_companies":
-        case "list_recurring":
-        case "list_goals":
-        case "list_watchlists":
-          return "";
-        default:
-          return `✓ ${r.tool.replace(/_/g, " ")} completed`;
-      }
-    })
-    .filter(Boolean)
-    .join("\n");
 }
 
 // ── Gemini provider ────────────────────────────────────────────────────────────
@@ -315,6 +232,13 @@ const MAX_AGENT_ROUNDS = 4;
 
 type ChatMsg = { role: string; content: string };
 
+// Sent when the model says it did something but wrote no ACTION line.
+const UNBACKED_CLAIM_CORRECTION = (nonce: string) =>
+  `APP_NOTICE (from the app, not the user): your reply says something was done, but you wrote no ACTION line, so NOTHING was saved or changed. If the user asked for a change, write the ACTION line now (TOOL_CALL_${nonce}: {"tool":"...","args":{...}}). If you were only describing existing data, repeat your answer without claiming you did anything.`;
+
+const NOTHING_CHANGED_NOTE =
+  "ℹ️ Nothing was changed — no action was taken. Ask again if you'd like me to do it.";
+
 async function runAgentLoop(params: {
   conversationId: string;
   userOrgId: string;
@@ -324,15 +248,24 @@ async function runAgentLoop(params: {
   nonce: string;
   sendEvent: (event: string, data: unknown) => void;
   close: () => void;
+  // Actions the user already approved earlier in this request (resume) —
+  // never propose them again.
+  alreadyDone?: string[];
 }): Promise<void> {
   const { conversationId, userOrgId, userId, runModel, nonce, sendEvent, close } = params;
   const msgs = [...params.chatMsgs];
   const toolCalls: ToolCall[] = [];
   const toolResults: ToolResult[] = [];
-  // Calls that already succeeded this turn — never run the same write twice
-  // just because the model repeated itself in a follow-up round.
-  const succeeded = new Set<string>();
+  // Data-changing calls wait for the user's Approve — never executed here.
+  const proposals: ToolCall[] = [];
+  // Reads that succeeded and writes already proposed/approved — the model
+  // repeating itself in a follow-up round must not duplicate them.
+  const handled = new Set<string>(params.alreadyDone ?? []);
   let text = "";
+  let corrected = false;
+  // Right after the user approved a card, "recorded ✓" is true — the app
+  // saved it — so it must not be corrected or labelled "Nothing was changed".
+  const approvedThisTurn = (params.alreadyDone?.length ?? 0) > 0;
 
   for (let round = 1; round <= MAX_AGENT_ROUNDS; round++) {
     if (round > 1) sendEvent("thinking", {});
@@ -340,17 +273,54 @@ async function runAgentLoop(params: {
     const parsed = parseToolCalls(turn.text, nonce);
     if (parsed.text) text = parsed.text;
 
-    const fresh = parsed.toolCalls.filter((c) => !succeeded.has(JSON.stringify([c.tool, c.args])));
-    // Done when the model answers without calling anything new.
-    if (fresh.length === 0) break;
+    // Dedupe against earlier rounds AND within this reply — small models
+    // sometimes write the same ACTION line twice.
+    const seen = new Set<string>();
+    const fresh = parsed.toolCalls
+      .map((c) => canonicalizeCall(normalizeToolCall(c)))
+      .filter((c) => {
+        const key = callKey(c);
+        if (handled.has(key) || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
+    if (fresh.length === 0) {
+      // "✓ Expense recorded" with no ACTION line is how a transaction went
+      // missing — give the model one chance to actually make the call.
+      if (
+        !corrected &&
+        !approvedThisTurn &&
+        proposals.length === 0 &&
+        toolCalls.length === 0 &&
+        round < MAX_AGENT_ROUNDS &&
+        claimsUnbackedAction(parsed.text)
+      ) {
+        corrected = true;
+        msgs.push({ role: "assistant", content: turn.text });
+        msgs.push({ role: "user", content: UNBACKED_CLAIM_CORRECTION(nonce) });
+        continue;
+      }
+      break;
+    }
 
     const roundResults: ToolResult[] = [];
     for (const call of fresh) {
-      const result = await executeToolCall(db, userOrgId, userId, call);
-      if (result.success) succeeded.add(JSON.stringify([call.tool, call.args]));
-      roundResults.push(result);
+      if (isReadOnlyCall(call)) {
+        const result = await executeToolCall(db, userOrgId, userId, call);
+        if (result.success) handled.add(callKey(call));
+        toolCalls.push(call);
+        roundResults.push(result);
+        continue;
+      }
+      const problem = validateProposal(call) ?? (await checkProposalRefs(db, userOrgId, call));
+      if (problem) {
+        roundResults.push({ tool: call.tool, success: false, error: problem });
+        continue;
+      }
+      handled.add(callKey(call));
+      proposals.push(call);
     }
-    toolCalls.push(...fresh);
     // A failure the model then recovers from shouldn't show as a red card —
     // drop earlier rounds' failures, keep this round's.
     for (let i = toolResults.length - 1; i >= 0; i--) {
@@ -358,24 +328,34 @@ async function runAgentLoop(params: {
     }
     toolResults.push(...roundResults);
 
-    // Always let the model see what happened: a read gives it data to act
-    // on, and a write's result carries ids a multi-step request needs next
-    // (e.g. create a pipeline, then add its stages).
+    // Writes wait for the user; the turn resumes after they answer.
+    if (proposals.length > 0) break;
     if (round === MAX_AGENT_ROUNDS) break;
+    // Let the model read what it asked for (ids, balances) and carry on.
     msgs.push({ role: "assistant", content: turn.text });
     msgs.push({ role: "user", content: formatToolResultsForModel(roundResults, nonce) });
   }
 
+  // Only the app may say something was done.
+  text = stripStatusLines(text);
+  if (proposals.length > 0) {
+    if (!text || claimsUnbackedAction(text)) {
+      text =
+        proposals.length === 1
+          ? "Here's what I've prepared — approve it to save."
+          : "Here's what I've prepared — approve each one to save it.";
+    }
+  } else if (toolCalls.length === 0 && !approvedThisTurn && claimsUnbackedAction(text)) {
+    text = `${text}\n\n${NOTHING_CHANGED_NOTE}`;
+  }
+
   sendEvent("token", { content: text });
 
-  const summary = buildToolSummary(toolResults);
-  const finalContent = summary ? `${text}\n\n${summary}`.trim() : text;
-
-  await db.chatMessage.create({
+  const message = await db.chatMessage.create({
     data: {
       conversationId,
       role: "assistant",
-      content: finalContent,
+      content: text,
       toolCalls:
         toolCalls.length > 0
           ? (toolCalls as unknown as import("@prisma/client").Prisma.InputJsonValue)
@@ -387,7 +367,25 @@ async function runAgentLoop(params: {
     },
   });
 
-  sendEvent("done", { conversationId, content: finalContent, toolCalls, toolResults });
+  const pendingActions =
+    proposals.length > 0
+      ? await createProposals(db, {
+          organisationId: userOrgId,
+          userId,
+          conversationId,
+          messageId: message.id,
+          calls: proposals,
+        })
+      : [];
+
+  sendEvent("done", {
+    conversationId,
+    messageId: message.id,
+    content: text,
+    toolCalls,
+    toolResults,
+    pendingActions,
+  });
   close();
 }
 
@@ -412,7 +410,7 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) {
     return new Response("Invalid request body", { status: 400 });
   }
-  const { message, conversationId: inputConvId, attachmentId } = parsed.data;
+  const { message, resume, conversationId: inputConvId, attachmentId } = parsed.data;
 
   // Rate-limit chat requests to protect AI compute costs
   try {
@@ -427,14 +425,14 @@ export async function POST(req: NextRequest) {
       data: {
         organisationId: user.organisationId,
         userId: user.id,
-        title: message.slice(0, 60),
+        title: message!.slice(0, 60),
       },
     });
     conversationId = conv.id;
   } else {
-    // Verify the conversation belongs to this organisation — prevent IDOR
+    // Verify the conversation is this user's own — prevent IDOR
     const ownedConv = await db.chatConversation.findFirst({
-      where: { id: conversationId, organisationId: user.organisationId },
+      where: { id: conversationId, organisationId: user.organisationId, userId: user.id },
       select: { id: true },
     });
     if (!ownedConv) {
@@ -442,19 +440,40 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  await db.chatMessage.create({
-    data: {
-      conversationId,
-      role: "user",
-      content: message,
-      attachmentId: attachmentId || null,
-    },
-  });
+  let alreadyDone: string[] = [];
+  if (resume) {
+    // Continue only right after the user has answered every proposal on the
+    // latest reply — otherwise there's nothing to continue from (and a
+    // replayed request can't trigger a second follow-up).
+    const latest = await db.chatMessage.findFirst({
+      where: { conversationId },
+      orderBy: { createdAt: "desc" },
+      include: { pendingActions: true },
+    });
+    const actions = latest?.pendingActions ?? [];
+    const answered =
+      latest?.role === "assistant" &&
+      actions.length > 0 &&
+      actions.every((a) => a.status !== "PENDING" && a.status !== "EXECUTING");
+    if (!answered) return new Response("Nothing to resume", { status: 409 });
+    alreadyDone = actions
+      .filter((a) => a.status === "APPROVED")
+      .map((a) => callKey({ tool: a.tool, args: a.args as Record<string, unknown> }));
+  } else {
+    await db.chatMessage.create({
+      data: {
+        conversationId,
+        role: "user",
+        content: message!,
+        attachmentId: attachmentId || null,
+      },
+    });
+  }
 
   const { messages, nonce } = await buildChatMessages(db, {
     organisationId: user.organisationId,
     conversationId,
-    userMessage: message,
+    userMessage: resume ? undefined : message,
     attachmentId,
   });
 
@@ -499,6 +518,7 @@ export async function POST(req: NextRequest) {
           nonce,
           sendEvent,
           close: () => controller.close(),
+          alreadyDone,
         });
         return;
       } catch (err) {

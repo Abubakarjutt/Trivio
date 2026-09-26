@@ -37,6 +37,8 @@ const AREA_LABELS: Record<string, string> = {
   statementTransactions:
     "PERSONAL FINANCE transactions (spending/income on the Personal Finance → Transactions page)",
   transactions: "BUSINESS journal entries (double-entry accounting)",
+  dashboard:
+    "BUSINESS ledger totals from journal entries only — for personal spending/income use statementTransactions.summary or statementTransactions.list",
   budgets: "personal finance budgets",
   goals: "personal finance savings goals",
   recurringItems: "personal finance recurring bills/income",
@@ -196,6 +198,64 @@ function truncate(data: unknown): unknown {
 
 const createCaller = createCallerFactory(appRouter);
 
+type AccountRow = { id: string; code: string; name: string };
+
+// Input fields that hold a chart-of-accounts id (not bankAccountId — that's a
+// BankAccount row).
+const CHART_ACCOUNT_KEY =
+  /^(accountId|cashAccountId|chartAccountId|expenseAccountId|incomeAccountId|taxAccountId)$/;
+
+/**
+ * The UI picks accounts from a list; the model only knows codes and names
+ * ("5300", "Rent & Lease"). Rewrite every `…accountId` field to this
+ * organisation's account id, and fail with the valid codes when there's no
+ * such account — so the model can correct itself instead of the user
+ * approving a card that can only fail.
+ */
+export async function resolveAccountRefs(
+  db: Pick<PrismaClient, "chartAccount">,
+  organisationId: string,
+  value: unknown
+): Promise<unknown> {
+  let accounts: AccountRow[] | null = null;
+  const load = async () =>
+    (accounts ??= await db.chartAccount.findMany({
+      where: { organisationId, isArchived: false },
+      select: { id: true, code: true, name: true },
+      orderBy: { code: "asc" },
+    }));
+
+  const resolveOne = async (ref: string): Promise<string> => {
+    const all = await load();
+    const wanted = ref.trim();
+    const hit =
+      all.find((a) => a.id === wanted) ??
+      all.find((a) => a.code === wanted) ??
+      all.find((a) => a.name.toLowerCase() === wanted.toLowerCase());
+    if (hit) return hit.id;
+    const valid = all.map((a) => `${a.code} ${a.name}`).join("; ");
+    throw new Error(
+      `No account "${wanted}" in this organisation's chart of accounts. Use one of: ${valid}`
+    );
+  };
+
+  const walk = async (v: unknown): Promise<unknown> => {
+    if (Array.isArray(v)) return Promise.all(v.map(walk));
+    if (!v || typeof v !== "object" || v instanceof Date) return v;
+    const out: Record<string, unknown> = {};
+    for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+      out[k] =
+        CHART_ACCOUNT_KEY.test(k) &&
+        (typeof x === "string" || typeof x === "number") &&
+        String(x).trim()
+          ? await resolveOne(String(x))
+          : await walk(x);
+    }
+    return out;
+  };
+  return walk(value);
+}
+
 /**
  * Run one app action as the given user, exactly as their UI session would.
  * Organisation scoping comes from the procedure's own middleware (it re-reads
@@ -223,6 +283,13 @@ export async function runAppAction(
   )[area][proc];
   const defaults = CHAT_INPUT_DEFAULTS[action.name];
   const merged = defaults ? { ...defaults, ...((input as object | undefined) ?? {}) } : input;
-  const data = await fn(coerceInput(action.input, merged ?? undefined));
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: { organisationId: true },
+  });
+  const resolved = user?.organisationId
+    ? await resolveAccountRefs(db, user.organisationId, merged)
+    : merged;
+  const data = await fn(coerceInput(action.input, resolved ?? undefined));
   return { action: action.name, kind: action.kind, data: truncate(data) };
 }

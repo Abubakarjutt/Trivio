@@ -28,6 +28,25 @@ const SUPPORTED_CURRENCIES = [
   { code: "NGN", name: "Nigerian Naira" },
 ];
 
+// Only currencies the app can format; "usd" is accepted as USD.
+const currencyCode = z
+  .string()
+  .trim()
+  .transform((c) => c.toUpperCase())
+  .refine((c) => SUPPORTED_CURRENCIES.some((s) => s.code === c), {
+    message: `Unsupported currency. Use one of: ${SUPPORTED_CURRENCIES.map((s) => s.code).join(", ")}`,
+  });
+
+async function assertTaxRegimeExists(
+  db: { taxRegime: { findUnique: (a: { where: { id: string } }) => Promise<unknown> } },
+  id: string | null | undefined
+) {
+  if (!id) return;
+  if (!(await db.taxRegime.findUnique({ where: { id } }))) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Tax regime not found" });
+  }
+}
+
 export const orgRouter = createTRPCRouter({
   getCurrencies: publicProcedure.query(() => SUPPORTED_CURRENCIES),
 
@@ -49,9 +68,15 @@ export const orgRouter = createTRPCRouter({
       const userId = ctx.session.user.id;
 
       // Guard: user must exist in DB (JWT can be stale after a DB reset or account deletion)
-      const userExists = await ctx.db.user.findUnique({ where: { id: userId }, select: { id: true } });
+      const userExists = await ctx.db.user.findUnique({
+        where: { id: userId },
+        select: { id: true },
+      });
       if (!userExists) {
-        throw new TRPCError({ code: "UNAUTHORIZED", message: "User account not found. Please sign out and sign in again." });
+        throw new TRPCError({
+          code: "UNAUTHORIZED",
+          message: "User account not found. Please sign out and sign in again.",
+        });
       }
 
       let org = await ctx.db.organisation.findFirst({
@@ -87,7 +112,7 @@ export const orgRouter = createTRPCRouter({
   setupStep2: protectedProcedure
     .input(
       z.object({
-        currency: z.string().length(3),
+        currency: currencyCode,
         taxRegimeId: z.string().optional(),
         fiscalYearStartMonth: z.number().min(1).max(12),
       })
@@ -100,6 +125,7 @@ export const orgRouter = createTRPCRouter({
       if (!user?.organisationId) {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Complete step 1 first" });
       }
+      await assertTaxRegimeExists(ctx.db, input.taxRegimeId);
 
       const org = await ctx.db.organisation.update({
         where: { id: user.organisationId },
@@ -145,7 +171,10 @@ export const orgRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       if (ctx.user.role !== "OWNER") {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Only the organisation owner can update these settings." });
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only the organisation owner can update these settings.",
+        });
       }
       return ctx.db.organisation.update({
         where: { id: ctx.organisationId },
@@ -154,12 +183,18 @@ export const orgRouter = createTRPCRouter({
     }),
 
   setCurrency: orgProcedure
-    .input(z.object({ currency: z.string().min(3).max(3) }))
+    .input(z.object({ currency: currencyCode }))
     .mutation(async ({ ctx, input }) => {
       if (ctx.user.role !== "OWNER") {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Only the organisation owner can change the currency." });
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only the organisation owner can change the currency.",
+        });
       }
-      await ctx.db.organisation.update({ where: { id: ctx.organisationId }, data: { currency: input.currency } });
+      await ctx.db.organisation.update({
+        where: { id: ctx.organisationId },
+        data: { currency: input.currency },
+      });
       return { success: true };
     }),
 
@@ -167,9 +202,16 @@ export const orgRouter = createTRPCRouter({
     .input(z.object({ taxRegimeId: z.string().nullable() }))
     .mutation(async ({ ctx, input }) => {
       if (ctx.user.role !== "OWNER") {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Only the organisation owner can change the tax regime." });
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only the organisation owner can change the tax regime.",
+        });
       }
-      await ctx.db.organisation.update({ where: { id: ctx.organisationId }, data: { taxRegimeId: input.taxRegimeId } });
+      await assertTaxRegimeExists(ctx.db, input.taxRegimeId);
+      await ctx.db.organisation.update({
+        where: { id: ctx.organisationId },
+        data: { taxRegimeId: input.taxRegimeId },
+      });
       return { success: true };
     }),
 
@@ -177,7 +219,10 @@ export const orgRouter = createTRPCRouter({
     .input(z.object({ jurisdiction: z.string().nullable() }))
     .mutation(async ({ ctx, input }) => {
       if (ctx.user.role !== "OWNER") {
-        throw new TRPCError({ code: "FORBIDDEN", message: "Only the organisation owner can change the tax jurisdiction." });
+        throw new TRPCError({
+          code: "FORBIDDEN",
+          message: "Only the organisation owner can change the tax jurisdiction.",
+        });
       }
       await ctx.db.organisation.update({
         where: { id: ctx.organisationId },
@@ -250,4 +295,3 @@ export const orgRouter = createTRPCRouter({
     return { success: true, count };
   }),
 });
-

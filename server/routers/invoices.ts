@@ -11,6 +11,7 @@ import {
 } from "@/server/services/invoice.service";
 import { sendInvoiceEmail } from "@/server/services/email.service";
 import { writeAuditLog } from "@/server/services/audit.service";
+import { assertOwnContact } from "@/server/services/ownership";
 import { formatDate, formatCurrency } from "@/lib/utils";
 import { Prisma } from "@prisma/client";
 import { clearAccountingSampleData } from "@/lib/accounting-sample-data";
@@ -136,6 +137,7 @@ export const invoicesRouter = createTRPCRouter({
       if (existing.status !== "DRAFT") {
         throw new TRPCError({ code: "BAD_REQUEST", message: "Only draft invoices can be edited" });
       }
+      await assertOwnContact(ctx.db, ctx.organisationId, input.contactId);
 
       const { id, lines, ...data } = input;
       const totals = lines ? calcInvoiceTotals(lines) : null;

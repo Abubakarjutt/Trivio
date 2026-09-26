@@ -535,7 +535,41 @@ model ChatMessage {
   attachment     Attachment?      @relation(fields: [attachmentId], references: [id])
   createdAt      DateTime         @default(now())
 
+  pendingActions ChatPendingAction[]
+
   @@index([conversationId])
+}
+
+enum ChatActionStatus {
+  PENDING
+  EXECUTING
+  APPROVED
+  REJECTED
+  FAILED
+}
+
+// A data-changing action the AI chat proposed. Nothing is written until the
+// user approves it (CLAUDE.md: AI output always needs user confirmation).
+model ChatPendingAction {
+  id             String           @id @default(cuid())
+  organisationId String
+  userId         String
+  conversationId String
+  messageId      String
+  message        ChatMessage      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  tool           String
+  args           Json
+  preview        Json             // { title, fields: [{ label, value }] }
+  status         ChatActionStatus @default(PENDING)
+  result         Json?
+  summary        String?
+  error          String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@index([messageId])
+  @@index([conversationId])
+  @@index([organisationId, status])
 }
 
 // ─── Personal Finance (EasyFinance module) ────────────────────────────────────

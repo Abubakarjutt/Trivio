@@ -1,6 +1,7 @@
 import { type PrismaClient, type InvoiceStatus, Prisma } from "@prisma/client";
 import { TRPCError } from "@trpc/server";
 import { createJournalEntry, voidJournalEntry } from "./accounting.service";
+import { assertOwnContact } from "./ownership";
 
 export interface InvoiceLineInput {
   description: string;
@@ -22,7 +23,10 @@ export interface CreateInvoiceInput {
 }
 
 // Auto-generates next invoice number: INV-0001, INV-0002, …
-export async function getNextInvoiceNumber(db: PrismaClient, organisationId: string): Promise<string> {
+export async function getNextInvoiceNumber(
+  db: PrismaClient,
+  organisationId: string
+): Promise<string> {
   const last = await db.invoice.findFirst({
     where: { organisationId },
     orderBy: { createdAt: "desc" },
@@ -48,6 +52,7 @@ export function calcInvoiceTotals(lines: InvoiceLineInput[]) {
 }
 
 export async function createInvoice(db: PrismaClient, input: CreateInvoiceInput) {
+  await assertOwnContact(db, input.organisationId, input.contactId);
   const number = await getNextInvoiceNumber(db, input.organisationId);
   const { subtotal, taxAmount, totalAmount } = calcInvoiceTotals(input.lines);
 
@@ -91,7 +96,8 @@ export async function postInvoiceToLedger(
     include: { lines: true },
   });
   if (!invoice) throw new TRPCError({ code: "NOT_FOUND" });
-  if (invoice.journalEntryId) throw new TRPCError({ code: "BAD_REQUEST", message: "Already posted" });
+  if (invoice.journalEntryId)
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Already posted" });
 
   // Find AR, income, and tax accounts
   const [arAccount, incomeAccount, taxAccount] = await Promise.all([
@@ -101,7 +107,16 @@ export async function postInvoiceToLedger(
   ]);
 
   if (!arAccount || !incomeAccount) {
-    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Required accounts not found in chart of accounts" });
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "Required accounts not found in chart of accounts",
+    });
+  }
+  if (Number(invoice.taxAmount) > 0 && !taxAccount) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "This invoice has tax but no Tax Payable account (2200) exists",
+    });
   }
 
   const subtotal = Number(invoice.subtotal);
@@ -113,7 +128,11 @@ export async function postInvoiceToLedger(
     { accountId: incomeAccount.id, credit: subtotal, description: `Income: ${invoice.number}` },
   ];
   if (taxAmount > 0 && taxAccount) {
-    lines.push({ accountId: taxAccount.id, credit: taxAmount, description: `Tax: ${invoice.number}` });
+    lines.push({
+      accountId: taxAccount.id,
+      credit: taxAmount,
+      description: `Tax: ${invoice.number}`,
+    });
   }
 
   const entry = await createJournalEntry(db, {
@@ -150,49 +169,64 @@ export async function recordInvoicePayment(
 ) {
   // Wrap the read-modify-write in a serializable transaction to prevent
   // concurrent payments from double-counting amountPaid.
-  return db.$transaction(async (tx) => {
-    const invoice = await tx.invoice.findFirst({
-      where: { id: params.invoiceId, organisationId: params.organisationId },
-    });
-    if (!invoice) throw new TRPCError({ code: "NOT_FOUND" });
-    if (invoice.status === "VOID") throw new TRPCError({ code: "BAD_REQUEST", message: "Cannot pay a voided invoice" });
+  return db.$transaction(
+    async (tx) => {
+      const invoice = await tx.invoice.findFirst({
+        where: { id: params.invoiceId, organisationId: params.organisationId },
+      });
+      if (!invoice) throw new TRPCError({ code: "NOT_FOUND" });
+      if (invoice.status === "VOID")
+        throw new TRPCError({ code: "BAD_REQUEST", message: "Cannot pay a voided invoice" });
 
-    const arAccount = await tx.chartAccount.findFirst({
-      where: { organisationId: params.organisationId, code: "1200" },
-    });
-    if (!arAccount) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "AR account not found" });
+      const arAccount = await tx.chartAccount.findFirst({
+        where: { organisationId: params.organisationId, code: "1200" },
+      });
+      if (!arAccount)
+        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "AR account not found" });
 
-    const entry = await createJournalEntry(tx as unknown as PrismaClient, {
-      organisationId: params.organisationId,
-      userId: params.userId,
-      date: params.date,
-      description: `Payment: ${invoice.number}`,
-      reference: params.reference ?? invoice.number,
-      source: "INVOICE",
-      sourceId: invoice.id,
-      lines: [
-        { accountId: params.cashAccountId, debit: params.amount, description: `Payment received: ${invoice.number}` },
-        { accountId: arAccount.id, credit: params.amount, description: `AR cleared: ${invoice.number}` },
-      ],
-    });
+      const entry = await createJournalEntry(tx as unknown as PrismaClient, {
+        organisationId: params.organisationId,
+        userId: params.userId,
+        date: params.date,
+        description: `Payment: ${invoice.number}`,
+        reference: params.reference ?? invoice.number,
+        source: "INVOICE",
+        sourceId: invoice.id,
+        lines: [
+          {
+            accountId: params.cashAccountId,
+            debit: params.amount,
+            description: `Payment received: ${invoice.number}`,
+          },
+          {
+            accountId: arAccount.id,
+            credit: params.amount,
+            description: `AR cleared: ${invoice.number}`,
+          },
+        ],
+      });
 
-    const newAmountPaid = Number(invoice.amountPaid) + params.amount;
-    const totalAmount = Number(invoice.totalAmount);
-    const newStatus: InvoiceStatus =
-      newAmountPaid >= totalAmount - 0.001 ? "PAID"
-      : newAmountPaid > 0 ? "PARTIAL"
-      : invoice.status;
+      const newAmountPaid = Number(invoice.amountPaid) + params.amount;
+      const totalAmount = Number(invoice.totalAmount);
+      const newStatus: InvoiceStatus =
+        newAmountPaid >= totalAmount - 0.001
+          ? "PAID"
+          : newAmountPaid > 0
+            ? "PARTIAL"
+            : invoice.status;
 
-    await tx.invoice.update({
-      where: { id: params.invoiceId },
-      data: {
-        amountPaid: new Prisma.Decimal(newAmountPaid),
-        status: newStatus,
-      },
-    });
+      await tx.invoice.update({
+        where: { id: params.invoiceId },
+        data: {
+          amountPaid: new Prisma.Decimal(newAmountPaid),
+          status: newStatus,
+        },
+      });
 
-    return entry;
-  }, { isolationLevel: "Serializable" });
+      return entry;
+    },
+    { isolationLevel: "Serializable" }
+  );
 }
 
 // Void invoice: reverse the posting entry plus all payment entries, then mark as void
@@ -207,7 +241,8 @@ export async function voidInvoice(
     where: { id: invoiceId, organisationId },
   });
   if (!invoice) throw new TRPCError({ code: "NOT_FOUND" });
-  if (invoice.status === "VOID") throw new TRPCError({ code: "BAD_REQUEST", message: "Already voided" });
+  if (invoice.status === "VOID")
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Already voided" });
 
   // Reverse the original posting entry (Dr AR / Cr Income)
   if (invoice.journalEntryId) {

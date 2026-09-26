@@ -3,12 +3,18 @@ import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, orgProcedure } from "@/server/trpc";
 import { createManualPfTransaction } from "@/server/services/pf-transaction.service";
 
-/** Convert a "YYYY-MM" string into an inclusive [gte, lt) date range. */
+/**
+ * Convert a "YYYY-MM" string into an inclusive [gte, lt) date range.
+ * `date` is a DATE column and Prisma sends a bound's UTC calendar date, so the
+ * bounds must be UTC midnight — local-midnight bounds east of UTC (e.g.
+ * Pakistan) become "last day of the previous month", dropping the month's
+ * final day from its own view.
+ */
 function monthRange(month: string): { gte: Date; lt: Date } {
   const [y, m] = month.split("-").map(Number);
   return {
-    gte: new Date(y, m - 1, 1),
-    lt: new Date(y, m, 1),
+    gte: new Date(Date.UTC(y, m - 1, 1)),
+    lt: new Date(Date.UTC(y, m, 1)),
   };
 }
 

@@ -67,9 +67,9 @@ export async function getProfitAndLoss(
           lte: range.to,
         },
       },
+      // Archived accounts still hold posted balances — reports must include them.
       account: {
         type: { in: ["INCOME", "EXPENSE"] },
-        isArchived: false,
       },
     },
     include: {
@@ -136,10 +136,9 @@ export async function getBalanceSheet(
         isVoid: false,
         date: { lte: asOf },
       },
-      account: {
-        type: { in: ["ASSET", "LIABILITY", "EQUITY"] },
-        isArchived: false,
-      },
+      // Income/expense are included so un-closed profit can be shown as
+      // current-period earnings — without it the sheet can never balance.
+      // Archived accounts still hold posted balances, so they count too.
     },
     include: {
       account: {
@@ -173,8 +172,17 @@ export async function getBalanceSheet(
   let totalLiabilities = new Prisma.Decimal(0);
   let totalEquity = new Prisma.Decimal(0);
 
+  let currentEarnings = new Prisma.Decimal(0);
   for (const [, acct] of accountMap) {
     let total: Prisma.Decimal;
+    if (acct.type === "INCOME") {
+      currentEarnings = currentEarnings.plus(acct.credit.minus(acct.debit));
+      continue;
+    }
+    if (acct.type === "EXPENSE") {
+      currentEarnings = currentEarnings.minus(acct.debit.minus(acct.credit));
+      continue;
+    }
     if (acct.type === "ASSET") {
       // Asset: debit-normal
       total = acct.debit.minus(acct.credit);
@@ -197,6 +205,18 @@ export async function getBalanceSheet(
   liabilities.sort((a, b) => a.code.localeCompare(b.code));
   equity.sort((a, b) => a.code.localeCompare(b.code));
 
+  // Income and expense are never closed into retained earnings, so the net
+  // profit to date belongs in equity for Assets = Liabilities + Equity.
+  if (!currentEarnings.isZero()) {
+    equity.push({
+      code: "",
+      name: "Current Year Earnings",
+      type: "EQUITY" as AccountType,
+      total: currentEarnings,
+    });
+    totalEquity = totalEquity.plus(currentEarnings);
+  }
+
   return { assets, liabilities, equity, totalAssets, totalLiabilities, totalEquity };
 }
 
@@ -214,9 +234,6 @@ export async function getTrialBalance(
           gte: range.from,
           lte: range.to,
         },
-      },
-      account: {
-        isArchived: false,
       },
     },
     include: {

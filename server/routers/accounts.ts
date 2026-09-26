@@ -3,6 +3,17 @@ import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, orgProcedure } from "@/server/trpc";
 import { writeAuditLog } from "@/server/services/audit.service";
 
+// A parent must be one of this organisation's own accounts.
+async function assertOwnParent(
+  db: { chartAccount: { findFirst: (a: object) => Promise<unknown> } },
+  organisationId: string,
+  parentId: string | null | undefined
+) {
+  if (!parentId) return;
+  const parent = await db.chartAccount.findFirst({ where: { id: parentId, organisationId } });
+  if (!parent) throw new TRPCError({ code: "BAD_REQUEST", message: "Parent account not found" });
+}
+
 export const accountsRouter = createTRPCRouter({
   list: orgProcedure
     .input(
@@ -50,6 +61,7 @@ export const accountsRouter = createTRPCRouter({
       if (existing) {
         throw new TRPCError({ code: "CONFLICT", message: `Account code ${input.code} already exists` });
       }
+      await assertOwnParent(ctx.db, ctx.organisationId, input.parentId);
 
       const account = await ctx.db.chartAccount.create({
         data: {
@@ -91,6 +103,10 @@ export const accountsRouter = createTRPCRouter({
       if (!existing) throw new TRPCError({ code: "NOT_FOUND" });
       if (existing.isSystem) {
         throw new TRPCError({ code: "FORBIDDEN", message: "System accounts cannot be modified" });
+      }
+      await assertOwnParent(ctx.db, ctx.organisationId, input.parentId);
+      if (input.parentId === input.id) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "An account cannot be its own parent" });
       }
 
       const updated = await ctx.db.chartAccount.update({
