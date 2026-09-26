@@ -46,7 +46,21 @@ const PAGES = [
 ];
 
 test.beforeAll(async ({ browser }) => {
-  page = await browser.newPage();
+  const context = await browser.newContext({ permissions: ["microphone"] });
+  // A synthetic microphone (a 440 Hz tone) behind the real getUserMedia API,
+  // so voice input is testable without the OS mic prompt. Recording, WAV
+  // conversion, upload and transcription all run for real.
+  await context.addInitScript(() => {
+    navigator.mediaDevices.getUserMedia = async () => {
+      const ctx = new AudioContext();
+      const osc = ctx.createOscillator();
+      const out = ctx.createMediaStreamDestination();
+      osc.connect(out);
+      osc.start();
+      return out.stream;
+    };
+  });
+  page = await context.newPage();
 });
 
 test("sign up and onboard like a new user", async () => {
@@ -136,4 +150,44 @@ test("a rejected chat card saves nothing", async () => {
   await expect(page.getByText(/Rejected — nothing was saved/)).toBeVisible();
   await page.reload();
   await expect(page.locator("main").getByText("Casino")).toHaveCount(0);
+});
+
+test("voice input: off by default, turned on in Settings, speech lands in the chat box", async () => {
+  await page.goto("/pf/transactions");
+  await page.getByRole("button", { name: "Open AI assistant" }).click();
+  await expect(page.getByPlaceholder("Ask me anything...")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Speak your message" })).toHaveCount(0);
+
+  await page.goto("/settings");
+  const toggle = page.getByRole("switch", { name: "Voice input" });
+  await expect(toggle).toHaveAttribute("aria-checked", "false");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByText(/Ready — use the mic button/)).toBeVisible();
+  await page.getByRole("radio", { name: "Urdu", exact: true }).click();
+  await expect(page.getByRole("radio", { name: "Urdu", exact: true })).toHaveAttribute("aria-checked", "true");
+
+  await page.goto("/pf/transactions");
+  const input = page.getByPlaceholder("Ask me anything...");
+  if (!(await input.isVisible())) await page.getByRole("button", { name: "Open AI assistant" }).click();
+  await page.getByRole("button", { name: "Speak your message" }).click();
+  await expect(page.getByRole("button", { name: /Stop recording/ })).toBeVisible();
+  await page.waitForTimeout(1200);
+  await page.getByRole("button", { name: /Stop recording/ }).click();
+  // The transcript is put in the box for the user to check — not sent.
+  await expect(input).toHaveValue("I spent 12 at Florist");
+  await expect(page.getByRole("button", { name: "Approve", exact: true })).toHaveCount(0);
+
+  await input.press("Enter");
+  await page.getByRole("button", { name: "Approve", exact: true }).click();
+  await expect(page.locator("main").getByText("Florist").first()).toBeVisible();
+
+  // Turning it off removes the mic.
+  await page.goto("/settings");
+  await page.getByRole("switch", { name: "Voice input" }).click();
+  await expect(page.getByRole("switch", { name: "Voice input" })).toHaveAttribute("aria-checked", "false");
+  await page.goto("/pf/transactions");
+  if (!(await input.isVisible())) await page.getByRole("button", { name: "Open AI assistant" }).click();
+  await expect(input).toBeVisible();
+  await expect(page.getByRole("button", { name: "Speak your message" })).toHaveCount(0);
 });

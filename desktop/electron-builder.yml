@@ -79,6 +79,14 @@ extraResources:
       - "VERSION"
       - "MANIFEST.json"
       - "!**/.DS_Store"
+  # The local speech-to-text engine for chat voice input (built by
+  # `npm run fetch:whisper`). main.ts passes <resources>/whisper/bin/whisper-cli
+  # to the server as WHISPER_BIN; the speech model is downloaded at runtime.
+  - from: desktop/whisper
+    to: whisper
+    filter:
+      - "bin/**/*"
+      - "VERSION"
 
 dmg:
   artifactName: "${productName}-${version}-${arch}.${ext}"
@@ -97,6 +105,10 @@ mac:
   gatekeeperAssess: false
   entitlements: desktop/entitlements.mac.plist
   entitlementsInherit: desktop/entitlements.mac.inherit.plist
+  # Voice input in the AI chat records from the microphone; macOS shows this
+  # text in its permission prompt (and blocks the mic without it).
+  extendInfo:
+    NSMicrophoneUsageDescription: "Trivio uses the microphone when you speak to the AI assistant. Speech is transcribed on this Mac and never sent anywhere."
   icon: desktop/build/icon.icns
   # Apple Silicon first (build host is arm64). A universal/x64 target is intentionally
   # NOT built by CI: fetch:pg lays down a single-arch Postgres engine, so a

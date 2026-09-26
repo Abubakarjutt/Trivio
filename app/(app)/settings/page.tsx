@@ -8,6 +8,7 @@ import { PrivacyTab } from "./_components/privacy-tab";
 import { JurisdictionPicker } from "./_components/jurisdiction-picker";
 import { CurrencyPicker } from "./_components/currency-picker";
 import { TaxRegimePicker } from "./_components/tax-regime-picker";
+import { VoiceInputCard } from "./_components/voice-input-card";
 
 export default async function SettingsPage() {
   const session = await auth();
@@ -139,6 +140,9 @@ export default async function SettingsPage() {
               </div>
             </div>
           </div>
+
+          {/* Voice input for the AI assistant */}
+          <VoiceInputCard />
 
           {/* Email Import */}
           {emailImportToken && (

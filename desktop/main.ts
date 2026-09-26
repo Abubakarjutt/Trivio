@@ -307,6 +307,16 @@ async function startLocalServer(): Promise<string> {
   // applyOllamaToServerEnv for why this must run before the child process spawns.
   applyOllamaToServerEnv(env);
 
+  // Voice input (server/services/voice.service.ts): the bundled whisper.cpp
+  // engine, and where its speech model is downloaded (survives app updates).
+  if (!env.WHISPER_BIN) {
+    const exe = process.platform === "win32" ? "whisper-cli.exe" : "whisper-cli";
+    env.WHISPER_BIN = app.isPackaged
+      ? join(process.resourcesPath, "whisper", "bin", exe)
+      : join(appRoot(), "desktop", "whisper", "bin", exe);
+  }
+  if (!env.WHISPER_HOME) env.WHISPER_HOME = join(app.getPath("userData"), "whisper");
+
   // ── Database ──────────────────────────────────────────────────────────────
   // By default the desktop app owns its OWN embedded Postgres inside the user's
   // data dir (see desktop/embedded/embedded-db.ts) — no external server, no

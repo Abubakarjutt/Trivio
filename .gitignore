@@ -61,6 +61,9 @@ storage/
 /desktop/embedded/VERSION
 /desktop/embedded/MANIFEST.json
 /desktop/embedded/.dl/
+# Produced by `npm run fetch:whisper`; speech models downloaded in dev.
+/desktop/whisper/
+/.whisper/
 
 # agent/dev scratch (machine-local, not for public repo)
 .superpowers/

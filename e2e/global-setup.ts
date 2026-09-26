@@ -5,7 +5,7 @@
 //     becomes an add_pf_transaction proposal — so chat cards are deterministic;
 //   • `next dev` wired to both, with the desktop app's server flags.
 // The base URL is handed to the tests via E2E_BASE_URL.
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -98,6 +98,12 @@ export default async function globalSetup() {
   await seedTaxRegimes(prisma);
   await prisma.$disconnect();
 
+  // Voice input: the fake engine "hears" a fixed sentence; the speech model is
+  // already in place so no download happens.
+  const whisperHome = join(work, "whisper");
+  mkdirSync(join(whisperHome, "models"), { recursive: true });
+  writeFileSync(join(whisperHome, "models", "ggml-small-q5_1.bin"), "e2e model");
+
   const ollama = await startStubOllama();
   const baseURL = `http://127.0.0.1:${PORT}`;
   const next = spawn(
@@ -122,6 +128,9 @@ export default async function globalSetup() {
         GEMINI_API_KEY: "",
         RESEND_API_KEY: "",
         STRIPE_SECRET_KEY: "",
+        WHISPER_BIN: join(repo, "tests", "fixtures", "fake-whisper.mjs"),
+        WHISPER_HOME: whisperHome,
+        FAKE_WHISPER_TEXT: "I spent 12 at Florist",
       },
       stdio: process.env.E2E_VERBOSE ? "inherit" : "ignore",
     }

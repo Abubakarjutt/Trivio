@@ -6,6 +6,7 @@ import { trpc } from "@/lib/trpc/client";
 import { useToast } from "@/lib/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { VoiceInputButton } from "./voice-input-button";
 import {
   MessageSquare,
   X,
@@ -1621,6 +1622,14 @@ export function ChatPanel() {
                 onChange={(e) => setInput(e.target.value)}
                 disabled={isStreaming}
                 className="flex-1 text-sm"
+              />
+              <VoiceInputButton
+                active={isOpen}
+                disabled={isStreaming}
+                onTranscript={(text) => {
+                  setInput((prev) => (prev.trim() ? `${prev.trimEnd()} ${text}` : text));
+                  inputRef.current?.focus();
+                }}
               />
               <Button
                 type="submit"

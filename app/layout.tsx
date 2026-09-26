@@ -3,6 +3,7 @@ import { Fraunces, DM_Sans, DM_Mono } from "next/font/google";
 import "./globals.css";
 import { TRPCReactProvider } from "@/lib/trpc/provider";
 import { Toaster } from "@/components/ui/toaster";
+import { Toaster as SonnerToaster } from "sonner";
 
 const fraunces = Fraunces({
   subsets: ["latin"],
@@ -39,6 +40,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <TRPCReactProvider>
           {children}
           <Toaster />
+          {/* Many pages report success/errors via sonner's toast() — it needs this. */}
+          <SonnerToaster richColors position="bottom-right" />
         </TRPCReactProvider>
       </body>
     </html>

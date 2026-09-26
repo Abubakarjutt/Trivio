@@ -12,6 +12,7 @@ import { reportsRouter } from "@/server/routers/reports";
 import { subscriptionRouter } from "@/server/routers/subscription";
 import { dashboardRouter } from "@/server/routers/dashboard";
 import { chatRouter } from "@/server/routers/chat";
+import { voiceRouter } from "@/server/routers/voice";
 import { gdprRouter } from "@/server/routers/gdpr";
 // EasyFinance module
 import { statementTransactionsRouter } from "./routers/statementTransactions";
@@ -42,6 +43,7 @@ export const appRouter = createTRPCRouter({
   subscription: subscriptionRouter,
   dashboard: dashboardRouter,
   chat: chatRouter,
+  voice: voiceRouter,
   gdpr: gdprRouter,
   // EasyFinance module
   statementTransactions: statementTransactionsRouter,

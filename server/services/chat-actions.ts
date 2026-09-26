@@ -14,6 +14,7 @@ const DENYLIST: (string | RegExp)[] = [
   /^auth\./, // sign-up / session
   /^subscription\./, // Stripe checkout & billing portal
   /^chat\./, // the chat's own conversation plumbing
+  /^voice\./, // mic settings + a large model download — Settings only
   "gdpr.deleteAccount", // irreversible account wipe — UI only
   "gdpr.purgeOldChatMessages",
   "gdpr.recordConsent", // consent must come from the human, not the model
