@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, orgProcedure } from "@/server/trpc";
+import { createManualPfTransaction } from "@/server/services/pf-transaction.service";
 
 /** Convert a "YYYY-MM" string into an inclusive [gte, lt) date range. */
 function monthRange(month: string): { gte: Date; lt: Date } {
@@ -73,44 +74,10 @@ export const statementTransactionsRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      // Manually-added transactions still need a batch to belong to
-      // (importBatchId is required) — reuse a single "Manual entries" batch
-      // per organisation instead of creating one per transaction.
-      let batch = await ctx.db.statementImportBatch.findFirst({
-        where: { organisationId: ctx.organisationId, fileType: "MANUAL" },
+      return createManualPfTransaction(ctx.db, ctx.organisationId, {
+        ...input,
+        date: new Date(input.date),
       });
-      if (!batch) {
-        batch = await ctx.db.statementImportBatch.create({
-          data: {
-            organisationId: ctx.organisationId,
-            filename: "Manual entries",
-            fileType: "MANUAL",
-            status: "DONE",
-          },
-        });
-      }
-
-      const txn = await ctx.db.statementTransaction.create({
-        data: {
-          organisationId: ctx.organisationId,
-          importBatchId: batch.id,
-          date: new Date(input.date),
-          description: input.description,
-          merchantName: input.merchantName,
-          amount: input.amount,
-          type: input.type,
-          category: input.category,
-          mccCode: input.mccCode ?? "",
-          mccLabel: input.mccLabel ?? "",
-        },
-      });
-
-      await ctx.db.statementImportBatch.update({
-        where: { id: batch.id },
-        data: { transactionCount: { increment: 1 } },
-      });
-
-      return txn;
     }),
 
   updateCategory: orgProcedure

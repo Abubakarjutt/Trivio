@@ -5,7 +5,9 @@ import { db } from "@/lib/db";
 import {
   buildChatMessages,
   executeToolCall,
+  formatToolResultsForModel,
   parseToolCalls,
+  type ToolCall,
   type ToolResult,
 } from "@/server/services/chat.service";
 import { chatRateLimiter } from "@/server/middleware/rateLimit";
@@ -138,6 +140,14 @@ function buildToolSummary(toolResults: ToolResult[]): string {
         case "get_ar_aging":
         case "get_ap_aging":
           return "";
+        case "add_pf_transaction":
+          return `✓ ${d?.type === "INCOME" ? "Income" : "Expense"} recorded — ${d?.merchantName}: ${d?.amount} (${d?.category}, ${d?.date})`;
+        case "app_action": {
+          const a = d as { action?: string; kind?: string } | undefined;
+          if (a?.kind === "query") return "";
+          const [area, proc] = String(a?.action ?? "").split(".");
+          return `✓ ${proc?.replace(/([A-Z])/g, " $1").toLowerCase()} (${area}) done`;
+        }
         case "create_watchlist":
           return `✓ Watchlist "${d?.name}" created — alert when ${d?.category} exceeds $${d?.threshold} per ${String(d?.period ?? "").toLowerCase()}`;
         case "list_budgets":
@@ -299,28 +309,64 @@ async function runOllama(params: {
 
 // ── Shared post-processing ─────────────────────────────────────────────────────
 
-async function finishTurn(params: {
+// Max model calls per user message. Each extra round lets the model read the
+// data it asked for (e.g. look up an id) and then act on it.
+const MAX_AGENT_ROUNDS = 4;
+
+type ChatMsg = { role: string; content: string };
+
+async function runAgentLoop(params: {
   conversationId: string;
   userOrgId: string;
   userId: string;
-  responseText: string;
+  chatMsgs: ChatMsg[];
+  runModel: (chatMsgs: ChatMsg[]) => Promise<ProviderTurn>;
   nonce: string;
   sendEvent: (event: string, data: unknown) => void;
   close: () => void;
 }): Promise<void> {
-  const { conversationId, userOrgId, userId, responseText, nonce, sendEvent, close } = params;
-
-  sendEvent("token", { content: responseText });
-
-  const { text, toolCalls } = parseToolCalls(responseText, nonce);
+  const { conversationId, userOrgId, userId, runModel, nonce, sendEvent, close } = params;
+  const msgs = [...params.chatMsgs];
+  const toolCalls: ToolCall[] = [];
   const toolResults: ToolResult[] = [];
+  // Calls that already succeeded this turn — never run the same write twice
+  // just because the model repeated itself in a follow-up round.
+  const succeeded = new Set<string>();
+  let text = "";
 
-  if (toolCalls.length > 0) {
-    for (const call of toolCalls) {
+  for (let round = 1; round <= MAX_AGENT_ROUNDS; round++) {
+    if (round > 1) sendEvent("thinking", {});
+    const turn = await runModel(msgs);
+    const parsed = parseToolCalls(turn.text, nonce);
+    if (parsed.text) text = parsed.text;
+
+    const fresh = parsed.toolCalls.filter((c) => !succeeded.has(JSON.stringify([c.tool, c.args])));
+    // Done when the model answers without calling anything new.
+    if (fresh.length === 0) break;
+
+    const roundResults: ToolResult[] = [];
+    for (const call of fresh) {
       const result = await executeToolCall(db, userOrgId, userId, call);
-      toolResults.push(result);
+      if (result.success) succeeded.add(JSON.stringify([call.tool, call.args]));
+      roundResults.push(result);
     }
+    toolCalls.push(...fresh);
+    // A failure the model then recovers from shouldn't show as a red card —
+    // drop earlier rounds' failures, keep this round's.
+    for (let i = toolResults.length - 1; i >= 0; i--) {
+      if (!toolResults[i].success) toolResults.splice(i, 1);
+    }
+    toolResults.push(...roundResults);
+
+    // Always let the model see what happened: a read gives it data to act
+    // on, and a write's result carries ids a multi-step request needs next
+    // (e.g. create a pipeline, then add its stages).
+    if (round === MAX_AGENT_ROUNDS) break;
+    msgs.push({ role: "assistant", content: turn.text });
+    msgs.push({ role: "user", content: formatToolResultsForModel(roundResults, nonce) });
   }
+
+  sendEvent("token", { content: text });
 
   const summary = buildToolSummary(toolResults);
   const finalContent = summary ? `${text}\n\n${summary}`.trim() : text;
@@ -428,25 +474,10 @@ export async function POST(req: NextRequest) {
         const chatMsgs = messages.filter((m) => m.role !== "system");
 
         // ── Provider selection ─────────────────────────────────────────────
-        if (AI_PROVIDER === "ollama") {
-          // Local Gemma via the desktop's Ollama. If it isn't reachable yet the
-          // provider throws NeedsSetupError, which we surface as a `needs_setup`
-          // error event so the UI can prompt the user to finish setup.
-          const turn = await runOllama({ systemMsg, chatMsgs });
-          await finishTurn({
-            conversationId,
-            userOrgId: user.organisationId!,
-            userId: user.id,
-            responseText: turn.text,
-            nonce,
-            sendEvent,
-            close: () => controller.close(),
-          });
-          return;
-        }
-
-        // ── Gemini (cloud — used when the provider is "gemini") ─────────────────────────────────────────
-        if (!GEMINI_API_KEY) {
+        // Local Gemma via the desktop's Ollama. If it isn't reachable yet the
+        // provider throws NeedsSetupError, which we surface as a `needs_setup`
+        // error event so the UI can prompt the user to finish setup.
+        if (AI_PROVIDER !== "ollama" && !GEMINI_API_KEY) {
           sendEvent("error", {
             code: "needs_setup",
             message: "AI chat is not configured. Please set GEMINI_API_KEY.",
@@ -454,17 +485,22 @@ export async function POST(req: NextRequest) {
           controller.close();
           return;
         }
+        const runModel = (msgs: ChatMsg[]) =>
+          AI_PROVIDER === "ollama"
+            ? runOllama({ systemMsg, chatMsgs: msgs })
+            : runGemini({ systemMsg, chatMsgs: msgs });
 
-        const turn = await runGemini({ systemMsg, chatMsgs });
-        await finishTurn({
+        await runAgentLoop({
           conversationId,
           userOrgId: user.organisationId!,
           userId: user.id,
-          responseText: turn.text,
+          chatMsgs,
+          runModel,
           nonce,
           sendEvent,
           close: () => controller.close(),
         });
+        return;
       } catch (err) {
         if (err instanceof NeedsSetupError) {
           sendEvent("error", { code: "needs_setup", message: err.message });

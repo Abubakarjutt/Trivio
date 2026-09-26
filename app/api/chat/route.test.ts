@@ -19,6 +19,7 @@ vi.mock("@/server/services/chat.service", () => ({
   buildChatMessages: vi.fn().mockResolvedValue({ messages: [], nonce: "abc" }),
   parseToolCalls: vi.fn().mockReturnValue({ text: "AI response", toolCalls: [] }),
   executeToolCall: vi.fn(),
+  formatToolResultsForModel: vi.fn().mockReturnValue("TOOL_RESULTS"),
 }));
 
 vi.mock("@/server/middleware/rateLimit", () => ({
@@ -332,6 +333,7 @@ describe("POST /api/chat (with GEMINI_API_KEY configured)", () => {
       buildChatMessages: vi.fn().mockResolvedValue({ messages: [], nonce: "abc" }),
       parseToolCalls: vi.fn().mockReturnValue({ text: "AI response", toolCalls: [] }),
       executeToolCall: vi.fn(),
+      formatToolResultsForModel: vi.fn().mockReturnValue("TOOL_RESULTS"),
     }));
     vi.mock("@/server/middleware/rateLimit", () => ({
       chatRateLimiter: vi.fn().mockResolvedValue(undefined),
@@ -447,6 +449,66 @@ describe("POST /api/chat (with GEMINI_API_KEY configured)", () => {
     expect(data.toolCalls).toHaveLength(1);
   });
 
+  it("feeds tool results back to the model and runs a second round", async () => {
+    const svc = await import("@/server/services/chat.service");
+    const lookup = { tool: "contacts.list", args: {} };
+    vi.mocked(svc.parseToolCalls)
+      .mockReturnValueOnce({ text: "", toolCalls: [lookup] })
+      .mockReturnValueOnce({ text: "You have 2 contacts.", toolCalls: [] });
+    vi.mocked(svc.executeToolCall).mockResolvedValue({
+      tool: "app_action",
+      success: true,
+      data: { action: "contacts.list", kind: "query", result: [] },
+    } as never);
+
+    const res = await POST_WITH_KEY(makeReq({ message: "how many contacts?" }));
+    const events = await readSSE(res);
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    const secondBody = JSON.parse(mockFetch.mock.calls[1][1].body as string);
+    const lastTurn = secondBody.contents[secondBody.contents.length - 1];
+    expect(lastTurn.parts[0].text).toBe("TOOL_RESULTS");
+    const done = events.find((e) => e.event === "done")!.data as { content: string };
+    expect(done.content).toContain("You have 2 contacts.");
+  });
+
+  it("never re-runs a write the model repeats in a follow-up round", async () => {
+    const svc = await import("@/server/services/chat.service");
+    const write = { tool: "add_pf_transaction", args: { merchantName: "Imtiaz", amount: 1500 } };
+    vi.mocked(svc.parseToolCalls)
+      .mockReturnValueOnce({ text: "", toolCalls: [write] })
+      .mockReturnValueOnce({ text: "Recorded again!", toolCalls: [write] });
+    vi.mocked(svc.executeToolCall).mockResolvedValue({ tool: "add_pf_transaction", success: true } as never);
+
+    const res = await POST_WITH_KEY(makeReq({ message: "I spent 1500 at Imtiaz" }));
+    const events = await readSSE(res);
+
+    expect(vi.mocked(svc.executeToolCall)).toHaveBeenCalledTimes(1);
+    const done = events.find((e) => e.event === "done")!.data as { toolCalls: unknown[] };
+    expect(done.toolCalls).toHaveLength(1);
+  });
+
+  it("stops the agent loop after a bounded number of rounds", async () => {
+    const svc = await import("@/server/services/chat.service");
+    let n = 0;
+    vi.mocked(svc.parseToolCalls).mockImplementation(() => ({
+      text: "",
+      toolCalls: [{ tool: "list_invoices", args: { page: ++n } }],
+    }));
+    vi.mocked(svc.executeToolCall).mockResolvedValue({ tool: "list_invoices", success: true } as never);
+
+    try {
+      const res = await POST_WITH_KEY(makeReq({ message: "loop forever" }));
+      const events = await readSSE(res);
+
+      expect(mockFetch).toHaveBeenCalledTimes(4);
+      expect(events.find((e) => e.event === "done")).toBeDefined();
+    } finally {
+      // clearAllMocks keeps implementations — don't leak the endless loop.
+      vi.mocked(svc.parseToolCalls).mockImplementation(() => ({ text: "AI response", toolCalls: [] }));
+    }
+  });
+
   it("uses fallback text when Gemini finishes with MAX_TOKENS and no content", async () => {
     mockFetch.mockResolvedValue({
       ok: true,
@@ -509,6 +571,7 @@ async function loadPost(env: { AI_PROVIDER?: string; GEMINI_API_KEY?: string }) 
     buildChatMessages: vi.fn().mockResolvedValue({ messages: [], nonce: "abc" }),
     parseToolCalls: vi.fn().mockReturnValue({ text: "AI response", toolCalls: [] }),
     executeToolCall: vi.fn(),
+    formatToolResultsForModel: vi.fn().mockReturnValue("TOOL_RESULTS"),
   }));
   vi.mock("@/server/middleware/rateLimit", () => ({
     chatRateLimiter: vi.fn().mockResolvedValue(undefined),

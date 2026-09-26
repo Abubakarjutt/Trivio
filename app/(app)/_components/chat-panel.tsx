@@ -1053,6 +1053,7 @@ export function ChatPanel() {
   const abortRef = useRef<AbortController | null>(null);
   const { toast } = useToast();
 
+  const utils = trpc.useUtils();
   const { data: orgData } = trpc.org.get.useQuery(undefined, { enabled: isOpen });
   const fmt = (v: unknown) => formatCurrency(Number(v ?? 0), orgData?.currency ?? "USD");
 
@@ -1185,6 +1186,17 @@ export function ChatPanel() {
           setConversationId(streamConvId);
         }
         refetchConversations();
+        // The chat can change anything the UI can — refresh whatever page is
+        // open so a transaction/invoice/etc. it just created shows up.
+        const changedSomething = finalToolResults.some(
+          (r) =>
+            r.success &&
+            !/^(list_|get_|search_)/.test(r.tool) &&
+            !(
+              r.tool === "app_action" && (r.data as { kind?: string } | undefined)?.kind === "query"
+            )
+        );
+        if (changedSomething) void utils.invalidate();
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
           toast({
@@ -1199,7 +1211,7 @@ export function ChatPanel() {
         abortRef.current = null;
       }
     },
-    [conversationId, toast, refetchConversations]
+    [conversationId, toast, refetchConversations, utils]
   );
 
   const deleteConversation = trpc.chat.deleteConversation.useMutation({
