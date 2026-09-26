@@ -82,6 +82,8 @@ extraResources:
   # The local speech-to-text engine for chat voice input (built by
   # `npm run fetch:whisper`). main.ts passes <resources>/whisper/bin/whisper-cli
   # to the server as WHISPER_BIN; the speech model is downloaded at runtime.
+  # bin/ also holds default.metallib (macOS: precompiled GPU shaders) or
+  # whisper-cli-cpu.exe (Windows: CPU fallback for the Vulkan engine).
   - from: desktop/whisper
     to: whisper
     filter:

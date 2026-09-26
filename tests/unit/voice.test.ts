@@ -3,7 +3,16 @@
 // HTTP server standing in for the model host and a fake whisper-cli.
 import { describe, it, expect, beforeEach, afterAll, vi } from "vitest";
 import { createServer, type Server } from "node:http";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { encodeWav } from "@/lib/audio/wav";
@@ -16,7 +25,10 @@ import {
   isWav,
   modelPath,
   modelUrl,
+  parseAccelerator,
+  resetVoiceEngines,
   transcribe,
+  warmUp,
   whisperArgs,
   whisperBin,
   type VoiceEnv,
@@ -82,8 +94,33 @@ describe("isSilent", () => {
 describe("whisperArgs", () => {
   it("names the model, file and language, with no timestamps or log noise", () => {
     const args = whisperArgs("/m.bin", "/a.wav", "ur");
-    expect(args.slice(0, 8)).toEqual(["-m", "/m.bin", "-f", "/a.wav", "-l", "ur", "-nt", "-np"]);
-    expect(Number(args[9])).toBeGreaterThanOrEqual(1);
+    expect(args.slice(0, 7)).toEqual(["-m", "/m.bin", "-f", "/a.wav", "-l", "ur", "-nt"]);
+    expect(Number(args[args.indexOf("-t") + 1])).toBeGreaterThanOrEqual(1);
+    expect(args).toContain("-np");
+    expect(args).not.toContain("-ng"); // the GPU, when there is one
+  });
+
+  it("can force the CPU, and keep the logs for the warm-up", () => {
+    expect(whisperArgs("/m.bin", "/a.wav", "en", { gpu: false })).toContain("-ng");
+    expect(whisperArgs("/m.bin", "/a.wav", "en", { logs: true })).not.toContain("-np");
+  });
+});
+
+describe("parseAccelerator", () => {
+  it("names the device whisper picked", () => {
+    expect(
+      parseAccelerator(
+        "whisper_backend_init_gpu: using MTL0 backend\nggml_metal_init: found device: Apple M4 Pro\n"
+      )
+    ).toEqual({ kind: "gpu", name: "Apple M4 Pro (Metal)" });
+    expect(parseAccelerator("whisper_backend_init_gpu: using Vulkan0 backend")).toEqual({
+      kind: "gpu",
+      name: "GPU (Vulkan)",
+    });
+    expect(parseAccelerator("whisper_backend_init_gpu: no GPU found\n")).toEqual({
+      kind: "cpu",
+      name: "CPU",
+    });
   });
 });
 
@@ -211,6 +248,8 @@ describe("downloadModel", () => {
 // ── Transcription ────────────────────────────────────────────────────────────
 
 describe("transcribe", () => {
+  beforeEach(() => resetVoiceEngines());
+
   function readyEnv(): VoiceEnv {
     const env: VoiceEnv = { ...process.env, ...freshEnv(), WHISPER_BIN: FAKE_BIN };
     mkdirSync(join(env.WHISPER_HOME!, "models"), { recursive: true });
@@ -295,6 +334,78 @@ describe("transcribe", () => {
       transcribe(wav(), { model: "small", language: "en", env }),
     ]);
     expect(results.map((r) => r.status)).toEqual(["rejected", "fulfilled", "fulfilled"]);
+  });
+
+  it("falls back to the CPU when the GPU fails, and stays there", async () => {
+    const env: VoiceEnv = {
+      ...readyEnv(),
+      FAKE_WHISPER_TEXT: "paid rent",
+      FAKE_WHISPER_GPU_FAIL: "1",
+    };
+    const log = (env.FAKE_WHISPER_LOG = join(env.WHISPER_HOME!, "calls.log"));
+    const calls = () =>
+      readFileSync(log, "utf8")
+        .trim()
+        .split("\n")
+        .map((l) => JSON.parse(l) as string[]);
+
+    expect(await transcribe(wav(), { model: "small", language: "en", env })).toBe("paid rent");
+    expect(calls().map((a) => a.includes("-ng"))).toEqual([false, true]);
+    expect(getVoiceStatus("small", env).accelerator).toEqual({ kind: "cpu", name: "CPU" });
+
+    // Straight to the CPU from now on.
+    expect(await transcribe(wav(), { model: "small", language: "en", env })).toBe("paid rent");
+    expect(calls().map((a) => a.includes("-ng"))).toEqual([false, true, true]);
+  });
+
+  it("switches to the CPU-only engine when the GPU one can't start (no Vulkan driver)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "voice-bin-"));
+    const gpuBin = join(dir, "whisper-cli");
+    writeFileSync(gpuBin, "#!/bin/sh\necho 'vulkan-1.dll was not found' >&2\nexit 1\n");
+    copyFileSync(FAKE_BIN, join(dir, "whisper-cli-cpu"));
+    chmodSync(gpuBin, 0o755);
+    chmodSync(join(dir, "whisper-cli-cpu"), 0o755);
+    const env: VoiceEnv = { ...readyEnv(), WHISPER_BIN: gpuBin, FAKE_WHISPER_TEXT: "bought milk" };
+    const log = (env.FAKE_WHISPER_LOG = join(env.WHISPER_HOME!, "calls.log"));
+
+    expect(await transcribe(wav(), { model: "small", language: "en", env })).toBe("bought milk");
+    await warmUp("small", env);
+    expect(getVoiceStatus("small", env).accelerator).toEqual({ kind: "cpu", name: "CPU" });
+    // Only the CPU engine ran (the GPU one logs nothing), always with -ng.
+    const calls = readFileSync(log, "utf8").trim().split("\n");
+    expect(calls.map((c) => (JSON.parse(c) as string[]).includes("-ng"))).toEqual([true, true]);
+  });
+
+  it("warms the engine up once, in the background, and learns its device", async () => {
+    const env = readyEnv();
+    const log = (env.FAKE_WHISPER_LOG = join(env.WHISPER_HOME!, "calls.log"));
+    expect(getVoiceStatus("small", env)).toMatchObject({ accelerator: null, warmingUp: false });
+
+    const warming = warmUp("small", env);
+    expect(getVoiceStatus("small", env).warmingUp).toBe(true);
+    await warming;
+    expect(getVoiceStatus("small", env)).toMatchObject({
+      accelerator: { kind: "gpu", name: "Fake M1 (Metal)" },
+      warmingUp: false,
+    });
+
+    await warmUp("small", env);
+    const calls = readFileSync(log, "utf8").trim().split("\n");
+    expect(calls).toHaveLength(1);
+    const args = JSON.parse(calls[0]) as string[];
+    expect(args).not.toContain("-np"); // it reads the engine's log
+    expect(existsSync(args[args.indexOf("-f") + 1])).toBe(false);
+
+    // No model yet: nothing to warm up.
+    resetVoiceEngines();
+    await warmUp("base", env);
+    expect(readFileSync(log, "utf8").trim().split("\n")).toHaveLength(1);
+  });
+
+  it("warms up on the CPU when the GPU is broken", async () => {
+    const env: VoiceEnv = { ...readyEnv(), FAKE_WHISPER_GPU_FAIL: "1" };
+    await warmUp("small", env);
+    expect(getVoiceStatus("small", env).accelerator).toEqual({ kind: "cpu", name: "CPU" });
   });
 
   it("finds the engine from WHISPER_BIN only when it exists", () => {

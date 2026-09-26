@@ -110,6 +110,9 @@ jobs:
       # env/local/brew and Homebrew's postgresql@16 keg is reliable, so we let it
       # fall through to brew; edb (a network download) is only the last resort.
       TRIVIO_PG_SOURCE: auto
+      # The voice engine must ship with its Metal (GPU) shaders precompiled;
+      # fetch-whisper.mjs fails instead of falling back to a slower build.
+      TRIVIO_WHISPER_GPU: required
 
     steps:
       - name: Checkout
@@ -123,6 +126,11 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # Precompiling the voice engine's GPU shaders needs Xcode's Metal
+      # compiler; newer Xcodes ship it as a separate download.
+      - name: Metal compiler
+        run: xcrun -sdk macosx metal --version || xcodebuild -downloadComponent MetalToolchain
 
       # The server tree is built from the Next.js standalone output, which needs
       # the generated Prisma client. The arm64 engine matches this runner.
@@ -298,6 +306,10 @@ jobs:
       # GitHub Actions `env:` block can't see runner-image OS env vars, only
       # ones set via workflow `env:`/$GITHUB_ENV -- so it must be read in bash).
       TRIVIO_PG_SOURCE: auto
+      # The voice engine must ship with Vulkan (GPU) support plus its CPU
+      # fallback; fetch-whisper.mjs fails instead of building CPU-only.
+      TRIVIO_WHISPER_GPU: required
+      VULKAN_VERSION: 1.4.313.2
 
     steps:
       - name: Checkout
@@ -311,6 +323,16 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # Headers + shader compiler for the voice engine's Vulkan (GPU) build.
+      # Users need no SDK: their GPU driver provides Vulkan.
+      - name: Install Vulkan SDK
+        shell: pwsh
+        run: |
+          curl.exe -fsSL -o "$env:RUNNER_TEMP\vulkan-sdk.exe" "https://sdk.lunarg.com/sdk/download/$env:VULKAN_VERSION/windows/vulkansdk-windows-X64-$env:VULKAN_VERSION.exe"
+          & "$env:RUNNER_TEMP\vulkan-sdk.exe" --accept-licenses --default-answer --confirm-command install | Out-Host
+          Add-Content $env:GITHUB_ENV "VULKAN_SDK=C:\VulkanSDK\$env:VULKAN_VERSION"
+          Add-Content $env:GITHUB_PATH "C:\VulkanSDK\$env:VULKAN_VERSION\bin"
 
       - name: Generate Prisma client
         run: npx prisma generate

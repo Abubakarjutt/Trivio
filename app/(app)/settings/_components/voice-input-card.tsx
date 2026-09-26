@@ -65,7 +65,9 @@ function Choice<T extends string>({
 export function VoiceInputCard() {
   const utils = trpc.useUtils();
   const { data: s } = trpc.voice.status.useQuery(undefined, {
-    refetchInterval: (q) => (q.state.data?.download?.active ? 1000 : false),
+    // Follow the model download, then the engine's first warm-up.
+    refetchInterval: (q) =>
+      q.state.data?.download?.active ? 1000 : q.state.data?.warmingUp ? 1500 : false,
   });
   const onSaved = (data: NonNullable<typeof s>) => utils.voice.status.setData(undefined, data);
   const update = trpc.voice.updateSettings.useMutation({
@@ -140,9 +142,21 @@ export function VoiceInputCard() {
           />
 
           {s.modelReady ? (
-            <p className="text-sm text-emerald-600">
-              Ready — use the mic button in the AI assistant.
-            </p>
+            <div className="space-y-0.5">
+              <p className="text-sm text-emerald-600">
+                Ready — use the mic button in the AI assistant.
+              </p>
+              {s.accelerator ? (
+                <p className="text-muted-foreground text-xs">
+                  Runs on{" "}
+                  {s.accelerator.kind === "gpu"
+                    ? `the GPU: ${s.accelerator.name}`
+                    : "the CPU (no supported GPU found)"}
+                </p>
+              ) : s.warmingUp ? (
+                <p className="text-muted-foreground text-xs">Preparing the speech engine…</p>
+              ) : null}
+            </div>
           ) : d?.active ? (
             <div className="space-y-1.5">
               <p className="text-sm">

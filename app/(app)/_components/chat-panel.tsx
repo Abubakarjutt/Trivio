@@ -1190,6 +1190,9 @@ export function ChatPanel() {
 
   const utils = trpc.useUtils();
   const { data: orgData } = trpc.org.get.useQuery(undefined, { enabled: isOpen });
+  // Asked on every page (the chat is closed): this starts the voice engine's
+  // one-time warm-up in the background, so the first recording isn't slow.
+  trpc.voice.status.useQuery(undefined, { retry: false });
   const fmt = (v: unknown) => formatCurrency(Number(v ?? 0), orgData?.currency ?? "USD");
 
   const { data: conversations, refetch: refetchConversations } =

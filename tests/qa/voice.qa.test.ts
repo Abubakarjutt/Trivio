@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { callerFor, newUser, type QaUser } from "./harness";
 import { encodeWav } from "@/lib/audio/wav";
-import { downloadModel, modelPath } from "@/server/services/voice.service";
+import { downloadModel, modelPath, resetVoiceEngines } from "@/server/services/voice.service";
 
 vi.mock("@/lib/auth", () => ({
   auth: vi.fn(),
@@ -112,6 +112,20 @@ describe("voice input settings", () => {
     const args = JSON.parse(calls.at(-1)!) as string[];
     expect(args[args.indexOf("-l") + 1]).toBe("ur");
     expect(args[args.indexOf("-m") + 1]).toBe(modelPath("base"));
+  });
+
+  it("says which device transcribes, once the engine has warmed up", async () => {
+    resetVoiceEngines();
+    // The status that starts the warm-up already says so — the Settings page
+    // polls on that until the device is known.
+    expect(await u.api.voice.status()).toMatchObject({ warmingUp: true, accelerator: null });
+    await vi.waitFor(async () =>
+      expect((await u.api.voice.status()).accelerator).toEqual({
+        kind: "gpu",
+        name: "Fake M1 (Metal)",
+      })
+    );
+    expect((await u.api.voice.status()).warmingUp).toBe(false);
   });
 
   it("switching models downloads the new model too", async () => {

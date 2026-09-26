@@ -7,6 +7,7 @@ import {
   downloadModel,
   getVoiceStatus,
   isVoiceModelId,
+  warmUp,
   type VoiceLanguage,
 } from "../services/voice.service";
 
@@ -33,6 +34,9 @@ async function settingsOf(
 
 async function statusFor(db: import("@prisma/client").PrismaClient, userId: string) {
   const settings = await settingsOf(db, userId);
+  // Warm the engine up (once) so the first recording isn't slow — before
+  // reading the status, so it reports `warmingUp` and the page keeps polling.
+  if (settings.enabled) void warmUp(settings.model);
   return {
     ...settings,
     ...getVoiceStatus(settings.model),

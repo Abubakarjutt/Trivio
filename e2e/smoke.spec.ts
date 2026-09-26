@@ -164,6 +164,8 @@ test("voice input: off by default, turned on in Settings, speech lands in the ch
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-checked", "true");
   await expect(page.getByText(/Ready — use the mic button/)).toBeVisible();
+  // The engine warms up in the background and Settings says what it runs on.
+  await expect(page.getByText("Runs on the GPU: Fake M1 (Metal)")).toBeVisible();
   await page.getByRole("radio", { name: "Urdu", exact: true }).click();
   await expect(page.getByRole("radio", { name: "Urdu", exact: true })).toHaveAttribute("aria-checked", "true");
 

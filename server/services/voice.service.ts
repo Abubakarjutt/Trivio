@@ -9,6 +9,11 @@
 //
 // Downloads resume (HTTP Range) — a 190 MB model on a slow link can take a
 // while, and a restart or dropped connection must not start it over.
+//
+// The engine uses the GPU when there is one (Metal on Macs, Vulkan on Windows)
+// and falls back to the CPU on its own. A GPU's first run compiles its shaders,
+// which can take seconds, so the engine is warmed up in the background as soon
+// as voice input is on — before the user presses the mic.
 
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -99,6 +104,9 @@ export interface VoiceStatus {
   engineInstalled: boolean;
   model: VoiceModelId;
   modelReady: boolean;
+  /** What transcribes: known once the engine has warmed up. */
+  accelerator: Accelerator | null;
+  warmingUp: boolean;
   download: {
     received: number;
     total: number | null;
@@ -110,10 +118,13 @@ export interface VoiceStatus {
 export function getVoiceStatus(id: VoiceModelId, env: VoiceEnv = process.env): VoiceStatus {
   const path = modelPath(id, env);
   const d = downloads.get(path);
+  const bin = whisperBin(env);
   return {
-    engineInstalled: whisperBin(env) !== null,
+    engineInstalled: bin !== null,
     model: id,
     modelReady: existsSync(path),
+    accelerator: (bin && engines.get(bin)?.accelerator) || null,
+    warmingUp: !!(bin && engines.get(bin)?.warmingUp),
     download: d
       ? { received: d.received, total: d.total, active: !!d.running, error: d.error }
       : null,
@@ -223,10 +234,188 @@ export function isSilent(buf: Buffer, threshold = 0.005): boolean {
   return n === 0 || Math.sqrt(sum / n) < threshold;
 }
 
-export function whisperArgs(model: string, file: string, language: VoiceLanguage): string[] {
+export function whisperArgs(
+  model: string,
+  file: string,
+  language: VoiceLanguage,
+  opts: { gpu?: boolean; logs?: boolean } = {}
+): string[] {
   const threads = Math.max(1, Math.min(8, cpus().length - 1));
-  // -nt: no timestamps, -np: no progress/log noise on stdout.
-  return ["-m", model, "-f", file, "-l", language, "-nt", "-np", "-t", String(threads)];
+  // -nt: no timestamps. -np: no log noise (the warm-up keeps the logs to see
+  // which device was picked). -ng: CPU only.
+  return [
+    "-m",
+    model,
+    "-f",
+    file,
+    "-l",
+    language,
+    "-nt",
+    "-t",
+    String(threads),
+    ...(opts.logs ? [] : ["-np"]),
+    ...(opts.gpu === false ? ["-ng"] : []),
+  ];
+}
+
+// One transcription at a time: whisper uses every core (and the GPU).
+let queue: Promise<unknown> = Promise.resolve();
+
+// ── GPU / CPU ────────────────────────────────────────────────────────────────
+
+export interface Accelerator {
+  kind: "gpu" | "cpu";
+  /** For people: "Apple M4 Pro (Metal)", "GPU (Vulkan)", "CPU". */
+  name: string;
+}
+
+/** Which device whisper picked, from its startup log. */
+export function parseAccelerator(log: string): Accelerator {
+  const backend = /whisper_backend_init_gpu: using (\S+) backend/.exec(log)?.[1];
+  if (!backend) return { kind: "cpu", name: "CPU" };
+  if (backend.startsWith("MTL")) {
+    const chip = /ggml_metal_init: found device: (.+)/.exec(log)?.[1]?.trim();
+    return { kind: "gpu", name: `${chip || "GPU"} (Metal)` };
+  }
+  if (backend.startsWith("Vulkan")) return { kind: "gpu", name: "GPU (Vulkan)" };
+  if (backend.startsWith("CUDA")) return { kind: "gpu", name: "NVIDIA GPU (CUDA)" };
+  return { kind: "gpu", name: backend };
+}
+
+// Per engine binary: whether its GPU path works, and what it runs on.
+interface EngineState {
+  gpu: boolean;
+  accelerator: Accelerator | null;
+  warmUp: Promise<void> | null;
+  warmingUp: boolean;
+}
+const engines = new Map<string, EngineState>();
+function engineState(bin: string): EngineState {
+  let e = engines.get(bin);
+  if (!e) engines.set(bin, (e = { gpu: true, accelerator: null, warmUp: null, warmingUp: false }));
+  return e;
+}
+
+/** Forget what was learnt about the engines (tests). */
+export function resetVoiceEngines(): void {
+  engines.clear();
+}
+
+function runEngine(bin: string, args: string[], env: VoiceEnv) {
+  return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
+    const child = spawn(bin, args, { env: env as NodeJS.ProcessEnv, windowsHide: true });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (c) => (stdout += c));
+    child.stderr.on("data", (c) => (stderr += c));
+    const timer = setTimeout(() => child.kill(), TRANSCRIBE_TIMEOUT_MS);
+    child.on("error", reject);
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({ code, stdout, stderr });
+    });
+  });
+}
+
+/**
+ * The CPU-only engine shipped next to a GPU one, if any. On Windows the main
+ * engine is built with Vulkan and won't even start on a PC without a Vulkan
+ * driver, so a plain CPU build ships beside it as whisper-cli-cpu.exe.
+ */
+export function cpuFallbackBin(bin: string): string {
+  const cpu = bin.replace(/whisper-cli(\.exe)?$/, "whisper-cli-cpu$1");
+  return cpu !== bin && existsSync(cpu) ? cpu : bin;
+}
+
+/**
+ * Run the engine, on the GPU if it has one. A GPU run that fails (no GPU
+ * driver, a broken one, a device lost mid-run) is retried on the CPU, and that
+ * engine then stays on the CPU for the rest of this session.
+ */
+async function runWithFallback(
+  bin: string,
+  args: (gpu: boolean) => string[],
+  env: VoiceEnv
+): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  const engine = engineState(bin);
+  const cpuBin = cpuFallbackBin(bin);
+  if (!engine.gpu) return runEngine(cpuBin, args(false), env);
+  const first = await runEngine(bin, args(true), env).catch((err: unknown) => ({
+    code: -1,
+    stdout: "",
+    stderr: String(err),
+  }));
+  if (first.code === 0) return first;
+  const cpu = await runEngine(cpuBin, args(false), env);
+  if (cpu.code === 0) {
+    engine.gpu = false;
+    engine.accelerator = { kind: "cpu", name: "CPU" };
+    console.warn(`[voice] GPU run failed, using the CPU: ${lastLine(first.stderr)}`);
+  }
+  return cpu;
+}
+
+const lastLine = (s: string) => s.trim().split("\n").at(-1) ?? "";
+
+/** One second of a quiet tone: enough for the engine to run end to end. */
+function warmUpWav(): Buffer {
+  const rate = 16000;
+  const buf = Buffer.alloc(44 + rate * 2);
+  buf.write("RIFF", 0, "ascii");
+  buf.writeUInt32LE(36 + rate * 2, 4);
+  buf.write("WAVEfmt ", 8, "ascii");
+  buf.writeUInt32LE(16, 16);
+  buf.writeUInt16LE(1, 20); // PCM
+  buf.writeUInt16LE(1, 22); // mono
+  buf.writeUInt32LE(rate, 24);
+  buf.writeUInt32LE(rate * 2, 28);
+  buf.writeUInt16LE(2, 32);
+  buf.writeUInt16LE(16, 34);
+  buf.write("data", 36, "ascii");
+  buf.writeUInt32LE(rate * 2, 40);
+  for (let i = 0; i < rate; i++) buf.writeInt16LE(Math.round(3000 * Math.sin(i / 8)), 44 + i * 2);
+  return buf;
+}
+
+/**
+ * Run the engine once in the background so the GPU's one-time shader compile
+ * (seconds on a first run) happens before the user speaks, and learn which
+ * device it uses. Once per engine per session; later calls are no-ops.
+ */
+export function warmUp(id: VoiceModelId, env: VoiceEnv = process.env): Promise<void> {
+  const bin = whisperBin(env);
+  const model = modelPath(id, env);
+  if (!bin || !existsSync(model)) return Promise.resolve();
+  const engine = engineState(bin);
+  if (engine.warmUp) return engine.warmUp;
+  engine.warmingUp = true;
+
+  const job = queue.then(async () => {
+    const file = join(tmpdir(), `trivio-voice-warmup-${randomUUID()}.wav`);
+    await writeFile(file, warmUpWav());
+    try {
+      const run = await runWithFallback(
+        bin,
+        (gpu) => whisperArgs(model, file, "en", { gpu, logs: true }),
+        env
+      );
+      if (run.code !== 0) throw new Error(lastLine(run.stderr) || `exit ${run.code}`);
+      engine.accelerator = engine.gpu ? parseAccelerator(run.stderr) : { kind: "cpu", name: "CPU" };
+    } finally {
+      rmSync(file, { force: true });
+    }
+  });
+  queue = job.catch(() => undefined);
+  // Once per session even if it fails: a failure isn't fatal (transcribing
+  // reports its own errors), and retrying on every status poll would be.
+  engine.warmUp = job
+    .catch((err: unknown) => {
+      console.warn(`[voice] engine warm-up failed: ${err instanceof Error ? err.message : err}`);
+    })
+    .finally(() => {
+      engine.warmingUp = false;
+    });
+  return engine.warmUp;
 }
 
 /** whisper's plain-text output → what goes into the chat box. */
@@ -239,9 +428,6 @@ export function cleanTranscript(raw: string): string {
       .trim()
   );
 }
-
-// One transcription at a time: whisper uses every core (and the GPU).
-let queue: Promise<unknown> = Promise.resolve();
 
 export function transcribe(
   audio: Buffer,
@@ -260,30 +446,14 @@ export function transcribe(
     const file = join(tmpdir(), `trivio-voice-${randomUUID()}.wav`);
     await writeFile(file, audio);
     try {
-      const out = await new Promise<string>((resolve, reject) => {
-        const child = spawn(bin, whisperArgs(model, file, opts.language), {
-          env: env as NodeJS.ProcessEnv,
-          windowsHide: true,
-        });
-        let stdout = "";
-        let stderr = "";
-        child.stdout.on("data", (c) => (stdout += c));
-        child.stderr.on("data", (c) => (stderr += c));
-        const timer = setTimeout(() => child.kill(), TRANSCRIBE_TIMEOUT_MS);
-        child.on("error", reject);
-        child.on("close", (code) => {
-          clearTimeout(timer);
-          if (code === 0) resolve(stdout);
-          else
-            reject(
-              new VoiceError(
-                `Transcription failed: ${stderr.trim().split("\n").at(-1) ?? code}`,
-                500
-              )
-            );
-        });
-      });
-      return cleanTranscript(out);
+      const run = await runWithFallback(
+        bin,
+        (gpu) => whisperArgs(model, file, opts.language, { gpu }),
+        env
+      );
+      if (run.code !== 0)
+        throw new VoiceError(`Transcription failed: ${lastLine(run.stderr) || run.code}`, 500);
+      return cleanTranscript(run.stdout);
     } finally {
       rmSync(file, { force: true });
     }
