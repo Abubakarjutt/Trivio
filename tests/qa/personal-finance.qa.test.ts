@@ -482,6 +482,54 @@ describe("pay months (close the month yourself)", () => {
     await expect(me.api.pfCycles.reopen()).rejects.toThrow(/no closed month/);
   });
 
+  it("monthly budgets follow the pay month; weekly ones stay rolling", async () => {
+    const me = await newUser();
+    await me.api.pfCycles.setStart({ startDate: day(-20) });
+    const spend = (date: string, amount: number) =>
+      me.api.statementTransactions.create({
+        date,
+        description: "Food",
+        merchantName: "Food",
+        amount,
+        type: "DEBIT",
+        category: "Groceries",
+      });
+    await spend(day(-25), 100); // before this pay month
+    await spend(day(-5), 40);
+    const monthly = await me.api.budgets.create({
+      name: "Food",
+      category: "Groceries",
+      limitAmount: 100,
+      period: "MONTHLY",
+    });
+    const weekly = await me.api.budgets.create({
+      name: "Food week",
+      category: "Groceries",
+      limitAmount: 100,
+      period: "WEEKLY",
+    });
+    const budget = async (id: string) => (await me.api.budgets.list({})).find((b) => b.id === id)!;
+
+    // Counts from the pay month's start — not the last 30 days (which would include the 100).
+    expect(await budget(monthly.id)).toMatchObject({
+      spent: 40,
+      remaining: 60,
+      utilization: 40,
+      periodStart: day(-20),
+    });
+
+    // Closing the month resets it; the next month counts from the day after.
+    await me.api.pfCycles.close({ endDate: day(-3) });
+    await spend(day(-1), 7);
+    expect(await budget(monthly.id)).toMatchObject({ spent: 7, periodStart: day(-2) });
+    // A weekly budget is still the last 7 days, whatever the pay month.
+    expect((await budget(weekly.id)).spent).toBe(47);
+
+    // Reopening brings the whole month back.
+    await me.api.pfCycles.reopen();
+    expect(await budget(monthly.id)).toMatchObject({ spent: 47, periodStart: day(-20) });
+  });
+
   it("rejects closing before the month started or in the future, and is per organisation", async () => {
     const me = await newUser();
     await me.api.pfCycles.setStart({ startDate: day(-5) });

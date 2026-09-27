@@ -1,5 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import type { PrismaClient } from "@prisma/client";
+import { periodFrom } from "@/server/services/easyfinance.service";
 
 /**
  * Personal Finance "months" follow the user's pay cycle, not the calendar: a
@@ -104,7 +105,11 @@ export function buildPeriods(
 const bad = (message: string) => new TRPCError({ code: "BAD_REQUEST", message });
 
 /** The org's cycles, oldest first. The first time, opens one on the 1st of this month. */
-export async function loadCycles(db: Db, organisationId: string, today = localToday()) {
+export async function loadCycles(
+  db: Pick<PrismaClient, "pfCycle">,
+  organisationId: string,
+  today = localToday()
+) {
   let rows = await db.pfCycle.findMany({
     where: { organisationId },
     orderBy: { startDate: "asc" },
@@ -202,4 +207,20 @@ export async function setCycleStart(
     db.pfCycle.update({ where: { id: open.id }, data: { startDate: dateOf(startDate) } }),
   ]);
   return { startDate };
+}
+
+/**
+ * Where a budget's window starts. A MONTHLY budget follows the pay month (it
+ * resets when the user closes the month, not on the 1st or after 30 days);
+ * weekly, quarterly and yearly budgets stay rolling windows back from `now`.
+ */
+export async function budgetPeriodStart(
+  db: Pick<PrismaClient, "pfCycle">,
+  organisationId: string,
+  period: string,
+  now = new Date()
+): Promise<Date> {
+  if (period !== "MONTHLY") return periodFrom(period, now);
+  const rows = await loadCycles(db, organisationId, localToday(now));
+  return rows[rows.length - 1].startDate;
 }

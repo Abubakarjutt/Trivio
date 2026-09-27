@@ -3,6 +3,7 @@ import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, orgProcedure } from "@/server/trpc";
 import { Prisma } from "@prisma/client";
 import { periodFrom, getSpentForCategory, calcBudgetUtilization } from "@/server/services/easyfinance.service";
+import { budgetPeriodStart, dayOf } from "@/server/services/pf-cycle.service";
 
 export const budgetsRouter = createTRPCRouter({
   list: orgProcedure
@@ -16,16 +17,20 @@ export const budgetsRouter = createTRPCRouter({
         orderBy: { createdAt: "desc" },
       });
 
-      // Calculate spending for each budget's period from journal entries
+      // Spending in each budget's period. Monthly budgets follow the pay month
+      // (they reset when the user closes the month); others are rolling windows.
       const now = new Date();
+      const monthStart = await budgetPeriodStart(ctx.db, ctx.organisationId, "MONTHLY", now);
       return Promise.all(
         budgets.map(async (budget) => {
-          const from = periodFrom(budget.period, now);
+          const from = budget.period === "MONTHLY" ? monthStart : periodFrom(budget.period, now);
           const spent = await getSpentForCategory(ctx.db, ctx.organisationId, budget.category, from, now);
           const limit = Number(budget.limitAmount);
           return {
             ...budget,
             limitAmount: limit,
+            /** First day counted ("YYYY-MM-DD"). */
+            periodStart: dayOf(from),
             spent,
             remaining: Math.max(0, limit - spent),
             utilization: calcBudgetUtilization(spent, limit),

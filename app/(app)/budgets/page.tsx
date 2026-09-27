@@ -108,7 +108,11 @@ export default function BudgetsPage() {
               <div className="flex items-start justify-between gap-2">
                 <div>
                   <p className="font-medium text-foreground">{b.name}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">{b.category} · {b.period.charAt(0) + b.period.slice(1).toLowerCase()}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {b.category} · {b.period.charAt(0) + b.period.slice(1).toLowerCase()}
+                    {/* Monthly budgets follow the pay month — they reset when it's closed. */}
+                    {b.period === "MONTHLY" && ` · since ${new Date(`${b.periodStart}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })}`}
+                  </p>
                 </div>
                 <div className="flex gap-1 shrink-0">
                   <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => archive.mutate({ id: b.id })} title="Archive">

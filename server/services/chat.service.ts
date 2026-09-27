@@ -22,6 +22,7 @@ import { extractionQueue } from "@/lib/queue";
 import { CATEGORY_NAMES } from "@/lib/categories";
 import { createManualPfTransaction } from "./pf-transaction.service";
 import { getSpentForCategory, periodFrom } from "./easyfinance.service";
+import { budgetPeriodStart, dayOf } from "./pf-cycle.service";
 import { buildActionCatalog, findAppAction, runAppAction } from "./chat-actions";
 import { formatActionEvents, stripStatusLines } from "./chat-approval";
 
@@ -225,9 +226,7 @@ export function buildSystemPrompt(
 ): string {
   // Every account: a cut-off list (it was the first 15) hid all the expense
   // accounts, so the model invented codes like 6000 for rent.
-  const accountList = orgContext.accounts
-    .map((a) => `${a.code}:${a.name}`)
-    .join(", ");
+  const accountList = orgContext.accounts.map((a) => `${a.code}:${a.name}`).join(", ");
 
   const contactList = orgContext.contacts
     .slice(0, 10)
@@ -505,9 +504,13 @@ async function toolCreateJournalEntry(
   const description = (args.description as string) || "Journal entry from chat";
   // Small models write `"credit": false` / `"debit": "150"` — normalise to numbers.
   const amount = (v: unknown) => (Number(v) > 0 ? Number(v) : undefined);
-  const lines = (args.lines as { accountCode: unknown; debit?: unknown; credit?: unknown }[] | undefined)?.map(
-    (l) => ({ accountCode: String(l.accountCode ?? "").trim(), debit: amount(l.debit), credit: amount(l.credit) })
-  );
+  const lines = (
+    args.lines as { accountCode: unknown; debit?: unknown; credit?: unknown }[] | undefined
+  )?.map((l) => ({
+    accountCode: String(l.accountCode ?? "").trim(),
+    debit: amount(l.debit),
+    credit: amount(l.credit),
+  }));
 
   if (!lines || lines.length < 2) {
     return {
@@ -1796,9 +1799,12 @@ async function toolListBudgets(db: PrismaClient, organisationId: string): Promis
     orderBy: { createdAt: "asc" },
   });
 
+  // Monthly budgets follow the pay month, as on the Budgets page.
+  const monthStart = await budgetPeriodStart(db, organisationId, "MONTHLY", now);
   const result = await Promise.all(
     budgets.map(async (b) => {
-      const spent = await getSpentForCategory(db, organisationId, b.category, periodFrom(b.period, now), now);
+      const from = b.period === "MONTHLY" ? monthStart : periodFrom(b.period, now);
+      const spent = await getSpentForCategory(db, organisationId, b.category, from, now);
       const limit = Number(b.limitAmount);
       return {
         category: b.category,
@@ -1806,6 +1812,7 @@ async function toolListBudgets(db: PrismaClient, organisationId: string): Promis
         spent,
         remaining: Math.max(0, limit - spent),
         period: b.period,
+        periodStart: dayOf(from),
       };
     })
   );
