@@ -27,6 +27,7 @@ import {
   Handshake,
   Calendar,
   MessageSquare,
+  PieChart,
 } from "lucide-react";
 
 type NavItem = {
@@ -43,9 +44,7 @@ type NavGroup = {
 
 const NAV_GROUPS: NavGroup[] = [
   {
-    items: [
-      { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-    ],
+    items: [{ label: "Dashboard", href: "/dashboard", icon: LayoutDashboard }],
   },
   {
     label: "Finance",
@@ -68,6 +67,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: "Personal Finance",
     items: [
+      { label: "Overview", href: "/pf/dashboard", icon: PieChart, matchPrefix: true },
       { label: "Transactions", href: "/pf/transactions", icon: CreditCard, matchPrefix: true },
       { label: "Budgets", href: "/budgets", icon: TrendingUp, matchPrefix: true },
       { label: "Tax Report", href: "/pf/tax-report", icon: FileStack, matchPrefix: true },
@@ -88,23 +88,33 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ];
 
-function NavItemComponent({ icon: Icon, href, label, matchPrefix, onNavigate }: NavItem & { onNavigate?: () => void }) {
+function NavItemComponent({
+  icon: Icon,
+  href,
+  label,
+  matchPrefix,
+  onNavigate,
+}: NavItem & { onNavigate?: () => void }) {
   const pathname = usePathname();
   const active = matchPrefix ? pathname.startsWith(href) : pathname === href;
 
   return (
-    <Link
-      href={href}
-      onClick={onNavigate}
-      className={`sb-link${active ? " sb-active" : ""}`}
-    >
+    <Link href={href} onClick={onNavigate} className={`sb-link${active ? " sb-active" : ""}`}>
       <Icon className="sb-icon h-4 w-4 flex-shrink-0" strokeWidth={1.75} />
       {label}
     </Link>
   );
 }
 
-export function Sidebar({ orgName, hasSampleData, onNavigate }: { orgName: string; hasSampleData?: boolean; onNavigate?: () => void }) {
+export function Sidebar({
+  orgName,
+  hasSampleData,
+  onNavigate,
+}: {
+  orgName: string;
+  hasSampleData?: boolean;
+  onNavigate?: () => void;
+}) {
   return (
     <>
       <style>{`
@@ -146,7 +156,7 @@ export function Sidebar({ orgName, hasSampleData, onNavigate }: { orgName: strin
       `}</style>
 
       <div
-        className="relative flex h-full w-56 flex-col px-3 py-5 gap-1 overflow-hidden"
+        className="relative flex h-full w-56 flex-col gap-1 overflow-hidden px-3 py-5"
         style={{
           background: "linear-gradient(178deg, #0C2A1B 0%, #0A2116 60%, #081B12 100%)",
           borderRight: "1px solid rgba(8,27,18,0.9)",
@@ -155,7 +165,7 @@ export function Sidebar({ orgName, hasSampleData, onNavigate }: { orgName: strin
         {/* Faint ledger grid texture */}
         <div
           aria-hidden
-          className="absolute inset-0 pointer-events-none"
+          className="pointer-events-none absolute inset-0"
           style={{
             opacity: 0.05,
             backgroundImage: "linear-gradient(rgba(147,196,174,1) 1px, transparent 1px)",
@@ -165,32 +175,65 @@ export function Sidebar({ orgName, hasSampleData, onNavigate }: { orgName: strin
         {/* Soft glow behind the monogram */}
         <div
           aria-hidden
-          className="absolute -top-16 -left-16 h-48 w-48 rounded-full pointer-events-none"
+          className="pointer-events-none absolute -top-16 -left-16 h-48 w-48 rounded-full"
           style={{ background: "radial-gradient(circle, rgba(42,138,90,0.25), transparent 70%)" }}
         />
 
         {/* Masthead */}
-        <div className="relative px-3 pt-1 pb-5 mb-3" style={{ borderBottom: "1px solid rgba(235,245,240,0.08)" }}>
+        <div
+          className="relative mb-3 px-3 pt-1 pb-5"
+          style={{ borderBottom: "1px solid rgba(235,245,240,0.08)" }}
+        >
           <div className="flex items-center gap-2.5">
             <div
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px]"
-              style={{ background: "rgba(235,245,240,0.07)", boxShadow: "inset 0 0 0 1px rgba(147,196,174,0.25)" }}
+              style={{
+                background: "rgba(235,245,240,0.07)",
+                boxShadow: "inset 0 0 0 1px rgba(147,196,174,0.25)",
+              }}
             >
               <svg width="17" height="17" viewBox="0 0 16 16" fill="none">
-                <path d="M2 2h12v3H2zM2 7h8v2H2zM2 11h5v2H2z" stroke="#93C4AE" strokeWidth="1.25" strokeLinejoin="round" fill="none" />
+                <path
+                  d="M2 2h12v3H2zM2 7h8v2H2zM2 11h5v2H2z"
+                  stroke="#93C4AE"
+                  strokeWidth="1.25"
+                  strokeLinejoin="round"
+                  fill="none"
+                />
                 <circle cx="11" cy="12" r="2.5" stroke="#93C4AE" strokeWidth="1.25" />
-                <path d="M11 10.75v1.25l.75.5" stroke="#93C4AE" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" />
+                <path
+                  d="M11 10.75v1.25l.75.5"
+                  stroke="#93C4AE"
+                  strokeWidth="1"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
               </svg>
             </div>
             <div className="min-w-0">
               <p
                 className="truncate"
-                style={{ fontWeight: 400, fontSize: "1rem", color: "#F4F3EF", letterSpacing: "-0.01em", lineHeight: 1.15 }}
+                style={{
+                  fontWeight: 400,
+                  fontSize: "1rem",
+                  color: "#F4F3EF",
+                  letterSpacing: "-0.01em",
+                  lineHeight: 1.15,
+                }}
                 title={orgName}
               >
                 {orgName}
               </p>
-              <p style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.18em", color: "rgba(201,168,106,0.75)", marginTop: 2 }}>
+              <p
+                style={{
+                  fontSize: 9,
+                  fontWeight: 700,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.18em",
+                  color: "rgba(201,168,106,0.75)",
+                  marginTop: 2,
+                }}
+              >
                 Trivio
               </p>
             </div>
@@ -213,7 +256,10 @@ export function Sidebar({ orgName, hasSampleData, onNavigate }: { orgName: strin
         <div className="relative pt-3" style={{ borderTop: "1px solid rgba(235,245,240,0.08)" }}>
           <button
             className="sb-link w-full"
-            onClick={() => { onNavigate?.(); window.dispatchEvent(new CustomEvent("open-chat")); }}
+            onClick={() => {
+              onNavigate?.();
+              window.dispatchEvent(new CustomEvent("open-chat"));
+            }}
           >
             <MessageSquare className="sb-icon h-4 w-4 flex-shrink-0" strokeWidth={1.75} />
             AI Chat
@@ -221,26 +267,46 @@ export function Sidebar({ orgName, hasSampleData, onNavigate }: { orgName: strin
         </div>
 
         {/* Footer */}
-        <div className="relative mt-2 pt-3 flex flex-col gap-0.5" style={{ borderTop: "1px solid rgba(235,245,240,0.08)" }}>
+        <div
+          className="relative mt-2 flex flex-col gap-0.5 pt-3"
+          style={{ borderTop: "1px solid rgba(235,245,240,0.08)" }}
+        >
           <Link href="/settings" onClick={onNavigate} className="sb-link">
             <Settings className="sb-icon h-4 w-4 flex-shrink-0" strokeWidth={1.75} />
             Settings
           </Link>
           <button
             className="sb-signout"
-            onClick={() => { onNavigate?.(); signOut({ callbackUrl: "/login" }); }}
+            onClick={() => {
+              onNavigate?.();
+              signOut({ callbackUrl: "/login" });
+            }}
           >
-            <LogOut className="h-4 w-4 flex-shrink-0" strokeWidth={1.75} style={{ color: "rgba(147,196,174,0.55)" }} />
+            <LogOut
+              className="h-4 w-4 flex-shrink-0"
+              strokeWidth={1.75}
+              style={{ color: "rgba(147,196,174,0.55)" }}
+            />
             Sign out
           </button>
           {hasSampleData && (
             <div className="pt-3">
               <div
                 className="mx-3 rounded-lg px-3 py-2 text-center"
-                style={{ background: "rgba(201,168,106,0.12)", border: "1px solid rgba(201,168,106,0.3)" }}
+                style={{
+                  background: "rgba(201,168,106,0.12)",
+                  border: "1px solid rgba(201,168,106,0.3)",
+                }}
               >
-                <p className="text-xs font-semibold" style={{ color: "#C9A86A", letterSpacing: "0.04em" }}>Demo data active</p>
-                <p className="text-[10px] mt-0.5" style={{ color: "rgba(201,168,106,0.65)" }}>Import a statement to switch to real data</p>
+                <p
+                  className="text-xs font-semibold"
+                  style={{ color: "#C9A86A", letterSpacing: "0.04em" }}
+                >
+                  Demo data active
+                </p>
+                <p className="mt-0.5 text-[10px]" style={{ color: "rgba(201,168,106,0.65)" }}>
+                  Import a statement to switch to real data
+                </p>
               </div>
             </div>
           )}

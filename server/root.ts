@@ -16,6 +16,7 @@ import { voiceRouter } from "@/server/routers/voice";
 import { gdprRouter } from "@/server/routers/gdpr";
 // EasyFinance module
 import { statementTransactionsRouter } from "./routers/statementTransactions";
+import { pfCyclesRouter } from "@/server/routers/pfCycles";
 import { taxReportRouter } from "@/server/routers/taxReport";
 import { budgetsRouter } from "@/server/routers/budgets";
 import { goalsRouter } from "@/server/routers/goals";
@@ -47,6 +48,7 @@ export const appRouter = createTRPCRouter({
   gdpr: gdprRouter,
   // EasyFinance module
   statementTransactions: statementTransactionsRouter,
+  pfCycles: pfCyclesRouter,
   taxReport: taxReportRouter,
   budgets: budgetsRouter,
   goals: goalsRouter,

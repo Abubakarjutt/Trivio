@@ -3,6 +3,7 @@
 // view, the summary and the budgets that track its category.
 import { describe, it, expect, beforeAll, afterEach } from "vitest";
 import { db, iso, newUser, today, type QaUser } from "./harness";
+import { addDays, localToday } from "@/server/services/pf-cycle.service";
 
 let u: QaUser;
 let other: QaUser;
@@ -340,5 +341,162 @@ describe("recurring items", () => {
     await expect(other.api.recurringItems.markPaid({ id: pay.id })).rejects.toThrow();
     await u.api.recurringItems.delete({ id: pay.id });
     expect(await db.recurringItem.findUnique({ where: { id: pay.id } })).toBeNull();
+  });
+});
+
+describe("personal finance dashboard (insights)", () => {
+  it("shows where the money goes: totals, category pie, groups, merchants and trend", async () => {
+    const me = await newUser();
+    const add = (
+      date: string,
+      type: "DEBIT" | "CREDIT",
+      amount: number,
+      category: string,
+      merchantName: string
+    ) =>
+      me.api.statementTransactions.create({
+        date,
+        description: merchantName,
+        merchantName,
+        amount,
+        type,
+        category,
+      });
+    await add("2025-11-01", "CREDIT", 3000, "Salary & Employment", "Employer");
+    await add("2025-11-03", "DEBIT", 120.5, "Groceries", "Metro");
+    await add("2025-11-30", "DEBIT", 79.5, "Groceries", "Metro");
+    await add("2025-11-15", "DEBIT", 800, "Rent & Mortgage", "Landlord");
+    const excluded = await add("2025-11-16", "DEBIT", 5000, "Shopping", "Ignored");
+    await me.api.statementTransactions.toggleExclude({ id: excluded.id });
+    await add("2025-10-10", "DEBIT", 50, "Groceries", "Metro");
+    await add("2025-12-01", "DEBIT", 999, "Groceries", "Next month");
+
+    // Months before the first pay month show as calendar months.
+    const periods = await me.api.pfCycles.list();
+    const novP = periods.find((p) => p.label === "November 2025")!;
+    expect(novP).toMatchObject({ from: "2025-11-01", to: "2025-11-30", kind: "calendar" });
+    const nov = await me.api.statementTransactions.insights({ from: novP.from, to: novP.to });
+    expect(nov).toMatchObject({ income: 3000, expenses: 1000, net: 2000, count: 4 });
+    expect(nov.savingsRate).toBeCloseTo(2 / 3);
+    expect(nov.expenseByCategory.map((s) => [s.name, s.total, s.count])).toEqual([
+      ["Rent & Mortgage", 800, 1],
+      ["Groceries", 200, 2],
+    ]);
+    expect(nov.expenseByCategory.map((s) => s.share)).toEqual([0.8, 0.2]);
+    expect(nov.expenseByGroup.map((s) => s.name)).toEqual(["Housing", "Food & Dining"]);
+    expect(nov.incomeByCategory.map((s) => s.name)).toEqual(["Salary & Employment"]);
+    expect(nov.topMerchants[0]).toMatchObject({ name: "Landlord", total: 800 });
+    expect(nov.dailyAverage).toBe(33.33); // 1000 / 30 days
+    // The trend starts at the earliest data (October), not before.
+    expect(nov.trend.map((p) => p.label)).toEqual(["October 2025", "November 2025"]);
+    expect(nov.trend.at(-2)).toMatchObject({ from: "2025-10-01", expenses: 50 });
+    expect(nov.trend.at(-1)).toMatchObject({ income: 3000, expenses: 1000 });
+
+    const all = await me.api.statementTransactions.insights({});
+    expect(all).toMatchObject({ expenses: 2049, count: 6, dailyAverage: null });
+    expect(all.trend).toHaveLength(12);
+
+    // Another organisation sees none of it.
+    const theirs = await other.api.statementTransactions.insights({
+      from: "2025-11-01",
+      to: "2025-11-30",
+    });
+    expect(theirs).toMatchObject({ income: 0, expenses: 0, count: 0 });
+    await expect(me.api.statementTransactions.insights({ from: "November" })).rejects.toThrow();
+  });
+});
+
+describe("pay months (close the month yourself)", () => {
+  // The server counts days on this machine's calendar.
+  const day = (offset: number) => addDays(localToday(), offset);
+
+  it("the month stays open past the 1st until closed; transactions land in a month by their date", async () => {
+    const me = await newUser();
+    // The first time, the current month opens on the 1st of this calendar month.
+    const first = await me.api.pfCycles.list();
+    expect(first).toEqual([
+      expect.objectContaining({ from: `${localToday().slice(0, 7)}-01`, to: null, kind: "open" }),
+    ]);
+    expect(await me.api.pfCycles.list()).toHaveLength(1); // not re-created
+
+    // Salary came 40 days ago: move the start there. Nothing closes on the 1st.
+    await me.api.pfCycles.setStart({ startDate: day(-40) });
+    const spend = (date: string, amount: number) =>
+      me.api.statementTransactions.create({
+        date,
+        description: "Shop",
+        merchantName: "Shop",
+        amount,
+        type: "DEBIT",
+        category: "Groceries",
+      });
+    await spend(day(-40), 5);
+    await spend(day(-10), 20);
+    await spend(day(-9), 300);
+    let periods = await me.api.pfCycles.list();
+    expect(periods).toHaveLength(1);
+    expect(periods[0]).toMatchObject({ from: day(-40), to: null, kind: "open" });
+    expect(
+      (await me.api.statementTransactions.insights({ from: day(-40), to: null })).expenses
+    ).toBe(325);
+
+    // Close it on the day before the salary arrived; the next month starts the day after.
+    const closed = await me.api.pfCycles.close({ endDate: day(-10) });
+    expect(closed).toEqual({ closed: { from: day(-40), to: day(-10) }, nextStarts: day(-9) });
+    periods = await me.api.pfCycles.list();
+    expect(periods.map((p) => [p.from, p.to, p.kind])).toEqual([
+      [day(-40), day(-10), "closed"],
+      [day(-9), null, "open"],
+    ]);
+    const [old, cur] = periods;
+    expect((await me.api.statementTransactions.insights(old)).expenses).toBe(25);
+    expect((await me.api.statementTransactions.insights(cur)).expenses).toBe(300);
+    // The Transactions page list and summary use the same bounds.
+    const oldRange = { dateFrom: old.from, dateTo: old.to! };
+    expect((await me.api.statementTransactions.summary(oldRange)).totalDebits).toBe(25);
+    expect((await me.api.statementTransactions.list(oldRange)).items).toHaveLength(2);
+    expect((await me.api.statementTransactions.summary({ dateFrom: cur.from })).totalDebits).toBe(
+      300
+    );
+    // The trend compares pay months.
+    const trend = (await me.api.statementTransactions.insights(cur)).trend;
+    expect(trend.map((p) => [p.from, p.expenses])).toEqual([
+      [day(-40), 25],
+      [day(-9), 300],
+    ]);
+
+    // Moving the current month's start moves the previous month's end with it.
+    await me.api.pfCycles.setStart({ startDate: day(-12) });
+    periods = await me.api.pfCycles.list();
+    expect(periods.map((p) => [p.from, p.to])).toEqual([
+      [day(-40), day(-13)],
+      [day(-12), null],
+    ]);
+    await expect(me.api.pfCycles.setStart({ startDate: day(-40) })).rejects.toThrow(
+      /previous month started/
+    );
+
+    // Undo: the previous month continues, taking in the current one.
+    expect(await me.api.pfCycles.reopen()).toEqual({ reopened: day(-40) });
+    expect((await me.api.pfCycles.list()).map((p) => [p.from, p.to])).toEqual([[day(-40), null]]);
+    await expect(me.api.pfCycles.reopen()).rejects.toThrow(/no closed month/);
+  });
+
+  it("rejects closing before the month started or in the future, and is per organisation", async () => {
+    const me = await newUser();
+    await me.api.pfCycles.setStart({ startDate: day(-5) });
+    await expect(me.api.pfCycles.close({ endDate: day(-6) })).rejects.toThrow(/can't end before/);
+    await expect(me.api.pfCycles.close({ endDate: day(1) })).rejects.toThrow(/future/);
+    await expect(me.api.pfCycles.setStart({ startDate: day(1) })).rejects.toThrow(/future/);
+    await expect(me.api.pfCycles.close({ endDate: "tomorrow" })).rejects.toThrow();
+
+    // Closing today (the default) starts the next month tomorrow.
+    expect((await me.api.pfCycles.close({})).nextStarts).toBe(day(1));
+    expect((await me.api.pfCycles.list()).at(-1)).toMatchObject({ from: day(1), kind: "open" });
+
+    // Someone else's months are untouched.
+    const theirs = await other.api.pfCycles.list();
+    expect(theirs.every((p) => p.from !== day(-5))).toBe(true);
+    expect(await db.pfCycle.count({ where: { organisationId: me.orgId } })).toBe(2);
   });
 });

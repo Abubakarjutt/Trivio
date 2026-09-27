@@ -28,7 +28,11 @@ import { AddTransactionDialog } from "./_components/add-transaction-dialog";
 import { TransactionCard } from "./_components/transaction-card";
 import { CategoryPicker } from "./_components/category-picker";
 import { CATEGORY_DEFINITIONS } from "@/server/services/statement-categorization.service";
-import { MonthPicker, currentMonth } from "@/app/(app)/pf/_components/month-picker";
+import {
+  PayMonthPicker,
+  usePayMonths,
+  type PayMonthSelection,
+} from "@/app/(app)/pf/_components/pay-month-picker";
 import { formatCurrency } from "@/lib/utils";
 
 type PendingBatch = {
@@ -77,7 +81,10 @@ export default function PfTransactionsPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [pendingBatch, setPendingBatch] = useState<PendingBatch | null>(null);
-  const [month, setMonth] = useState<string | undefined>(() => currentMonth());
+  const payMonths = usePayMonths();
+  const { period } = payMonths;
+  // The selected pay month as inclusive date bounds (none = all time).
+  const range = period ? { dateFrom: period.from, dateTo: period.to ?? undefined } : {};
   const [category, setCategory] = useState<string>("__all__");
   const [type, setType] = useState<string>("__all__");
   const [search, setSearch] = useState("");
@@ -87,16 +94,23 @@ export default function PfTransactionsPage() {
   const currency = org?.currency ?? "USD";
   const fmt = (n: number) => formatCurrency(n, currency);
 
-  const { data: summary } = trpc.statementTransactions.summary.useQuery({ month });
-
-  const { data, isLoading } = trpc.statementTransactions.list.useQuery({
-    month,
-    category: category === "__all__" ? undefined : category,
-    type: type === "__all__" ? undefined : (type as "DEBIT" | "CREDIT"),
-    search: search || undefined,
-    cursor,
-    limit: 50,
+  const { data: summary } = trpc.statementTransactions.summary.useQuery(range, {
+    enabled: payMonths.ready,
   });
+
+  const list = trpc.statementTransactions.list.useQuery(
+    {
+      ...range,
+      category: category === "__all__" ? undefined : category,
+      type: type === "__all__" ? undefined : (type as "DEBIT" | "CREDIT"),
+      search: search || undefined,
+      cursor,
+      limit: 50,
+    },
+    { enabled: payMonths.ready }
+  );
+  const data = list.data;
+  const isLoading = list.isLoading || !payMonths.ready;
 
   const updateCategory = trpc.statementTransactions.updateCategory.useMutation({
     onSuccess: () => {
@@ -116,8 +130,8 @@ export default function PfTransactionsPage() {
 
   const categories = CATEGORY_DEFINITIONS.map((c) => c.name);
 
-  function handleMonthChange(m: string | undefined) {
-    setMonth(m);
+  function handleMonthChange(m: PayMonthSelection) {
+    payMonths.setSelection(m);
     setCursor(undefined);
     setSearch("");
     setCategory("__all__");
@@ -153,7 +167,7 @@ export default function PfTransactionsPage() {
 
       {/* Month picker */}
       <div className="flex items-center justify-between">
-        <MonthPicker month={month} onChange={handleMonthChange} />
+        <PayMonthPicker {...payMonths} setSelection={handleMonthChange} />
       </div>
 
       {/* Summary strip */}
@@ -252,7 +266,7 @@ export default function PfTransactionsPage() {
       ) : !data?.items.length ? (
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-16 text-center">
           <CreditCard className="text-muted-foreground/40 mb-3 h-10 w-10" />
-          {month ? (
+          {period ? (
             <>
               <p className="text-muted-foreground text-sm font-medium">
                 No transactions in this month
@@ -264,7 +278,7 @@ export default function PfTransactionsPage() {
                 size="sm"
                 variant="outline"
                 className="mt-4"
-                onClick={() => setMonth(undefined)}
+                onClick={() => handleMonthChange("all")}
               >
                 View all transactions
               </Button>
@@ -401,7 +415,7 @@ export default function PfTransactionsPage() {
         pendingBatch={pendingBatch}
         onComplete={() => {
           setPendingBatch(null);
-          setMonth(undefined); // show All time so imported transactions are visible
+          payMonths.setSelection("all"); // show All time so imported transactions are visible
           setCursor(undefined);
           utils.statementTransactions.list.invalidate();
           utils.statementTransactions.summary.invalidate();

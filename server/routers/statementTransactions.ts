@@ -2,6 +2,15 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, orgProcedure } from "@/server/trpc";
 import { createManualPfTransaction } from "@/server/services/pf-transaction.service";
+import { buildInsights } from "@/server/services/pf-insights.service";
+import {
+  dateOf,
+  listPeriods,
+  localToday,
+  periodLabel,
+} from "@/server/services/pf-cycle.service";
+
+const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a YYYY-MM-DD date");
 
 /**
  * Convert a "YYYY-MM" string into an inclusive [gte, lt) date range.
@@ -183,12 +192,20 @@ export const statementTransactionsRouter = createTRPCRouter({
       z.object({
         /** "YYYY-MM" month filter — undefined = all time */
         month: z.string().optional(),
+        /** Inclusive date bounds (a pay month) — used when `month` isn't set. */
+        dateFrom: day.optional(),
+        dateTo: day.optional(),
       })
     )
     .query(async ({ ctx, input }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const baseWhere: any = { organisationId: ctx.organisationId, isExcluded: false };
       if (input.month) baseWhere.date = monthRange(input.month);
+      else if (input.dateFrom || input.dateTo)
+        baseWhere.date = {
+          ...(input.dateFrom ? { gte: dateOf(input.dateFrom) } : {}),
+          ...(input.dateTo ? { lte: dateOf(input.dateTo) } : {}),
+        };
 
       const [totalCount, debitsAgg, creditsAgg, latestBatch] = await Promise.all([
         ctx.db.statementTransaction.count({ where: baseWhere }),
@@ -211,5 +228,63 @@ export const statementTransactionsRouter = createTRPCRouter({
         totalCredits: Number(creditsAgg._sum.amount ?? 0),
         latestBatch,
       };
+    }),
+
+  /** Personal Finance dashboard: income vs expenses, where the money goes
+   *  (by category and group), top merchants and the trend over pay months. */
+  insights: orgProcedure
+    .input(
+      z.object({
+        /** A period from pfCycles.list — omit for all time. */
+        from: day.optional(),
+        /** Inclusive end; null/omitted = still open. */
+        to: day.nullish(),
+      })
+    )
+    .query(async ({ ctx, input }) => {
+      const today = localToday();
+      const periods = await listPeriods(ctx.db, ctx.organisationId, today);
+      const period = input.from ? { from: input.from, to: input.to ?? null } : undefined;
+      // The trend: the 6 periods up to the chosen one, or the last 12 for all time.
+      const at = period ? periods.findIndex((p) => p.from === period.from) : periods.length - 1;
+      const trend = (
+        at < 0
+          ? [{ ...period!, label: periodLabel(period!.from, period!.to) }]
+          : periods.slice(Math.max(0, at - (period ? 5 : 11)), at + 1)
+      ).map(({ from, to, label }) => ({ from, to, label }));
+
+      const base = { organisationId: ctx.organisationId, isExcluded: false };
+      const between = (from: string, to: string | null) => ({
+        gte: dateOf(from),
+        ...(to ? { lte: dateOf(to) } : {}),
+      });
+      const [rows, trendRows] = await Promise.all([
+        ctx.db.statementTransaction.findMany({
+          where: period ? { ...base, date: between(period.from, period.to) } : base,
+          select: {
+            date: true,
+            type: true,
+            amount: true,
+            category: true,
+            merchantName: true,
+            description: true,
+          },
+        }),
+        ctx.db.statementTransaction.findMany({
+          where: { ...base, date: between(trend[0].from, trend[trend.length - 1].to) },
+          select: { date: true, type: true, amount: true },
+        }),
+      ]);
+      return buildInsights(
+        rows.map((r) => ({ ...r, amount: Number(r.amount) })),
+        trendRows.map((r) => ({
+          ...r,
+          amount: Number(r.amount),
+          category: "",
+          merchantName: null,
+          description: "",
+        })),
+        { period, trend, today }
+      );
     }),
 });

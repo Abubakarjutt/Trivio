@@ -152,6 +152,7 @@ model Organisation {
   watchlists             Watchlist[]
   statementImportBatches StatementImportBatch[]
   statementTransactions  StatementTransaction[]
+  pfCycles               PfCycle[]
   // CRM
   crmLeads          CrmLead[]
   crmCompanies      CrmCompany[]
@@ -690,6 +691,22 @@ enum StatementImportStatus {
 enum StatementTransactionType {
   DEBIT
   CREDIT
+}
+
+/// A Personal Finance "month" — the user's pay cycle. It runs from startDate
+/// until the user closes it (endDate null = the open, current month); closing
+/// starts the next one the following day. Transactions belong to a cycle by
+/// date, so imports and back-dated entries land in the right one.
+model PfCycle {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  startDate      DateTime     @db.Date
+  endDate        DateTime?    @db.Date
+  closedAt       DateTime?
+  createdAt      DateTime     @default(now())
+
+  @@unique([organisationId, startDate])
 }
 
 model StatementImportBatch {

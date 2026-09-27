@@ -28,6 +28,7 @@ const PAGES = [
   "/reports/ar-aging",
   "/reports/ap-aging",
   "/reports/tax-summary",
+  "/pf/dashboard",
   "/pf/transactions",
   "/pf/tax-report",
   "/budgets",
@@ -113,6 +114,40 @@ test("a transaction added by hand shows up in Personal Finance", async () => {
   await expect(page.getByText("Farmers Market").first()).toBeVisible();
   await page.reload();
   await expect(page.getByText("Farmers Market").first()).toBeVisible();
+
+  // …and in the Overview's spending breakdown.
+  await page.goto("/pf/dashboard");
+  await expect(page.getByTestId("spending-pie")).toBeVisible();
+  await expect(page.getByText("Top merchants")).toBeVisible();
+  await expect(page.locator("main").getByText("Farmers Market").first()).toBeVisible();
+});
+
+test("the month stays open until closed with the button, and can be reopened", async () => {
+  await page.goto("/pf/dashboard");
+  // The sidebar marks the page it's on (both classes, not run together).
+  await expect(page.getByRole("link", { name: "Overview" })).toHaveClass(
+    /(^| )sb-link sb-active( |$)/
+  );
+  const label = page.getByTestId("pay-month-label");
+  await expect(label).toHaveText(/– now$/);
+  await page.getByRole("button", { name: "Close month" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByLabel("Last day of this month")).toBeVisible();
+  await dialog.getByRole("button", { name: "Close month" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByText(/Month closed\. A new month started on/)).toBeVisible();
+
+  // Today's expense stays in the month just closed; the new one starts empty.
+  await expect(page.getByText("No transactions for this month")).toBeVisible();
+  await page.getByRole("button", { name: "Previous month" }).click();
+  await expect(label).not.toHaveText(/– now$/);
+  await expect(page.locator("main").getByText("Farmers Market").first()).toBeVisible();
+
+  // Undo it: the month carries on.
+  await page.getByRole("button", { name: "Reopen month" }).click();
+  await expect(label).toHaveText(/– now$/);
+  await expect(page.getByRole("button", { name: "Close month" })).toBeVisible();
+  await expect(page.locator("main").getByText("Farmers Market").first()).toBeVisible();
 });
 
 async function ask(text: string) {
@@ -167,11 +202,15 @@ test("voice input: off by default, turned on in Settings, speech lands in the ch
   // The engine warms up in the background and Settings says what it runs on.
   await expect(page.getByText("Runs on the GPU: Fake M1 (Metal)")).toBeVisible();
   await page.getByRole("radio", { name: "Urdu", exact: true }).click();
-  await expect(page.getByRole("radio", { name: "Urdu", exact: true })).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByRole("radio", { name: "Urdu", exact: true })).toHaveAttribute(
+    "aria-checked",
+    "true"
+  );
 
   await page.goto("/pf/transactions");
   const input = page.getByPlaceholder("Ask me anything...");
-  if (!(await input.isVisible())) await page.getByRole("button", { name: "Open AI assistant" }).click();
+  if (!(await input.isVisible()))
+    await page.getByRole("button", { name: "Open AI assistant" }).click();
   await page.getByRole("button", { name: "Speak your message" }).click();
   await expect(page.getByRole("button", { name: /Stop recording/ })).toBeVisible();
   await page.waitForTimeout(1200);
@@ -187,9 +226,13 @@ test("voice input: off by default, turned on in Settings, speech lands in the ch
   // Turning it off removes the mic.
   await page.goto("/settings");
   await page.getByRole("switch", { name: "Voice input" }).click();
-  await expect(page.getByRole("switch", { name: "Voice input" })).toHaveAttribute("aria-checked", "false");
+  await expect(page.getByRole("switch", { name: "Voice input" })).toHaveAttribute(
+    "aria-checked",
+    "false"
+  );
   await page.goto("/pf/transactions");
-  if (!(await input.isVisible())) await page.getByRole("button", { name: "Open AI assistant" }).click();
+  if (!(await input.isVisible()))
+    await page.getByRole("button", { name: "Open AI assistant" }).click();
   await expect(input).toBeVisible();
   await expect(page.getByRole("button", { name: "Speak your message" })).toHaveCount(0);
 });

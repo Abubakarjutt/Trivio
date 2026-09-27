@@ -39,7 +39,9 @@ const AREA_LABELS: Record<string, string> = {
     "PERSONAL FINANCE transactions (spending/income on the Personal Finance → Transactions page)",
   transactions: "BUSINESS journal entries (double-entry accounting)",
   dashboard:
-    "BUSINESS ledger totals from journal entries only — for personal spending/income use statementTransactions.summary or statementTransactions.list",
+    "BUSINESS ledger totals from journal entries only — for personal spending/income use statementTransactions.insights (breakdown by category, top merchants, trend), statementTransactions.summary or statementTransactions.list",
+  pfCycles:
+    "personal finance MONTHS — they follow the user's pay cycle and stay open until closed (not calendar months). list gives each month's from/to dates; pass them to statementTransactions.insights / summary / list (dateFrom/dateTo) for 'this month'. close = the user's 'close my month'",
   budgets: "personal finance budgets",
   goals: "personal finance savings goals",
   recurringItems: "personal finance recurring bills/income",
