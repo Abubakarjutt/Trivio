@@ -20,11 +20,11 @@ const PORT = Number(process.env.E2E_PORT ?? 3107);
 
 type Msg = { role: string; content: string };
 
-/** What the stub model says, given the conversation so far. */
-function stubReply(messages: Msg[]): string {
-  const nonce = /TOOL_CALL_([0-9a-f]{16})/.exec(messages[0]?.content ?? "")?.[1] ?? "";
+/** What the stub model sends back (Ollama's message), given the conversation so far. */
+function stubReply(messages: Msg[]): { role: string; content: string; tool_calls?: unknown[] } {
   const last = messages.at(-1)?.content ?? "";
-  if (/just answered your proposed actions/.test(last)) return "Done — anything else?";
+  const say = (content: string) => ({ role: "assistant", content });
+  if (/just answered your proposed actions/.test(last)) return say("Done — anything else?");
   const spent = /spent (\d+(?:\.\d+)?) at ([A-Za-z]+)/i.exec(last);
   if (spent) {
     const args = {
@@ -33,10 +33,16 @@ function stubReply(messages: Msg[]): string {
       type: "EXPENSE",
       category: "Other",
     };
-    // Like a small model: a premature ✓ line the app must strip.
-    return `✓ Expense recorded\nTOOL_CALL_${nonce}: ${JSON.stringify({ tool: "add_pf_transaction", args })}`;
+    // Like Gemma: a native call to the action tool — plus a premature ✓ line
+    // the app must strip.
+    return {
+      ...say("✓ Expense recorded"),
+      tool_calls: [
+        { function: { name: "action", arguments: { tool: "add_pf_transaction", args } } },
+      ],
+    };
   }
-  return "Hello! How can I help with your finances?";
+  return say("Hello! How can I help with your finances?");
 }
 
 function startStubOllama(): Promise<{ server: Server; url: string }> {
@@ -47,7 +53,7 @@ function startStubOllama(): Promise<{ server: Server; url: string }> {
       res.setHeader("Content-Type", "application/json");
       if (req.url === "/api/chat") {
         const { messages } = JSON.parse(body) as { messages: Msg[] };
-        res.end(JSON.stringify({ message: { content: stubReply(messages) }, done: true }));
+        res.end(JSON.stringify({ message: stubReply(messages), done: true }));
       } else if (req.url === "/api/tags") {
         res.end(JSON.stringify({ models: [{ name: "gemma4:e4b", model: "gemma4:e4b" }] }));
       } else if (req.url === "/api/version") {

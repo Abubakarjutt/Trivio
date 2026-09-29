@@ -8,8 +8,14 @@ import {
   formatToolResultsForModel,
   parseToolCalls,
   type ToolCall,
+  type ToolMode,
   type ToolResult,
 } from "@/server/services/chat.service";
+import {
+  ACTION_TOOL,
+  fromNativeToolCalls,
+  type OllamaToolCall,
+} from "@/server/services/chat-native-tools";
 import {
   callKey,
   canonicalizeCall,
@@ -77,11 +83,15 @@ class NeedsSetupError extends Error {
   }
 }
 
-// The text the model produced, after provider-specific shaping. Both providers
-// return a plain string (our tool-calling is a TEXT protocol — TOOL_CALL: lines
-// — so no native function-calling is required or honoured).
+// One model turn, after provider-specific shaping. Gemini calls actions in its
+// text (TOOL_CALL_<nonce>: lines, parsed by the agent loop); Ollama calls them
+// natively, returned here as `toolCalls` (see chat-native-tools.ts).
 interface ProviderTurn {
   text: string;
+  toolCalls?: ToolCall[];
+  // The assistant message exactly as the model sent it (with its native tool
+  // calls), replayed so the next round's tool results follow the call.
+  assistantMsg?: ChatMsg;
 }
 
 // ── Gemini provider ────────────────────────────────────────────────────────────
@@ -164,17 +174,22 @@ async function runGemini(params: {
 
 async function runOllama(params: {
   systemMsg?: { role: string; content: string };
-  chatMsgs: { role: string; content: string }[];
+  chatMsgs: ChatMsg[];
 }): Promise<ProviderTurn> {
   const { systemMsg, chatMsgs } = params;
 
-  // Ollama's /api/chat uses system/user/assistant roles directly.
+  // Ollama's /api/chat uses system/user/assistant/tool roles directly.
   const messages = [
     ...(systemMsg ? [{ role: "system", content: systemMsg.content }] : []),
-    ...chatMsgs.map((m) => ({
-      role: m.role === "assistant" ? "assistant" : "user",
-      content: m.content,
-    })),
+    ...chatMsgs.map((m) =>
+      m.role === "tool"
+        ? { role: "tool", tool_name: ACTION_TOOL.function.name, content: m.content }
+        : {
+            role: m.role === "assistant" ? "assistant" : "user",
+            content: m.content,
+            ...(m.tool_calls?.length ? { tool_calls: m.tool_calls } : {}),
+          }
+    ),
   ];
 
   const res = await fetch(`${OLLAMA_HOST}/api/chat`, {
@@ -183,6 +198,7 @@ async function runOllama(params: {
     body: JSON.stringify({
       model: OLLAMA_MODEL,
       messages,
+      tools: [ACTION_TOOL],
       stream: false,
       options: { temperature: 0.2, num_predict: 8192 },
     }),
@@ -207,7 +223,7 @@ async function runOllama(params: {
   }
 
   const json = (await res.json()) as {
-    message?: { content?: string };
+    message?: { content?: string; tool_calls?: OllamaToolCall[] };
     done?: boolean;
     error?: string;
   };
@@ -221,7 +237,20 @@ async function runOllama(params: {
   }
 
   const text = (json.message?.content ?? "").trim();
-  return { text: text || "I'm sorry, I wasn't able to generate a response. Please try again." };
+  const rawCalls = json.message?.tool_calls ?? [];
+  const toolCalls = fromNativeToolCalls(rawCalls);
+  if (!text && toolCalls.length === 0) {
+    return { text: "I'm sorry, I wasn't able to generate a response. Please try again." };
+  }
+  return {
+    text,
+    toolCalls,
+    assistantMsg: {
+      role: "assistant",
+      content: text,
+      ...(rawCalls.length ? { tool_calls: rawCalls } : {}),
+    },
+  };
 }
 
 // ── Shared post-processing ─────────────────────────────────────────────────────
@@ -230,11 +259,18 @@ async function runOllama(params: {
 // data it asked for (e.g. look up an id) and then act on it.
 const MAX_AGENT_ROUNDS = 4;
 
-type ChatMsg = { role: string; content: string };
+type ChatMsg = {
+  role: string;
+  content: string;
+  // Native tool calls on an assistant message (Ollama), replayed as-is.
+  tool_calls?: OllamaToolCall[];
+};
 
-// Sent when the model says it did something but wrote no ACTION line.
-const UNBACKED_CLAIM_CORRECTION = (nonce: string) =>
-  `APP_NOTICE (from the app, not the user): your reply says something was done, but you wrote no ACTION line, so NOTHING was saved or changed. If the user asked for a change, write the ACTION line now (TOOL_CALL_${nonce}: {"tool":"...","args":{...}}). If you were only describing existing data, repeat your answer without claiming you did anything.`;
+// Sent when the model says it did something but made no call.
+const UNBACKED_CLAIM_CORRECTION = (nonce: string, toolMode: ToolMode) =>
+  toolMode === "native"
+    ? `APP_NOTICE (from the app, not the user): your reply says something was done, but you did not call the action tool, so NOTHING was saved or changed. If the user asked for a change, call the action tool now. If you were only describing existing data, repeat your answer without claiming you did anything.`
+    : `APP_NOTICE (from the app, not the user): your reply says something was done, but you wrote no ACTION line, so NOTHING was saved or changed. If the user asked for a change, write the ACTION line now (TOOL_CALL_${nonce}: {"tool":"...","args":{...}}). If you were only describing existing data, repeat your answer without claiming you did anything.`;
 
 const NOTHING_CHANGED_NOTE =
   "ℹ️ Nothing was changed — no action was taken. Ask again if you'd like me to do it.";
@@ -246,13 +282,14 @@ async function runAgentLoop(params: {
   chatMsgs: ChatMsg[];
   runModel: (chatMsgs: ChatMsg[]) => Promise<ProviderTurn>;
   nonce: string;
+  toolMode: ToolMode;
   sendEvent: (event: string, data: unknown) => void;
   close: () => void;
   // Actions the user already approved earlier in this request (resume) —
   // never propose them again.
   alreadyDone?: string[];
 }): Promise<void> {
-  const { conversationId, userOrgId, userId, runModel, nonce, sendEvent, close } = params;
+  const { conversationId, userOrgId, userId, runModel, nonce, toolMode, sendEvent, close } = params;
   const msgs = [...params.chatMsgs];
   const toolCalls: ToolCall[] = [];
   const toolResults: ToolResult[] = [];
@@ -270,13 +307,18 @@ async function runAgentLoop(params: {
   for (let round = 1; round <= MAX_AGENT_ROUNDS; round++) {
     if (round > 1) sendEvent("thinking", {});
     const turn = await runModel(msgs);
+    // Native calls (Ollama) plus any TOOL_CALL_<nonce> lines (Gemini). The
+    // nonce is only ever shown to a text-mode model, so a line in a native
+    // model's reply can't match it.
     const parsed = parseToolCalls(turn.text, nonce);
     if (parsed.text) text = parsed.text;
+    const calls = [...(turn.toolCalls ?? []), ...parsed.toolCalls];
+    const assistantMsg = turn.assistantMsg ?? { role: "assistant", content: turn.text };
 
     // Dedupe against earlier rounds AND within this reply — small models
-    // sometimes write the same ACTION line twice.
+    // sometimes make the same call twice.
     const seen = new Set<string>();
-    const fresh = parsed.toolCalls
+    const fresh = calls
       .map((c) => canonicalizeCall(normalizeToolCall(c)))
       .filter((c) => {
         const key = callKey(c);
@@ -297,8 +339,8 @@ async function runAgentLoop(params: {
         claimsUnbackedAction(parsed.text)
       ) {
         corrected = true;
-        msgs.push({ role: "assistant", content: turn.text });
-        msgs.push({ role: "user", content: UNBACKED_CLAIM_CORRECTION(nonce) });
+        msgs.push(assistantMsg);
+        msgs.push({ role: "user", content: UNBACKED_CLAIM_CORRECTION(nonce, toolMode) });
         continue;
       }
       break;
@@ -332,8 +374,12 @@ async function runAgentLoop(params: {
     if (proposals.length > 0) break;
     if (round === MAX_AGENT_ROUNDS) break;
     // Let the model read what it asked for (ids, balances) and carry on.
-    msgs.push({ role: "assistant", content: turn.text });
-    msgs.push({ role: "user", content: formatToolResultsForModel(roundResults, nonce) });
+    msgs.push(assistantMsg);
+    msgs.push({
+      // A native call is answered by a tool message; a text call by the user.
+      role: toolMode === "native" ? "tool" : "user",
+      content: formatToolResultsForModel(roundResults, nonce, toolMode),
+    });
   }
 
   // Only the app may say something was done.
@@ -470,11 +516,15 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  // The local model calls actions through Ollama's native tool calling;
+  // Gemini keeps the TOOL_CALL text protocol.
+  const toolMode: ToolMode = AI_PROVIDER === "ollama" ? "native" : "text";
   const { messages, nonce } = await buildChatMessages(db, {
     organisationId: user.organisationId,
     conversationId,
     userMessage: resume ? undefined : message,
     attachmentId,
+    toolMode,
   });
 
   const encoder = new TextEncoder();
@@ -516,6 +566,7 @@ export async function POST(req: NextRequest) {
           chatMsgs,
           runModel,
           nonce,
+          toolMode,
           sendEvent,
           close: () => controller.close(),
           alreadyDone,
