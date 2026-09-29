@@ -129,7 +129,7 @@ export function VoiceInputCard() {
             options={s.models.map((m) => ({
               id: m.id,
               label: m.label,
-              hint: `${m.sizeMB} MB${m.id === "small" ? " · best for Urdu" : ""}`,
+              hint: `${m.sizeMB} MB${m.id === "turbo" ? " · best for accents and Urdu" : ""}`,
             }))}
             onChange={(model) => update.mutate({ model })}
           />

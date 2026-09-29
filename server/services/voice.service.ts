@@ -48,6 +48,15 @@ export const VOICE_MODELS = {
     sizeMB: 190,
     sha256: "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb",
   },
+  // large-v3 with a 4-layer decoder: large-v3's accuracy (accents, names,
+  // numbers, Urdu script) at a fraction of its cost — ~0.75 s a pass on an
+  // Apple GPU with the language set (~1.3 s on "auto", which adds a detection pass).
+  turbo: {
+    file: "ggml-large-v3-turbo-q5_0.bin",
+    label: "Most accurate",
+    sizeMB: 574,
+    sha256: "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
+  },
 } as const;
 export type VoiceModelId = keyof typeof VOICE_MODELS;
 export const VOICE_MODEL_IDS = Object.keys(VOICE_MODELS) as [VoiceModelId, ...VoiceModelId[]];

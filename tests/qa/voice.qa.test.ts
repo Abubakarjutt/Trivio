@@ -82,7 +82,7 @@ describe("voice input settings", () => {
       download: null,
     });
     expect(s.engineInstalled).toBe(true);
-    expect(s.models.map((m) => m.id)).toEqual(["base", "small"]);
+    expect(s.models.map((m) => m.id)).toEqual(["base", "small", "turbo"]);
     expect(requests).toBe(0);
   });
 
