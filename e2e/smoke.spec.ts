@@ -213,9 +213,13 @@ test("voice input: off by default, turned on in Settings, speech lands in the ch
     await page.getByRole("button", { name: "Open AI assistant" }).click();
   await page.getByRole("button", { name: "Speak your message" }).click();
   await expect(page.getByRole("button", { name: /Stop recording/ })).toBeVisible();
-  await page.waitForTimeout(1200);
+  // The words appear live, while still recording…
+  await expect(input).toHaveValue("I spent 12 at Florist");
+  await expect(page.getByRole("button", { name: /Stop recording/ })).toBeVisible();
   await page.getByRole("button", { name: /Stop recording/ }).click();
-  // The transcript is put in the box for the user to check — not sent.
+  // …and the final pass replaces them rather than adding them again. The
+  // transcript is put in the box for the user to check — not sent.
+  await expect(page.getByRole("button", { name: "Speak your message" })).toBeEnabled();
   await expect(input).toHaveValue("I spent 12 at Florist");
   await expect(page.getByRole("button", { name: "Approve", exact: true })).toHaveCount(0);
 

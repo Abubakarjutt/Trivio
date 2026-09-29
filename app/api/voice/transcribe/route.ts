@@ -4,7 +4,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { chatRateLimiter } from "@/server/middleware/rateLimit";
+import { voiceRateLimiter } from "@/server/middleware/rateLimit";
 import {
   MAX_AUDIO_BYTES,
   VOICE_LANGUAGES,
@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    await chatRateLimiter(`voice:${user.id}`);
+    await voiceRateLimiter(`voice:${user.id}`);
   } catch {
     return new Response("Too many requests. Try again shortly.", { status: 429 });
   }

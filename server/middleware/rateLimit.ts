@@ -58,9 +58,11 @@ export function createRouteRateLimiter(limit: number, windowMs: number) {
   };
 }
 
-export const authRateLimiter       = createRateLimiter(10, 60_000);
+export const authRateLimiter = createRateLimiter(10, 60_000);
 export const extractionRateLimiter = createRateLimiter(20, 60_000);
-export const exportRateLimiter     = createRateLimiter(3, 60 * 60_000);
-export const deletionRateLimiter   = createRateLimiter(2, 60 * 60_000);
-export const registerRateLimiter   = createRouteRateLimiter(5, 60 * 60 * 1000);
-export const chatRateLimiter       = createRateLimiter(20, 60_000);
+export const exportRateLimiter = createRateLimiter(3, 60 * 60_000);
+export const deletionRateLimiter = createRateLimiter(2, 60 * 60_000);
+export const registerRateLimiter = createRouteRateLimiter(5, 60 * 60 * 1000);
+export const chatRateLimiter = createRateLimiter(20, 60_000);
+// Voice input re-transcribes about once a second while recording.
+export const voiceRateLimiter = createRateLimiter(120, 60_000);

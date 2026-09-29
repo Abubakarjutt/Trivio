@@ -1186,6 +1186,9 @@ export function ChatPanel() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // What was in the box when voice text started arriving — live text is
+  // shown after it and replaced on each update.
+  const voiceBaseRef = useRef<string | null>(null);
   const { toast } = useToast();
 
   const utils = trpc.useUtils();
@@ -1629,9 +1632,15 @@ export function ChatPanel() {
               <VoiceInputButton
                 active={isOpen}
                 disabled={isStreaming}
-                onTranscript={(text) => {
-                  setInput((prev) => (prev.trim() ? `${prev.trimEnd()} ${text}` : text));
-                  inputRef.current?.focus();
+                onTranscript={(text, done) => {
+                  if (voiceBaseRef.current === null)
+                    voiceBaseRef.current = inputRef.current?.value ?? "";
+                  const base = voiceBaseRef.current;
+                  setInput(base.trim() && text ? `${base.trimEnd()} ${text}` : base || text);
+                  if (done) {
+                    voiceBaseRef.current = null;
+                    inputRef.current?.focus();
+                  }
                 }}
               />
               <Button

@@ -3,6 +3,12 @@
 // The chat's mic button: record → local whisper.cpp → text in the message box.
 // Hidden unless voice input is turned on in Settings. The transcript is put in
 // the input for the user to check and send — never sent on its own.
+//
+// Live text: while recording, everything said so far is re-transcribed about
+// once a second and shown as it grows (whisper reads audio in 30 s windows, so
+// a pass over the whole recording costs about the same as over its last
+// second, and there are no seams to stitch). One pass at a time — a slower
+// machine just updates less often. Stopping runs a final pass whose text wins.
 
 import { useEffect, useRef, useState } from "react";
 import { Loader2, Mic, Square } from "lucide-react";
@@ -12,8 +18,20 @@ import { useToast } from "@/lib/hooks/use-toast";
 import { recordingToWav } from "@/lib/audio/wav";
 
 const MAX_SECONDS = 60;
+const LIVE_EVERY_MS = 1000;
 
 type Phase = "idle" | "recording" | "transcribing";
+
+async function transcribeRecording(chunks: Blob[], mimeType: string): Promise<string> {
+  const wav = await recordingToWav(new Blob(chunks, { type: mimeType }));
+  const res = await fetch("/api/voice/transcribe", {
+    method: "POST",
+    headers: { "Content-Type": "audio/wav" },
+    body: wav,
+  });
+  if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
+  return ((await res.json()) as { text: string }).text;
+}
 
 export function VoiceInputButton({
   active,
@@ -22,7 +40,9 @@ export function VoiceInputButton({
 }: {
   active: boolean; // the chat panel is open
   disabled?: boolean;
-  onTranscript: (text: string) => void;
+  /** Called with the text so far while recording (done=false), then once
+   *  with the final text (done=true) — each call replaces the last. */
+  onTranscript: (text: string, done: boolean) => void;
 }) {
   const { toast } = useToast();
   const [phase, setPhase] = useState<Phase>("idle");
@@ -81,22 +101,40 @@ export function VoiceInputButton({
     }
     const chunks: Blob[] = [];
     const rec = new MediaRecorder(stream);
-    rec.ondataavailable = (e) => e.data.size > 0 && chunks.push(e.data);
+    let stopped = false;
+    let liveBusy = false;
+    let shownLive = false;
+    const live = async () => {
+      if (liveBusy || stopped) return;
+      liveBusy = true;
+      try {
+        const text = await transcribeRecording(chunks, rec.mimeType);
+        // A pass that finishes after Stop is stale — the final pass decides.
+        if (!stopped && text) {
+          shownLive = true;
+          onTranscript(text, false);
+        }
+      } catch {
+        // A cut-off chunk can fail to decode; the next pass or the final one covers it.
+      } finally {
+        liveBusy = false;
+      }
+    };
+    rec.ondataavailable = (e) => {
+      if (e.data.size === 0) return;
+      chunks.push(e.data);
+      if (rec.state === "recording") void live();
+    };
     rec.onstop = async () => {
+      stopped = true;
       stream.getTracks().forEach((t) => t.stop());
       recorder.current = null;
       setPhase("transcribing");
       try {
-        const wav = await recordingToWav(new Blob(chunks, { type: rec.mimeType }));
-        const res = await fetch("/api/voice/transcribe", {
-          method: "POST",
-          headers: { "Content-Type": "audio/wav" },
-          body: wav,
-        });
-        if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
-        const { text } = (await res.json()) as { text: string };
-        if (text) onTranscript(text);
-        else toast({ title: "Didn't catch that", description: "No speech was heard — try again." });
+        const text = await transcribeRecording(chunks, rec.mimeType);
+        if (text || shownLive) onTranscript(text, true);
+        if (!text)
+          toast({ title: "Didn't catch that", description: "No speech was heard — try again." });
       } catch (err) {
         toast({
           title: "Couldn't transcribe",
@@ -109,7 +147,7 @@ export function VoiceInputButton({
     };
     recorder.current = rec;
     setSeconds(0);
-    rec.start();
+    rec.start(LIVE_EVERY_MS);
     setPhase("recording");
   }
 
