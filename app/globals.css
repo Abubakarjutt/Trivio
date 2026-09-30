@@ -246,6 +246,11 @@
   top: 0;
 }
 
+/* ── The macOS desktop app's window drag handle — shown by desktop/main.ts ── */
+.desktop-drag-strip {
+  display: none;
+}
+
 /* ── Focus-visible ring — consistent across all interactive elements ── */
 :focus-visible {
   outline: 2px solid hsl(var(--ring));

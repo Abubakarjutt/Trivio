@@ -447,6 +447,29 @@ function createWindow(): BrowserWindow {
     void runUpdateCheck();
   });
 
+  // With the title bar hidden, macOS lets the window be dragged only by page
+  // areas marked `app-region: drag` — without one it can't be moved at all.
+  // Show the layout's strip across the top as the drag handle (the page never
+  // sees it on the web). It swallows mouse events, so controls opt out; it
+  // comes first in the body, so later elements' no-drag carves holes in it.
+  if (isMac) {
+    win.webContents.on("dom-ready", () => {
+      void win.webContents.insertCSS(`
+        .desktop-drag-strip {
+          display: block !important; position: fixed; top: 0; left: 0; right: 0;
+          height: 32px; z-index: 2147483647; pointer-events: none;
+          -webkit-app-region: drag;
+        }
+        a, button, input, select, textarea, label, summary, [contenteditable="true"],
+        [role="button"], [role="link"], [role="tab"], [role="switch"], [role="radio"],
+        [role="checkbox"], [role="menuitem"], [role="option"], [role="combobox"],
+        [role="dialog"], [role="menu"], [role="listbox"] {
+          -webkit-app-region: no-drag;
+        }
+      `);
+    });
+  }
+
   // Open external http(s) links in the user's default browser, not in-app.
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url) && !/^(http:\/\/127\.0\.0\.1|http:\/\/localhost)/.test(url)) {

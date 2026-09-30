@@ -14,7 +14,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className={`${fraunces.variable} ${dmSans.variable} ${dmMono.variable}`}>
       <body>
-        <a href="#main-content" className="skip-link">Skip to main content</a>
+        {/* Hidden everywhere except the macOS desktop app, whose shell shows it
+            as the window's drag handle (desktop/main.ts). First in the body so
+            the controls after it can opt out of dragging. */}
+        <div className="desktop-drag-strip" aria-hidden="true" />
+        <a href="#main-content" className="skip-link">
+          Skip to main content
+        </a>
         <TRPCReactProvider>
           {children}
           <Toaster />
