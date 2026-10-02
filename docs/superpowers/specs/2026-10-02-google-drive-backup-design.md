@@ -1,7 +1,22 @@
 # Google Drive Backup & Restore — Design
 
 **Date:** 2026-10-02
-**Status:** Approved in conversation; awaiting written-spec review
+**Status:** Approved by the user; amended while planning (see §0)
+**Plan:** `docs/superpowers/plans/2026-10-02-google-drive-backup.md`
+
+## 0. Amendments made while planning
+
+These override the text below where they conflict.
+
+1. The renderer bridge is `window.trivioDesktop.backup` (the existing global), not `window.trivio.backup`.
+2. Change fingerprint: `stats_reset | sum(n_tup_ins + n_tup_upd + n_tup_del)` from `pg_stat_user_tables`, plus the attachments hash. `xact_commit` also counts the backup's own read-only queries, so "unchanged" would never be detected.
+3. Failure notification: one notification once backups have been failing for ≥ 48 h (`failingSince`, `failureNotified`), instead of "3 consecutive failures" (hourly retries would trip that in 3 hours).
+4. A successful restore adopts the backup's password key, so daily backups continue with the same password and a first-run restore needs no separate "set password" step.
+5. Modules are split more finely than §2's table: `errors`, `keys`, `tar`, `archive`, `pg-tools`, `state`, `secret-store`, `google-auth`, `drive-client`, `backup-service`, plus Electron-only glue in `wire.ts`.
+6. `drive-client` is tested with a fake `fetch`; `google-auth`'s loopback listener with a real local HTTP server.
+7. `server/routers/gdpr.ts:154` also hard-codes `process.cwd()/storage`; it uses the same `storageRoot()`.
+8. `pg_restore` into `trivio_restore` runs while the server is still up; the server is stopped only for the attachment + database swap.
+9. Extra error codes: `BACKUP_FAILED` (generic backup failure) and `BUSY` (backup and restore never interleave).
 **Scope:** Trivio desktop app (Electron + embedded Postgres), macOS and Windows
 
 ## 1. Goal
@@ -54,11 +69,11 @@ lives there, in `desktop/backup/`:
 - A "Restore from Google Drive" link on `app/(auth)/register/page.tsx`, shown only in the
   desktop app, opening a restore dialog.
 
-Both call `window.trivio.backup.*`, exposed by `desktop/preload.ts` and served by
+Both call `window.trivioDesktop.backup.*`, exposed by `desktop/preload.ts` and served by
 `ipcMain.handle("backup:*")` in `desktop/main.ts`. Outside the desktop app, the card shows
 "Available in the desktop app" and the register link is hidden.
 
-**IPC surface** (`window.trivio.backup`):
+**IPC surface** (`window.trivioDesktop.backup`):
 
 ```ts
 status(): Promise<BackupStatus>          // connected email, last success/attempt/error, count kept, running?
@@ -154,12 +169,12 @@ TRAILER
 - **When:** on app start and every hour. If connected, a password is set, and the last
   *successful* backup is more than 24 h old, run a backup unless the fingerprint is
   unchanged.
-- **Fingerprint:** `xact_commit` from `pg_stat_database` for `trivio`, plus a sha256 of the
-  sorted `(relative path, size, mtime)` list of attachments.
-  - Read-only transactions also bump `xact_commit`, so changes are over-reported, never
-    under-reported. That is acceptable, because an unneeded backup is cheap.
-  - Stats reset when Postgres restarts, so any value that differs from the stored one counts
-    as "changed".
+- **Fingerprint:** `stats_reset | sum(n_tup_ins + n_tup_upd + n_tup_del)` from
+  `pg_stat_user_tables`, plus a sha256 of the sorted `(relative path, size, mtime)` list of
+  attachments (see §0.2).
+  - Reads don't move it, so the backup's own queries don't count as a change.
+  - If statistics are reset, the value differs from the stored one and counts as "changed"
+    — erring toward backing up.
 - **Unchanged:** record `lastCheckedAt` and stop.
 - **Run:**
   1. `pg_dump` against the live DB into `userData/backup/tmp`. The dump is an MVCC-consistent
@@ -189,8 +204,9 @@ Steps:
    file stops here, with nothing changed.
 3. Check `manifest.latestMigration` and `dbDumpSha256`.
 4. Settings path only: confirm "This replaces all data on this computer."
-5. `stopServer()`. Run `CREATE DATABASE trivio_restore`, then
-   `pg_restore --no-owner --no-privileges -d trivio_restore db.dump`.
+5. While the server is still running: `CREATE DATABASE trivio_restore`, then
+   `pg_restore --no-owner --no-privileges -d trivio_restore db.dump`. Then `stopServer()` and
+   wait for the process to exit (§0.8).
 6. Close any remaining connections to `trivio`, because `RENAME` needs zero connections. Use
    `pg_terminate_backend`, scoped to that database. Then:
    - `ALTER DATABASE trivio RENAME TO trivio_before_restore`;
@@ -226,14 +242,14 @@ Files already in Drive are left in place, and the card says so.
 | Backup from a newer app | "Update Trivio first" | Nothing changed |
 | `pg_dump` / `pg_restore` fails | "Backup failed" / "Restore failed — your data was not changed" | stderr goes to the app log; rollback per §4.3 |
 | App quits mid-backup | — | `tmp/` is cleared on next start; Drive discards the abandoned resumable session |
-| 3 consecutive daily failures | Red status + one system notification | No further action |
+| Failing for ≥ 48 h | Red status + one system notification | No further action |
 | No client ID in build | "Google Drive backup isn't configured in this build" | Card disabled; nothing else affected |
 
 **State file** `userData/backup/state.json`:
 
 ```
 { email, folderId, pwSalt, verifier, lastSuccessAt, lastAttemptAt, lastError,
-  lastCheckedAt, fingerprint, consecutiveFailures, keptCount }
+  lastCheckedAt, fingerprint, failingSince, failureNotified, keptCount, cleanupPending }
 ```
 
 Timestamps are ISO 8601 UTC. The file is written atomically: write a temp file, then rename.
@@ -265,7 +281,7 @@ Vitest, offline:
   - Runs when the last success is more than 24 h old.
   - Prunes to 10 only after a confirmed upload, and never after a failure.
   - `backupNow` joins an in-flight run.
-  - Sends one notification after the 3rd consecutive failure.
+  - Sends one notification after 48 h of failing.
   - Clears `tmp/` on start.
 - **`drive-client`** (fake HTTP server):
   - Resumable upload, including resume after a 503.
