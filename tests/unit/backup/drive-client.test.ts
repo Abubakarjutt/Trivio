@@ -15,7 +15,7 @@ function fakeDrive() {
   const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
     new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
   const view = (f: any) => ({ id: f.id, name: f.name, size: String(f.data.length), createdTime: f.createdTime, appProperties: f.appProperties, trashed: f.trashed });
-  const add = (name: string, parents: string[], data = Buffer.alloc(0), extra: any = {}) => {
+  const add = (name: string, parents: string[], data: Buffer = Buffer.alloc(0), extra: any = {}) => {
     const id = `f${++seq}`;
     clock += 1000;
     files.set(id, { id, name, parents, trashed: false, data, createdTime: new Date(clock).toISOString(), ...extra });
@@ -44,7 +44,7 @@ function fakeDrive() {
     if (one && method === "GET") {
       const f = files.get(one[1]);
       if (!f) return json({ error: { code: 404 } }, 404);
-      if (url.searchParams.get("alt") === "media") return new Response(f.data);
+      if (url.searchParams.get("alt") === "media") return new Response(new Uint8Array(f.data));
       return json(view(f));
     }
     if (one && method === "DELETE") {
