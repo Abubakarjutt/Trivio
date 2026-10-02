@@ -6,7 +6,7 @@
 
 import { randomBytes } from "node:crypto";
 import { promises as fsp } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { attachmentsFingerprint, backupFileName, packBackup, unpackBackup } from "./archive";
 import type { DriveLike } from "./drive-client";
 import { BackupError, toBackupError } from "./errors";
@@ -97,6 +97,7 @@ export class BackupService {
   private running: { kind: "backup" | "restore"; forced?: boolean; promise: Promise<void> } | null = null;
   private saveChain: Promise<void> = Promise.resolve(); // serialises state.json writes
   private timers: NodeJS.Timeout[] = [];
+  private schedule: { everyMs: number; firstAfterMs: number } | null = null; // remembered so connect() can resume it
 
   constructor(private readonly d: ServiceDeps) {}
 
@@ -140,6 +141,7 @@ export class BackupService {
   }
 
   startSchedule(everyMs = 3600_000, firstAfterMs = 60_000): void {
+    this.schedule = { everyMs, firstAfterMs };
     const run = () => void this.tick();
     const first = setTimeout(run, firstAfterMs);
     const every = setInterval(run, everyMs);
@@ -174,6 +176,8 @@ export class BackupService {
     if (!this.d.configured) throw new BackupError("NOT_CONFIGURED");
     const { email } = await this.d.auth.connect();
     await this.update({ email, lastError: null });
+    // disconnect() stops the schedule; a later reconnect resumes it.
+    if (this.schedule && this.timers.length === 0) this.startSchedule(this.schedule.everyMs, this.schedule.firstAfterMs);
     return { email };
   }
 
@@ -357,14 +361,124 @@ export class BackupService {
   }
 
   async list(): Promise<BackupEntry[]> {
-    throw new Error("not implemented");
+    if (!this.state.email) throw new BackupError("NOT_CONNECTED");
+    const folderId = await this.d.drive.ensureFolder(this.state.folderId);
+    if (folderId !== this.state.folderId) await this.update({ folderId });
+    return (await this.d.drive.list(folderId)).map((f) => ({
+      id: f.id,
+      name: f.name,
+      createdAt: f.createdTime,
+      sizeBytes: f.size,
+      appVersion: f.appVersion,
+    }));
   }
 
-  async restore(_id: string, _password: string): Promise<void> {
-    throw new Error("not implemented");
+  restore(id: string, password: string): Promise<void> {
+    if (this.running) return Promise.reject(new BackupError("BUSY"));
+    const promise: Promise<void> = this.doRestore(id, password)
+      .catch((err) => {
+        throw toBackupError(err, "RESTORE_FAILED");
+      })
+      .finally(() => {
+        if (this.running === entry) this.running = null;
+      });
+    const entry = { kind: "restore" as const, promise };
+    this.running = entry;
+    return promise;
+  }
+
+  private async doRestore(id: string, password: string): Promise<void> {
+    if (!this.state.email) throw new BackupError("NOT_CONNECTED");
+    const work = join(this.tmp, `restore-${this.now().getTime()}`);
+    await fsp.mkdir(work, { recursive: true });
+    try {
+      this.progress("downloading");
+      const src = join(work, "backup.trivio-backup");
+      await this.d.drive.download(id, src);
+
+      this.progress("decrypting");
+      const unpacked = await unpackBackup({
+        srcPath: src,
+        workDir: work,
+        getPwKey: (h) => derivePwKey(password, h.pwSalt, h.params),
+      });
+      const known = await this.d.db.appliedMigrations();
+      const needs = unpacked.manifest.latestMigration;
+      if (needs && !known.includes(needs)) throw new BackupError("NEWER_BACKUP");
+
+      // Restore into the side database while the app keeps running.
+      this.progress("restoring");
+      try {
+        await this.d.db.restore(unpacked.dumpPath);
+      } catch (err) {
+        await this.d.db.dropRestoreLeftovers().catch(() => {});
+        throw new BackupError("RESTORE_FAILED", err instanceof Error ? err.message : String(err));
+      }
+
+      // Swap: attachments first (plain renames), then both databases in one transaction.
+      await this.d.server.stop();
+      const live = this.d.attachmentsDir;
+      const previous = `${live}_before_restore`;
+      let liveMoved = false;
+      let newInPlace = false;
+      try {
+        await fsp.rm(previous, { recursive: true, force: true });
+        await fsp.mkdir(dirname(live), { recursive: true });
+        try {
+          await fsp.rename(live, previous);
+          liveMoved = true;
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+        }
+        await fsp.rename(unpacked.attachmentsDir, live);
+        newInPlace = true;
+        await this.d.db.swapIn();
+      } catch (err) {
+        if (newInPlace) await fsp.rm(live, { recursive: true, force: true });
+        if (liveMoved) await fsp.rename(previous, live);
+        await this.d.db.dropRestoreLeftovers().catch(() => {});
+        await this.d.server.start({ signOut: false });
+        throw new BackupError("RESTORE_FAILED", err instanceof Error ? err.message : String(err));
+      }
+
+      this.progress("restarting");
+      try {
+        await this.d.server.start({ signOut: true });
+      } catch (err) {
+        // The restored database wouldn't start (e.g. its migration failed): put everything back.
+        await this.d.server.stop().catch(() => {});
+        await this.d.db.undoSwap();
+        await this.d.db.dropRestoreLeftovers().catch(() => {});
+        await fsp.rm(live, { recursive: true, force: true });
+        if (liveMoved) await fsp.rename(previous, live);
+        await this.d.server.start({ signOut: false });
+        throw new BackupError("RESTORE_FAILED", err instanceof Error ? err.message : String(err));
+      }
+
+      await this.adoptKey(unpacked.pwKey, unpacked.pwSalt, unpacked.params);
+      await this.update({ cleanupPending: true, fingerprint: null, lastError: null });
+      this.progress("done");
+    } finally {
+      await fsp.rm(work, { recursive: true, force: true });
+    }
   }
 
   async disconnect(): Promise<void> {
-    throw new Error("not implemented");
+    if (this.running) throw new BackupError("BUSY");
+    this.stopSchedule();
+    await this.d.auth.disconnect();
+    await this.d.secrets.clear("key");
+    this.pwKey = null;
+    await this.update({
+      email: null,
+      folderId: null,
+      pwSalt: null,
+      scrypt: null,
+      verifier: null,
+      fingerprint: null,
+      lastError: null,
+      failingSince: null,
+      failureNotified: false,
+    });
   }
 }

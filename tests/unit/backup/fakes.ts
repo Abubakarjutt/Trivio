@@ -99,11 +99,13 @@ export class FakeDb implements DbLike {
 
 export class FakeServer implements ServerLike {
   calls: string[] = [];
+  failSignOutStart = false;
   async stop() {
     this.calls.push("stop");
   }
   async start(o: { signOut: boolean }) {
     this.calls.push(o.signOut ? "start:signOut" : "start");
+    if (o.signOut && this.failSignOutStart) throw new Error("server did not come up");
   }
 }
 
