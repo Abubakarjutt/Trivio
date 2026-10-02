@@ -161,16 +161,19 @@ describe("BackupService — backups", () => {
     expect((await loadState(join(t.deps.dir, "state.json"))).cleanupPending).toBe(true);
   });
 
-  it("a forced backupNow behind a scheduled run in flight chains rather than running two", async () => {
+  it("a forced backupNow behind a scheduled run in flight chains a forced run after it", async () => {
     const t = await ready();
+    await t.svc.backupNow();
+    t.setNow(new Date(Date.parse("2026-10-02T10:00:00Z") + 25 * HOUR));
     let open!: () => void;
     t.db.fingerprintGate = new Promise((r) => (open = r));
-    const tick = t.svc.tick();
-    const now = t.svc.backupNow();
+    const dumpsBefore = t.db.calls.filter((c) => c === "dump").length;
+    const tick = t.svc.tick(); // due, but the data is unchanged: it will skip
+    const forced = t.svc.backupNow();
     open();
-    await Promise.all([tick, now]);
-    expect(t.drive.files.size).toBe(1);
-    expect(t.db.calls.filter((c) => c === "dump")).toHaveLength(1);
+    await Promise.all([tick, forced]);
+    expect(t.drive.files.size).toBe(2); // the forced run uploaded
+    expect(t.db.calls.filter((c) => c === "dump").length - dumpsBefore).toBe(1);
   });
 
   it("a failed upload prunes nothing and records the error", async () => {
