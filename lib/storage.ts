@@ -1,7 +1,14 @@
 import path from "path";
 import fs from "fs/promises";
 
-const STORAGE_ROOT = path.join(process.cwd(), "storage");
+/**
+ * Where uploads live. The desktop app points this at its per-user data folder
+ * (TRIVIO_STORAGE_DIR, set by desktop/main.ts) so app updates — which replace
+ * the whole app bundle, and with it process.cwd() — never erase them.
+ */
+export function storageRoot(): string {
+  return process.env.TRIVIO_STORAGE_DIR || path.join(process.cwd(), "storage");
+}
 
 /**
  * Returns the absolute path for an attachment file.
@@ -12,14 +19,14 @@ export function getAttachmentPath(
   attachmentId: string,
   ext: string,
 ): string {
-  return path.join(STORAGE_ROOT, "attachments", organisationId, `${attachmentId}.${ext}`);
+  return path.join(storageRoot(), "attachments", organisationId, `${attachmentId}.${ext}`);
 }
 
 /**
  * Ensures the per-org storage directory exists.
  */
 export async function ensureDir(organisationId: string): Promise<void> {
-  const dir = path.join(STORAGE_ROOT, "attachments", organisationId);
+  const dir = path.join(storageRoot(), "attachments", organisationId);
   await fs.mkdir(dir, { recursive: true });
 }
 
@@ -43,8 +50,9 @@ export async function saveFile(
  * Reads a file from disk. filePath is the relative path (as stored in s3Key).
  */
 export async function readFile(filePath: string): Promise<Buffer> {
-  const absolutePath = path.resolve(STORAGE_ROOT, filePath);
-  if (!absolutePath.startsWith(STORAGE_ROOT + path.sep)) {
+  const root = storageRoot();
+  const absolutePath = path.resolve(root, filePath);
+  if (!absolutePath.startsWith(root + path.sep)) {
     throw new Error("Path traversal detected");
   }
   return fs.readFile(absolutePath);
@@ -54,8 +62,9 @@ export async function readFile(filePath: string): Promise<Buffer> {
  * Deletes a file from disk. filePath is the relative path (as stored in s3Key).
  */
 export async function deleteFile(filePath: string): Promise<void> {
-  const absolutePath = path.resolve(STORAGE_ROOT, filePath);
-  if (!absolutePath.startsWith(STORAGE_ROOT + path.sep)) {
+  const root = storageRoot();
+  const absolutePath = path.resolve(root, filePath);
+  if (!absolutePath.startsWith(root + path.sep)) {
     throw new Error("Path traversal detected");
   }
   try {

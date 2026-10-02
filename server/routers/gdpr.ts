@@ -4,6 +4,7 @@ import { TRPCError } from "@trpc/server";
 import { headers } from "next/headers";
 import { exportRateLimiter, deletionRateLimiter } from "@/server/middleware/rateLimit";
 import { writeAuditLog } from "@/lib/audit-log";
+import { storageRoot } from "@/lib/storage";
 import fs from "fs/promises";
 import path from "path";
 export { writeAuditLog } from "@/lib/audit-log";
@@ -151,7 +152,7 @@ export const gdprRouter = createTRPCRouter({
 
       // Delete org attachment files from disk after DB records are gone
       if (isOnlyUser && user.organisationId) {
-        const orgDir = path.join(process.cwd(), "storage", "attachments", user.organisationId);
+        const orgDir = path.join(storageRoot(), "attachments", user.organisationId);
         await fs.rm(orgDir, { recursive: true, force: true }).catch(() => {});
       }
 
