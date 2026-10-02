@@ -51,8 +51,17 @@ export function fileHeader(name: string, size: number, mtime: Date): Buffer {
 
 export async function writeTar(outPath: string, entries: TarEntry[]): Promise<void> {
   const out = createWriteStream(outPath);
+  let streamError: Error | null = null;
+
+  // Persistent error listener that records the error
+  out.on("error", (err) => {
+    streamError = err;
+  });
+
   const write = async (buf: Buffer) => {
+    if (streamError) throw streamError;
     if (!out.write(buf)) await once(out, "drain");
+    if (streamError) throw streamError;
   };
   try {
     for (const e of entries) {
@@ -70,7 +79,12 @@ export async function writeTar(outPath: string, entries: TarEntry[]): Promise<vo
     await write(Buffer.alloc(BLOCK * 2)); // end-of-archive marker
   } finally {
     out.end();
-    await once(out, "close");
+    // Only wait for close if not already closed/destroyed
+    if (!out.closed && !out.destroyed) {
+      await once(out, "close");
+    }
+    // Rethrow any stream error that occurred
+    if (streamError) throw streamError;
   }
 }
 

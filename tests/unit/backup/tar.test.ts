@@ -46,7 +46,9 @@ describe("tar", () => {
     await writeFile(f, "hello");
     const tar = join(dir, "x.tar");
     await writeTar(tar, [{ name: "attachments/org1/f.txt", path: f }]);
-    expect(execFileSync("tar", ["-tf", tar], { encoding: "utf8" }).trim()).toBe("attachments/org1/f.txt");
+    expect(execFileSync("tar", ["-tf", tar], { encoding: "utf8" }).trim()).toBe(
+      "attachments/org1/f.txt"
+    );
   });
 
   it("refuses entries that would escape the destination", async () => {
@@ -68,5 +70,13 @@ describe("tar", () => {
     await writeFile(tar, buf);
     await mkdir(join(dir, "out"));
     await expect(extractTar(tar, join(dir, "out"))).rejects.toThrow(/checksum/);
+  });
+
+  it("rejects writeTar to a nonexistent directory", async () => {
+    const dir = await scratch();
+    const f = join(dir, "f");
+    await writeFile(f, "x");
+    const tar = join(dir, "missing", "x.tar");
+    await expect(writeTar(tar, [{ name: "f", path: f }])).rejects.toThrow(/ENOENT/);
   });
 });
