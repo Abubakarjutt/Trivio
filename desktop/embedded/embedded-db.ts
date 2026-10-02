@@ -77,6 +77,12 @@ export interface DatabaseHandle {
   port: number;
   dataDir: string;
   stop: () => Promise<void>;
+  // Embedded only: the resolved engine config (binaries, port, credentials),
+  // used by the backup feature to run pg_dump/pg_restore/psql against it.
+  config?: EmbeddedDbConfig;
+  // Embedded only: re-apply the Prisma migrations (after a restore swapped in
+  // a database from an older app version).
+  migrate?: () => Promise<void>;
 }
 
 // ── Pure decisions (unit-tested directly) ─────────────────────────────────────
@@ -541,19 +547,19 @@ export async function startEmbeddedDatabase(opts: StartEmbeddedOptions): Promise
   // needed); the real implementation additionally needs the resolved
   // hidden-node path so a packaged macOS build doesn't spawn a second,
   // generic-icon Dock tile for this child (see resolveHiddenNodeExecPath).
-  if (opts.ensureMigrated) {
-    await opts.ensureMigrated(cfg, opts.serverDir, opts.env);
-  } else {
-    await ensureMigrated(
-      cfg,
-      opts.serverDir,
-      opts.env,
-      undefined,
-      undefined,
-      undefined,
-      resolveHiddenNodeExecPath(opts.isPackaged === true, opts.resourcesDir, process.platform, exists)
-    );
-  }
+  const migrate = () =>
+    opts.ensureMigrated
+      ? opts.ensureMigrated(cfg, opts.serverDir, opts.env)
+      : ensureMigrated(
+          cfg,
+          opts.serverDir,
+          opts.env,
+          undefined,
+          undefined,
+          undefined,
+          resolveHiddenNodeExecPath(opts.isPackaged === true, opts.resourcesDir, process.platform, exists)
+        );
+  await migrate();
 
   return {
     mode: "embedded",
@@ -561,6 +567,8 @@ export async function startEmbeddedDatabase(opts: StartEmbeddedOptions): Promise
     host: cfg.host,
     port: cfg.port,
     dataDir: cfg.dataDir,
+    config: cfg,
+    migrate,
     stop: () => stopDatabaseProcess(server, log),
   };
 }

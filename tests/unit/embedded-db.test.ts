@@ -817,4 +817,36 @@ describe("startEmbeddedDatabase", () => {
       );
     }
   });
+
+  it("returns a handle exposing its config and a way to re-run migrations", async () => {
+    const spawnImpl: any = () => {
+      const child = fakeChild();
+      child.kill = vi.fn(() => {
+        child.killed = true;
+        process.nextTick(() => child.emit("exit", 0));
+        return true;
+      });
+      return child;
+    };
+    const migrate = vi.fn(async () => {});
+    const handle = await startEmbeddedDatabase(
+      opts({
+        spawnImpl,
+        existsSyncImpl: () => true, // engine found, cluster already initialised
+        mkdirSyncImpl: () => {},
+        rmSyncImpl: () => {},
+        readdirSyncImpl: () => [],
+        pickPortImpl: async () => 6543,
+        waitForReady: async () => {},
+        ensureMigrated: migrate,
+        log: () => {},
+      })
+    );
+    expect(migrate).toHaveBeenCalledTimes(1);
+    expect(handle.config?.port).toBe(6543);
+    expect(handle.config?.database).toBe("trivio");
+    await handle.migrate!();
+    expect(migrate).toHaveBeenCalledTimes(2);
+    await handle.stop();
+  });
 });
