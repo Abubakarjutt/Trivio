@@ -63,8 +63,9 @@ export function decodeHeader(b: Buffer): BackupHeader {
   if (!powerOfTwo || params.N < 2 ** 10 || params.N > 2 ** 20 || params.r < 1 || params.r > 32 || params.p < 1 || params.p > 4) {
     throw new BackupError("BAD_FORMAT");
   }
-  // Enforce memory bound compatible with derivePwKey (256 MiB max = 128·N·r bytes)
-  if (128 * params.N * params.r > 256 * 1024 * 1024) {
+  // Enforce memory bound compatible with derivePwKey. Node's scrypt needs overhead beyond 128·N·r,
+  // so leave a 2x margin: allow at most 128 MiB of the 256 MiB maxmem in keys.ts.
+  if (128 * params.N * params.r > 128 * 1024 * 1024) {
     throw new BackupError("BAD_FORMAT");
   }
   return {

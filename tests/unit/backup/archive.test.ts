@@ -13,7 +13,7 @@ import {
   HEADER_LEN,
   type KeyMaterial,
 } from "../../../desktop/backup/archive";
-import { derivePwKey } from "../../../desktop/backup/keys";
+import { derivePwKey, DEFAULT_SCRYPT } from "../../../desktop/backup/keys";
 
 const FAST = { N: 1024, r: 8, p: 1 };
 
@@ -155,16 +155,34 @@ describe("archive", () => {
     expect(() => decodeHeader(b)).toThrow(/isn't a Trivio backup/);
   });
 
-  it("refuses scrypt parameters that exceed memory bounds", () => {
+  it("rejects scrypt parameters at the memory bound boundary (N=2^18, r=8)", () => {
     const b = encodeHeader({
       params: FAST,
       pwSalt: randomBytes(16),
       fileSalt: randomBytes(16),
       nonce: randomBytes(12),
     });
-    b.writeUInt32BE(2 ** 20, 9);
+    b.writeUInt32BE(2 ** 18, 9);
     b.writeUInt8(8, 13);
     expect(() => decodeHeader(b)).toThrow(/isn't a Trivio backup/);
+  });
+
+  it("accepts DEFAULT_SCRYPT (N=2^17, r=8, p=1) at the memory limit", () => {
+    const b = encodeHeader({
+      params: DEFAULT_SCRYPT,
+      pwSalt: randomBytes(16),
+      fileSalt: randomBytes(16),
+      nonce: randomBytes(12),
+    });
+    const h = decodeHeader(b);
+    expect(h.params).toEqual(DEFAULT_SCRYPT);
+  });
+
+  it("proves the memory margin is real: DEFAULT_SCRYPT works with derivePwKey", async () => {
+    const pwSalt = randomBytes(16);
+    const key = await derivePwKey("test-password", pwSalt, DEFAULT_SCRYPT);
+    expect(key).toBeInstanceOf(Buffer);
+    expect(key).toHaveLength(32);
   });
 
   it("attachments fingerprint changes when a file is added or modified, not otherwise", async () => {
