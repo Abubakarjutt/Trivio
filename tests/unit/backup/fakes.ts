@@ -12,6 +12,7 @@ export class FakeDrive implements DriveLike {
   files = new Map<string, DriveFile & { data: Buffer; folder: string }>();
   folders = new Set<string>();
   failUpload: Error | null = null;
+  failDelete = false;
   uploadGate: Promise<void> | null = null;
   private seq = 0;
   private clock = Date.parse("2026-09-01T00:00:00Z");
@@ -48,6 +49,7 @@ export class FakeDrive implements DriveLike {
     await writeFile(dest, this.files.get(id)!.data);
   }
   async delete(id: string) {
+    if (this.failDelete) throw new Error("delete failed");
     this.files.delete(id);
   }
 }
@@ -60,11 +62,14 @@ export class FakeDb implements DbLike {
   restored: string | null = null;
   failSwap = false;
   failRestore = false;
+  failDropPrevious = false;
+  fingerprintGate: Promise<void> | null = null;
   async dump(out: string) {
     this.calls.push("dump");
     await writeFile(out, this.content);
   }
   async fingerprint() {
+    if (this.fingerprintGate) await this.fingerprintGate;
     return this.fp;
   }
   async appliedMigrations() {
@@ -88,6 +93,7 @@ export class FakeDb implements DbLike {
   }
   async dropPrevious() {
     this.calls.push("dropPrevious");
+    if (this.failDropPrevious) throw new Error("drop failed");
   }
 }
 

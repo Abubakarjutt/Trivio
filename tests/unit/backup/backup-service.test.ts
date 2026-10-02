@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { readdir, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { BackupService } from "../../../desktop/backup/backup-service";
+import { loadState } from "../../../desktop/backup/state";
 import { BackupError } from "../../../desktop/backup/errors";
 import type { SecretStoreLike } from "../../../desktop/backup/secret-store";
 import { makeService, ready } from "./fakes";
@@ -19,7 +20,7 @@ describe("BackupService — setup", () => {
     const { svc } = await makeService();
     await svc.connect();
     expect(svc.status()).toMatchObject({ connected: true, email: "me@x.com", passwordSet: false });
-    await expect(svc.setPassword("short")).rejects.toThrow(/at least 8/);
+    await expect(svc.setPassword("short")).rejects.toMatchObject({ code: "WEAK_PASSWORD" });
     await svc.setPassword("pw-12345678");
     expect(svc.status().passwordSet).toBe(true);
   });
@@ -61,6 +62,7 @@ describe("BackupService — backups", () => {
     expect(f.data.subarray(0, 8).toString()).toBe("TRIVIOBK");
     expect(f.data.includes(Buffer.from("receipt-1"))).toBe(false); // encrypted
     expect(status).toMatchObject({ lastSuccessAt: "2026-10-02T10:00:00.000Z", keptCount: 1, lastError: null });
+    expect(await readdir(join(t.deps.dir, "tmp")).catch(() => [])).toEqual([]);
   });
 
   it("is due with no backup yet, not due within 24 h, due after 24 h", async () => {
@@ -125,7 +127,50 @@ describe("BackupService — backups", () => {
     const inFolder = [...t.drive.files.values()].filter((f) => f.folder === folder).map((f) => f.name);
     expect(inFolder.filter((n) => n.endsWith(".trivio-backup"))).toHaveLength(10);
     expect(inFolder).toContain("my-notes.txt");
+    expect(inFolder).toContain("trivio-2026-10-13T21-00-00Z.trivio-backup"); // the newest survives
     expect(t.svc.status().keptCount).toBe(10);
+  });
+
+  it("a failing prune after a confirmed upload is still a success and is not retried hourly", async () => {
+    const t = await ready();
+    for (let i = 0; i < 10; i++) {
+      t.setNow(new Date(Date.parse("2026-10-02T10:00:00Z") + i * 25 * HOUR));
+      await t.svc.backupNow();
+    }
+    t.drive.failDelete = true;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    t.setNow(new Date(Date.parse("2026-10-02T10:00:00Z") + 10 * 25 * HOUR));
+    const status = await t.svc.backupNow();
+    warn.mockRestore();
+    expect(status).toMatchObject({ lastSuccessAt: t.svc.status().lastSuccessAt, lastError: null, failingSince: null, keptCount: 11 });
+    expect(status.lastSuccessAt).toBe(new Date(Date.parse("2026-10-02T10:00:00Z") + 10 * 25 * HOUR).toISOString());
+    expect(t.drive.files.size).toBe(11);
+    t.setNow(new Date(Date.parse("2026-10-02T10:00:00Z") + 10 * 25 * HOUR + 25 * HOUR));
+    await t.svc.tick();
+    expect(t.drive.files.size).toBe(11);
+  });
+
+  it("a failing restore-leftover cleanup does not fail the backup and stays pending", async () => {
+    const t = await ready();
+    await (t.svc as unknown as { update(p: object): Promise<void> }).update({ cleanupPending: true });
+    t.db.failDropPrevious = true;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await t.svc.backupNow();
+    warn.mockRestore();
+    expect(t.svc.status().lastError).toBeNull();
+    expect((await loadState(join(t.deps.dir, "state.json"))).cleanupPending).toBe(true);
+  });
+
+  it("a forced backupNow behind a scheduled run in flight chains rather than running two", async () => {
+    const t = await ready();
+    let open!: () => void;
+    t.db.fingerprintGate = new Promise((r) => (open = r));
+    const tick = t.svc.tick();
+    const now = t.svc.backupNow();
+    open();
+    await Promise.all([tick, now]);
+    expect(t.drive.files.size).toBe(1);
+    expect(t.db.calls.filter((c) => c === "dump")).toHaveLength(1);
   });
 
   it("a failed upload prunes nothing and records the error", async () => {
@@ -138,6 +183,7 @@ describe("BackupService — backups", () => {
     await expect(t.svc.backupNow()).rejects.toMatchObject({ code: "OFFLINE" });
     expect(t.drive.files.size).toBe(10);
     expect(t.svc.status().lastError).toMatchObject({ code: "OFFLINE" });
+    expect(await readdir(join(t.deps.dir, "tmp")).catch(() => [])).toEqual([]);
   });
 
   it("notifies once when backups have been failing for 48 hours", async () => {

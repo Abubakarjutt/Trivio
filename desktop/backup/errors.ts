@@ -5,6 +5,7 @@ export type BackupErrorCode =
   | "NOT_CONFIGURED"
   | "NOT_CONNECTED"
   | "NO_PASSWORD"
+  | "WEAK_PASSWORD"
   | "BUSY"
   | "WRONG_PASSWORD"
   | "BAD_FORMAT"
@@ -22,6 +23,7 @@ const MESSAGES: Record<BackupErrorCode, string> = {
   NOT_CONFIGURED: "Google Drive backup isn't configured in this build.",
   NOT_CONNECTED: "Connect Google Drive first.",
   NO_PASSWORD: "Set a backup password first.",
+  WEAK_PASSWORD: "Choose a backup password of at least 8 characters.",
   BUSY: "A backup or restore is already running.",
   WRONG_PASSWORD: "Wrong password or damaged backup.",
   BAD_FORMAT: "This file isn't a Trivio backup, or it is damaged.",

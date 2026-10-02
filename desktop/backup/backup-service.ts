@@ -94,7 +94,8 @@ export interface ServiceDeps {
 export class BackupService {
   private state!: BackupState;
   private pwKey: Buffer | null = null;
-  private running: { kind: "backup" | "restore"; promise: Promise<void> } | null = null;
+  private running: { kind: "backup" | "restore"; forced?: boolean; promise: Promise<void> } | null = null;
+  private saveChain: Promise<void> = Promise.resolve(); // serialises state.json writes
   private timers: NodeJS.Timeout[] = [];
 
   constructor(private readonly d: ServiceDeps) {}
@@ -113,8 +114,13 @@ export class BackupService {
   }
   private async update(patch: Partial<BackupState>): Promise<void> {
     this.state = { ...this.state, ...patch };
-    await fsp.mkdir(this.d.dir, { recursive: true });
-    await saveState(this.stateFile, this.state);
+    const snapshot = this.state;
+    const save = this.saveChain.then(async () => {
+      await fsp.mkdir(this.d.dir, { recursive: true });
+      await saveState(this.stateFile, snapshot);
+    });
+    this.saveChain = save.catch(() => {});
+    await save;
   }
 
   async init(): Promise<void> {
@@ -172,7 +178,7 @@ export class BackupService {
   }
 
   async setPassword(password: string): Promise<void> {
-    if (normalizePassword(password).length < 8) throw new Error("Use at least 8 characters.");
+    if (normalizePassword(password).length < 8) throw new BackupError("WEAK_PASSWORD");
     if (!this.state.email) throw new BackupError("NOT_CONNECTED");
     const params = this.d.scrypt ?? DEFAULT_SCRYPT;
     const pwSalt = randomBytes(16);
@@ -206,11 +212,27 @@ export class BackupService {
   }
 
   private runBackup(force: boolean): Promise<void> {
-    if (this.running?.kind === "backup") return this.running.promise;
-    const promise = this.doBackup(force).finally(() => {
-      this.running = null;
+    const current = this.running;
+    if (current?.kind === "backup") {
+      if (!force || current.forced) return current.promise;
+      // A forced request behind a scheduled run: chain, never run two at once.
+      // Skip the extra upload if the run in flight already uploaded.
+      const before = this.state.lastSuccessAt;
+      const chained = current.promise
+        .catch(() => {})
+        .then(() => (this.state.lastSuccessAt !== before ? undefined : this.doBackup(true)))
+        .finally(() => {
+          if (this.running === entry) this.running = null;
+        });
+      const entry = { kind: "backup" as const, forced: true, promise: chained };
+      this.running = entry;
+      return chained;
+    }
+    const promise: Promise<void> = this.doBackup(force).finally(() => {
+      if (this.running === entry) this.running = null;
     });
-    this.running = { kind: "backup", promise };
+    const entry = { kind: "backup" as const, forced: force, promise };
+    this.running = entry;
     return promise;
   }
 
@@ -265,11 +287,34 @@ export class BackupService {
         throw new BackupError("BACKUP_FAILED", `Drive has ${uploaded.size} bytes, expected ${size}`);
       }
 
+      // The upload is confirmed: from here on the run is a success. Prune and
+      // cleanup failures are only logged, never recorded as a failed backup.
       this.progress("pruning");
-      const all = await this.d.drive.list(folderId);
       const keep = this.d.keep ?? KEEP;
-      for (const old of all.slice(keep)) await this.d.drive.delete(old.id);
-      if (this.state.cleanupPending) await this.dropRestoreLeftovers();
+      let kept = Math.min(this.state.keptCount + 1, keep);
+      try {
+        const others = (await this.d.drive.list(folderId)).filter((f) => f.id !== uploaded.id);
+        kept = 1 + others.length;
+        for (const old of others.slice(keep - 1)) {
+          try {
+            await this.d.drive.delete(old.id);
+            kept--;
+          } catch (err) {
+            console.warn("[backup] could not delete an old backup:", err instanceof Error ? err.message : err);
+          }
+        }
+      } catch (err) {
+        console.warn("[backup] could not prune old backups:", err instanceof Error ? err.message : err);
+      }
+      let cleanupPending = this.state.cleanupPending;
+      if (cleanupPending) {
+        try {
+          await this.dropRestoreLeftovers();
+          cleanupPending = false;
+        } catch (err) {
+          console.warn("[backup] could not drop restore leftovers:", err instanceof Error ? err.message : err);
+        }
+      }
 
       const doneAt = this.now().toISOString();
       await this.update({
@@ -279,8 +324,8 @@ export class BackupService {
         lastError: null,
         failingSince: null,
         failureNotified: false,
-        keptCount: Math.min(all.length, keep),
-        cleanupPending: false,
+        keptCount: kept,
+        cleanupPending,
       });
       this.progress("done");
     } catch (err) {
@@ -288,12 +333,16 @@ export class BackupService {
       const now = this.now();
       const failingSince = this.state.failingSince ?? now.toISOString();
       const notify = !this.state.failureNotified && now.getTime() - Date.parse(failingSince) >= NOTIFY_AFTER;
-      await this.update({
-        lastAttemptAt: now.toISOString(),
-        lastError: { code: e.code, message: e.userMessage },
-        failingSince,
-        failureNotified: this.state.failureNotified || notify,
-      });
+      try {
+        await this.update({
+          lastAttemptAt: now.toISOString(),
+          lastError: { code: e.code, message: e.userMessage },
+          failingSince,
+          failureNotified: this.state.failureNotified || notify,
+        });
+      } catch (saveErr) {
+        console.warn("[backup] could not record the failure:", saveErr instanceof Error ? saveErr.message : saveErr);
+      }
       if (notify) this.d.notify("Trivio backups are failing", `${e.userMessage} Open Settings → Backup for details.`);
       console.error("[backup] failed:", e.message);
       throw e;
