@@ -52,4 +52,18 @@ describe("FileSecretStore", () => {
     const store = new FileSecretStore(await scratch(), { ...codec, isEncryptionAvailable: () => false });
     await expect(store.save("key", "x")).rejects.toThrow(/keychain/i);
   });
+
+  it("reports a decrypt failure instead of treating it as missing", async () => {
+    const dir = await scratch();
+    const good = new FileSecretStore(dir, codec);
+    await good.save("key", "x");
+    const bad = new FileSecretStore(dir, {
+      ...codec,
+      decryptString: () => {
+        throw new Error("keychain denied");
+      },
+    });
+    await expect(bad.load("key")).rejects.toThrow(/keychain denied/);
+    expect(await bad.load("google-token")).toBeNull();
+  });
 });

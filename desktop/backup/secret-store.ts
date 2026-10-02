@@ -29,8 +29,9 @@ export class FileSecretStore implements SecretStoreLike {
   async load(name: SecretName): Promise<string | null> {
     try {
       return this.codec.decryptString(await fsp.readFile(this.file(name)));
-    } catch {
-      return null;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw err;
     }
   }
 

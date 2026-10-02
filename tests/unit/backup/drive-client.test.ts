@@ -177,4 +177,20 @@ describe("DriveClient", () => {
     await expect(revoked.ensureFolder(null)).rejects.toMatchObject({ code: "AUTH_REVOKED" });
     expect(unauthorized).toBe(1);
   });
+
+  it("refreshes once on a 401 even after an earlier transient failure", async () => {
+    let unauthorized = 0;
+    const steps = [503, 401, 200];
+    const c = new DriveClient({
+      token: async () => "t",
+      onUnauthorized: () => unauthorized++,
+      fetch: (async () => {
+        const s = steps.shift()!;
+        return s === 200 ? new Response(JSON.stringify({ files: [{ id: "found" }] }), { status: 200 }) : new Response("", { status: s });
+      }) as unknown as typeof fetch,
+      sleep: async () => {},
+    });
+    expect(await c.ensureFolder(null)).toBe("found");
+    expect(unauthorized).toBe(1);
+  });
 });

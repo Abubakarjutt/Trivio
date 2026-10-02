@@ -76,6 +76,7 @@ export class DriveClient implements DriveLike {
   }
 
   private async call(url: string, init: RequestInit = {}, ok: number[] = [200], retry = true): Promise<Response> {
+    let refreshed = false;
     for (let attempt = 0; ; attempt++) {
       const token = await this.deps.token();
       let res: Response;
@@ -93,7 +94,8 @@ export class DriveClient implements DriveLike {
       }
       if (ok.includes(res.status)) return res;
       if (res.status === 401) {
-        if (attempt === 0) {
+        if (!refreshed) {
+          refreshed = true;
           this.deps.onUnauthorized?.();
           continue;
         }
@@ -170,7 +172,9 @@ export class DriveClient implements DriveLike {
           res = await this.call(session, { method: "PUT", headers: { "content-range": `bytes */${size}` } }, [200, 201, 308]);
         }
         if (res.status === 308) {
-          offset = nextOffset(res.headers.get("range"));
+          const next = nextOffset(res.headers.get("range"));
+          if (next > offset) failures = 0;
+          offset = next;
           continue;
         }
         return toDriveFile((await res.json()) as RawFile);
