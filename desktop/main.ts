@@ -41,6 +41,9 @@ import {
   stopDatabaseProcess,
   type DatabaseHandle,
 } from "./embedded/embedded-db";
+import { createBackupService, registerBackupIpc } from "./backup/wire";
+import type { BackupService } from "./backup/backup-service";
+import { moveLegacyAttachments } from "./storage-dir";
 
 // ── Ollama (local AI) engine lifecycle ─────────────────────────────────────────
 // The desktop shell owns a local Ollama server + Gemma model so the AI chat can
@@ -181,6 +184,17 @@ function serverDir(): string {
 
 let server: ChildProcess | null = null;
 let dbHandle: DatabaseHandle | null = null;
+// How the app server was launched, so a restore can stop and relaunch it on
+// the same port (the window keeps its URL).
+interface AppServerLaunch {
+  cmd: string;
+  args: string[];
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  url: string;
+}
+let appServerLaunch: AppServerLaunch | null = null;
+let backupService: BackupService | null = null;
 
 function getFreePort(): Promise<number> {
   return new Promise((res, rej) => {
@@ -317,6 +331,15 @@ async function startLocalServer(): Promise<string> {
   }
   if (!env.WHISPER_HOME) env.WHISPER_HOME = join(app.getPath("userData"), "whisper");
 
+  // Uploads live in the per-user data folder, not the replaced-on-update app
+  // bundle (lib/storage.ts). Carry over anything an older version left behind.
+  if (!env.TRIVIO_STORAGE_DIR) env.TRIVIO_STORAGE_DIR = join(app.getPath("userData"), "storage");
+  const moved = await moveLegacyAttachments(
+    join(dir, "storage", "attachments"),
+    join(env.TRIVIO_STORAGE_DIR, "attachments"),
+  );
+  if (moved) console.log(`[desktop] moved ${moved} attachment(s) out of the app bundle`);
+
   // ── Database ──────────────────────────────────────────────────────────────
   // By default the desktop app owns its OWN embedded Postgres inside the user's
   // data dir (see desktop/embedded/embedded-db.ts) — no external server, no
@@ -369,13 +392,35 @@ async function startLocalServer(): Promise<string> {
     .filter(Boolean)
     .join(" ");
 
-  console.log(`[desktop] starting app server: ${cmd} ${execArgv.join(" ")} @127.0.0.1:${port}`);
-  server = spawn(cmd, execArgv, {
-    cwd: dir,
-    env: childEnv,
+  const url = `http://127.0.0.1:${port}`;
+  appServerLaunch = { cmd, args: execArgv, cwd: dir, env: childEnv, url };
+  await spawnAppServer(appServerLaunch);
+
+  // Google Drive backup needs the embedded engine's tools and credentials.
+  if (dbHandle?.config) {
+    try {
+      backupService = await createBackupService({
+        userData: app.getPath("userData"),
+        attachmentsDir: join(env.TRIVIO_STORAGE_DIR!, "attachments"),
+        db: dbHandle,
+        server: { stop: stopServerAndWait, start: restartAppServer },
+        onProgress: (p) => mainWindow?.webContents.send("backup:progress", p),
+      });
+      backupService.startSchedule();
+    } catch (err) {
+      console.error("[desktop] backup unavailable:", err);
+    }
+  }
+  return url;
+}
+
+async function spawnAppServer(launch: AppServerLaunch): Promise<void> {
+  console.log(`[desktop] starting app server: ${launch.cmd} ${launch.args.join(" ")} @${launch.url}`);
+  server = spawn(launch.cmd, launch.args, {
+    cwd: launch.cwd,
+    env: launch.env,
     stdio: ["ignore", "pipe", "pipe", "ipc"],
   });
-
   server.stdout?.on("data", (d: Buffer) => {
     const s = String(d).trimEnd();
     if (s) console.log(`[next] ${s}`);
@@ -388,11 +433,19 @@ async function startLocalServer(): Promise<string> {
     console.log(`[desktop] app server exited code=${code ?? 0}`);
     server = null;
   });
+  await waitForServer(launch.url);
+  console.log(`[desktop] app server ready at ${launch.url}`);
+}
 
-  const url = `http://127.0.0.1:${port}`;
-  await waitForServer(url);
-  console.log(`[desktop] app server ready at ${url}`);
-  return url;
+// After a restore: bring the swapped-in database up to this app's schema, start
+// the server again on the same port, and show the login page. signOut clears
+// the session cookie, which belongs to the replaced database's user.
+async function restartAppServer(opts: { signOut: boolean }): Promise<void> {
+  if (!appServerLaunch) throw new Error("app server was never started");
+  await dbHandle?.migrate?.();
+  await spawnAppServer(appServerLaunch);
+  if (opts.signOut) await mainWindow?.webContents.session.clearStorageData({ storages: ["cookies"] });
+  await mainWindow?.loadURL(`${appServerLaunch.url}${opts.signOut ? "/login" : ""}`);
 }
 
 function stopServer(): void {
@@ -405,6 +458,17 @@ function stopServer(): void {
     server.once("exit", () => clearTimeout(kill));
     server = null;
   }
+}
+
+// Stop the app server and resolve once the process has actually exited, so
+// its database connections are gone (a restore renames the database next).
+function stopServerAndWait(): Promise<void> {
+  const child = server;
+  if (!child || child.exitCode !== null) return Promise.resolve();
+  return new Promise((resolve) => {
+    child.once("exit", () => resolve());
+    stopServer();
+  });
 }
 
 // ── Window ───────────────────────────────────────────────────────────────────
@@ -818,6 +882,7 @@ if (!gotLock) {
   app.whenReady().then(async () => {
     buildMenu();
     registerIpc();
+    registerBackupIpc(() => backupService);
     setupUpdater();
 
     const mode = resolveMode();
@@ -878,6 +943,7 @@ You can also run Trivio in thin-client mode by setting DESKTOP_MODE=remote.`
 // Gracefully stop the embedded server AND the embedded Postgres engine on
 // every quit path, so the app never leaves a database process behind.
 async function stopAll(): Promise<void> {
+  backupService?.stopSchedule();
   stopServer();
   await stopDatabase();
 }

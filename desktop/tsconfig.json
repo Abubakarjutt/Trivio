@@ -21,6 +21,8 @@
   "include": [
     "main.ts",
     "preload.ts",
+    "backup/*.ts",
+    "storage-dir.ts",
     "embedded/embedded-db.ts",
     "embedded/ollama.ts"
   ]

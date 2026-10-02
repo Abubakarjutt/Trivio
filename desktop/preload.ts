@@ -24,6 +24,15 @@ const CHANNELS = {
   OLLAMA_STOP: "ollama:stop",
   OLLAMA_PROGRESS: "ollama:progress",
   OLLAMA_STATUS_CHANGE: "ollama:status-change",
+  // Google Drive backup. Every invoke resolves to {ok,value}|{ok:false,code,message}.
+  BACKUP_STATUS: "backup:status",
+  BACKUP_CONNECT: "backup:connect",
+  BACKUP_DISCONNECT: "backup:disconnect",
+  BACKUP_SET_PASSWORD: "backup:setPassword",
+  BACKUP_NOW: "backup:backupNow",
+  BACKUP_LIST: "backup:list",
+  BACKUP_RESTORE: "backup:restore",
+  BACKUP_PROGRESS: "backup:progress",
 } as const;
 
 // Map a scheme/URL so it works whether the web server is 127.0.0.1:<port>
@@ -90,6 +99,34 @@ const ollama = {
   },
 } as const;
 
+// Google Drive backup. The main process answers {ok,value} or {ok:false,code,
+// message}; unwrap it here so the renderer gets a plain value or an Error whose
+// message is ready to show and whose `code` identifies the failure.
+async function invokeBackup<T>(channel: string, ...args: unknown[]): Promise<T> {
+  const r = (await ipcRenderer.invoke(channel, ...args)) as
+    | { ok: true; value: T }
+    | { ok: false; code: string; message: string };
+  if (r.ok) return r.value;
+  const err = new Error(r.message) as Error & { code?: string };
+  err.code = r.code;
+  throw err;
+}
+
+const backup = {
+  status: () => invokeBackup(CHANNELS.BACKUP_STATUS),
+  connect: () => invokeBackup(CHANNELS.BACKUP_CONNECT),
+  disconnect: () => invokeBackup(CHANNELS.BACKUP_DISCONNECT),
+  setPassword: (password: string) => invokeBackup(CHANNELS.BACKUP_SET_PASSWORD, password),
+  backupNow: () => invokeBackup(CHANNELS.BACKUP_NOW),
+  list: () => invokeBackup(CHANNELS.BACKUP_LIST),
+  restore: (id: string, password: string) => invokeBackup(CHANNELS.BACKUP_RESTORE, id, password),
+  onProgress(cb: (p: unknown) => void): () => void {
+    const handler = (_e: unknown, p: unknown) => cb(p);
+    ipcRenderer.on(CHANNELS.BACKUP_PROGRESS, handler);
+    return () => ipcRenderer.removeListener(CHANNELS.BACKUP_PROGRESS, handler);
+  },
+} as const;
+
 // Minimal, safe surface exposed to `window.trivioDesktop`.
 const api = {
   isDesktop: true,
@@ -121,6 +158,7 @@ const api = {
   // Local AI engine (Ollama + Gemma). The renderer drives setup through this
   // only; it never touches the binary or the port directly.
   ollama,
+  backup,
   // Subscribe to trivio:// deep links delivered to this window. Returns an
   // unsubscribe function so the renderer can clean up on unmount.
   onDeepLink(cb: (info: { raw: string; path: string; query: string }) => void): () => void {

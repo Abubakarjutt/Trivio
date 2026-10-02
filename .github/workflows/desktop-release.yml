@@ -102,6 +102,8 @@ jobs:
 
     env:
       CSC_LINK: ${{ secrets.CSC_LINK }}
+      TRIVIO_GOOGLE_CLIENT_ID: ${{ secrets.TRIVIO_GOOGLE_CLIENT_ID }}
+      TRIVIO_GOOGLE_CLIENT_SECRET: ${{ secrets.TRIVIO_GOOGLE_CLIENT_SECRET }}
       CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
       APPLE_ID: ${{ secrets.APPLE_ID }}
       APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
@@ -288,6 +290,8 @@ jobs:
 
     env:
       WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+      TRIVIO_GOOGLE_CLIENT_ID: ${{ secrets.TRIVIO_GOOGLE_CLIENT_ID }}
+      TRIVIO_GOOGLE_CLIENT_SECRET: ${{ secrets.TRIVIO_GOOGLE_CLIENT_SECRET }}
       WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
       # electron-builder reads CSC_LINK / CSC_KEY_PASSWORD for Authenticode.
       CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
