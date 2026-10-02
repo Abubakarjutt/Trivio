@@ -178,9 +178,22 @@ describe("archive", () => {
     expect(h.params).toEqual(DEFAULT_SCRYPT);
   });
 
-  it("proves the memory margin is real: DEFAULT_SCRYPT works with derivePwKey", async () => {
+  it("wraps key-derivation errors from untrusted headers as BAD_FORMAT (e.g., N=2^16, r=1 fails OpenSSL)", async () => {
+    const { dir, out } = await setup();
+    const buf = await readFile(out);
+    buf.writeUInt32BE(2 ** 16, 9);
+    buf[13] = 1;
+    await writeFile(out, buf);
+    await mkdir(join(dir, "w2"));
+    await expect(
+      unpackBackup({ srcPath: out, workDir: join(dir, "w2"), getPwKey: withPassword("pw-12345678") }),
+    ).rejects.toMatchObject({ code: "BAD_FORMAT" });
+  });
+
+  it("derives the maximum-accepted boundary header parameters (N=2^17, r=8, p=4)", async () => {
+    const maxBoundary = { N: 2 ** 17, r: 8, p: 4 };
     const pwSalt = randomBytes(16);
-    const key = await derivePwKey("test-password", pwSalt, DEFAULT_SCRYPT);
+    const key = await derivePwKey("test-password", pwSalt, maxBoundary);
     expect(key).toBeInstanceOf(Buffer);
     expect(key).toHaveLength(32);
   });

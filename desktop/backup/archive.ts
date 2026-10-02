@@ -111,7 +111,15 @@ export async function decryptFile(
     const header = decodeHeader(hb);
     const tag = Buffer.alloc(TAG_LEN);
     await fh.read(tag, 0, TAG_LEN, size - TAG_LEN);
-    const pwKey = await getPwKey(header);
+    let pwKey: Buffer;
+    try {
+      pwKey = await getPwKey(header);
+    } catch (err) {
+      // The header is untrusted until the tag verifies; any key-derivation failure
+      // on its parameters means it isn't a usable Trivio backup.
+      if (err instanceof BackupError) throw err;
+      throw new BackupError("BAD_FORMAT", err instanceof Error ? err.message : String(err));
+    }
     const d = createDecipheriv("aes-256-gcm", deriveFileKey(pwKey, header.fileSalt), header.nonce);
     d.setAAD(hb);
     d.setAuthTag(tag);
