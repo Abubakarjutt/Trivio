@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import { promises as fsp } from "node:fs";
 import { readFile, writeFile, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { BackupService } from "../../../desktop/backup/backup-service";
@@ -41,6 +42,7 @@ describe("BackupService — restore", () => {
     const t = await backedUp();
     await t.svc.restore(t.entry.id, "pw-12345678");
     expect(t.db.content).toBe("data-v1");
+    expect(t.svc.status().restoreRollbackFailed).toBe(false);
     expect(await readFile(join(t.attachmentsDir, "org1", "r.pdf"), "utf8")).toBe("receipt-1");
     expect(await readFile(join(`${t.attachmentsDir}_before_restore`, "org1", "r.pdf"), "utf8")).toBe("receipt-2");
     expect(t.db.calls).toEqual(["dump", "restore", "swapIn"]);
@@ -300,5 +302,36 @@ describe("BackupService — restore fix round", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("BackupService — attachments rollback failure", () => {
+  it("keeps the only copy of the old attachments and blocks cleanup and restores", async () => {
+    const t = await backedUp();
+    t.db.failSwap = true;
+    const realRename = fsp.rename.bind(fsp);
+    const spy = vi.spyOn(fsp, "rename").mockImplementation(async (from, to) => {
+      if (String(from).endsWith("_before_restore")) throw Object.assign(new Error("busy"), { code: "EBUSY" });
+      return realRename(from, to);
+    });
+    try {
+      await expect(t.svc.restore(t.entry.id, "pw-12345678")).rejects.toMatchObject({ code: "RESTORE_FAILED" });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(t.svc.status().restoreRollbackFailed).toBe(true);
+    expect(t.server.calls.at(-1)).toBe("start");
+
+    await t.svc.backupNow();
+    expect(await readFile(join(`${t.attachmentsDir}_before_restore`, "org1", "r.pdf"), "utf8")).toBe("receipt-2");
+
+    let downloads = 0;
+    const orig = t.drive.download.bind(t.drive);
+    t.drive.download = async (...a: Parameters<typeof orig>) => {
+      downloads++;
+      return orig(...a);
+    };
+    await expect(t.svc.restore(t.entry.id, "pw-12345678")).rejects.toMatchObject({ code: "RESTORE_FAILED" });
+    expect(downloads).toBe(0);
   });
 });

@@ -51,6 +51,7 @@ export interface BackupStatus {
   lastError: { code: string; message: string } | null;
   failingSince: string | null;
   keptCount: number;
+  restoreRollbackFailed: boolean; // a restore could not be undone; the old data is kept aside, contact support
 }
 
 export type BackupProgress = {
@@ -169,6 +170,7 @@ export class BackupService {
       lastError: s.lastError,
       failingSince: s.failingSince,
       keptCount: s.keptCount,
+      restoreRollbackFailed: !!s.restoreRollbackFailed,
     };
   }
 
@@ -428,25 +430,28 @@ export class BackupService {
       // Every rollback step is attempted on its own; the server is always restarted.
       const rollback = async (err: unknown): Promise<never> => {
         const failures: unknown[] = [];
-        const step = async (fn: () => Promise<unknown>) => {
+        // A failed step that leaves a *_before_restore copy as the only original must
+        // block every later cleanup and restore (update() keeps it in memory even if the write fails).
+        let originalAtRisk = false;
+        const step = async (fn: () => Promise<unknown>, keepsOnlyOriginal = false) => {
           try {
             await fn();
           } catch (e) {
             failures.push(e);
+            if (keepsOnlyOriginal) originalAtRisk = true;
           }
         };
         if (swapped) {
-          try {
-            await this.d.db.undoSwap();
-          } catch (e) {
-            failures.push(e);
-            console.error("[backup] ROLLBACK FAILED: could not undo the database swap; trivio_before_restore is kept:", e);
-            await step(() => this.update({ restoreRollbackFailed: true }));
-          }
+          await step(() => this.d.db.undoSwap(), true);
+          if (originalAtRisk) console.error("[backup] ROLLBACK FAILED: could not undo the database swap; trivio_before_restore is kept");
         }
         await step(() => this.d.db.dropRestoreLeftovers());
-        if (newInPlace) await step(() => fsp.rm(live, { recursive: true, force: true }));
-        if (liveMoved) await step(() => fsp.rename(previous, live));
+        if (newInPlace) await step(() => fsp.rm(live, { recursive: true, force: true }), true);
+        if (liveMoved) await step(() => fsp.rename(previous, live), true);
+        if (originalAtRisk) {
+          await step(() => this.update({ restoreRollbackFailed: true }));
+          this.state.restoreRollbackFailed = true;
+        }
         await step(() => this.d.server.start({ signOut: false }));
         for (const f of failures) console.error("[backup] restore rollback step failed:", f);
         throw new BackupError("RESTORE_FAILED", err instanceof Error ? err.message : String(err));
