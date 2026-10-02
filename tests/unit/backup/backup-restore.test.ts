@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { readFile, writeFile, readdir } from "node:fs/promises";
+import { readFile, writeFile, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { BackupService } from "../../../desktop/backup/backup-service";
 import { makeService, ready } from "./fakes";
@@ -19,6 +19,15 @@ describe("BackupService — list", () => {
     const t = await backedUp();
     expect(t.entry).toMatchObject({ name: "trivio-2026-10-02T10-00-00Z.trivio-backup", appVersion: "0.1.25" });
     expect(t.entry.sizeBytes).toBeGreaterThan(60);
+  });
+
+  it("orders several backups newest first", async () => {
+    const t = await ready();
+    await t.svc.backupNow();
+    t.setNow(new Date("2026-10-03T10:00:00Z"));
+    await t.svc.backupNow();
+    const names = (await t.svc.list()).map((e) => e.name);
+    expect(names).toEqual(["trivio-2026-10-03T10-00-00Z.trivio-backup", "trivio-2026-10-02T10-00-00Z.trivio-backup"]);
   });
 
   it("needs a connection", async () => {
@@ -198,5 +207,98 @@ describe("BackupService — restore cleanup and rollback", () => {
     await expect(t.svc.restore("missing-id", "pw-12345678")).rejects.toMatchObject({ code: "RESTORE_FAILED" });
     expect(t.server.calls).toEqual([]);
     await t.svc.backupNow(); // not stuck BUSY
+  });
+});
+
+describe("BackupService — restore fix round", () => {
+  it("post-commit failures (key save) don't fail a restore that already went live", async () => {
+    const t = await backedUp();
+    t.secrets.save = async () => {
+      throw new Error("keychain locked");
+    };
+    await t.svc.restore(t.entry.id, "pw-12345678");
+    expect(t.db.content).toBe("data-v1");
+    expect(t.server.calls.at(-1)).toBe("start:signOut");
+    expect(t.svc.status().running).toBeNull();
+    const state = JSON.parse(await readFile(join(t.root, "backup", "state.json"), "utf8"));
+    expect(state.cleanupPending).toBe(true);
+    const next = await t.svc.backupNow().then(() => null, (e) => e);
+    if (next) expect(next.code).toBe("NO_PASSWORD");
+  });
+
+  it("a failing attachments rollback still restarts the server and reports RESTORE_FAILED", async () => {
+    const t = await backedUp();
+    t.db.failSwap = true;
+    t.db.beforeSwap = () => rm(`${t.attachmentsDir}_before_restore`, { recursive: true, force: true });
+    await expect(t.svc.restore(t.entry.id, "pw-12345678")).rejects.toMatchObject({ code: "RESTORE_FAILED" });
+    expect(t.server.calls).toEqual(["stop", "start"]);
+  });
+
+  it("a failing undoSwap is recorded, keeps the old DB, and blocks further restores and cleanup", async () => {
+    const t = await backedUp();
+    t.server.failSignOutStart = true;
+    t.db.failUndoSwap = true;
+    await expect(t.svc.restore(t.entry.id, "pw-12345678")).rejects.toMatchObject({ code: "RESTORE_FAILED" });
+    expect(t.server.calls.at(-1)).toBe("start");
+    expect(t.svc.status().running).toBeNull();
+    const state = JSON.parse(await readFile(join(t.root, "backup", "state.json"), "utf8"));
+    expect(state.restoreRollbackFailed).toBe(true);
+
+    t.db.calls.length = 0;
+    await t.svc.backupNow();
+    expect(t.db.calls).not.toContain("dropPrevious");
+    expect(t.db.calls).not.toContain("dropRestoreLeftovers");
+
+    let downloads = 0;
+    const orig = t.drive.download.bind(t.drive);
+    t.drive.download = async (...a: Parameters<typeof orig>) => {
+      downloads++;
+      return orig(...a);
+    };
+    await expect(t.svc.restore(t.entry.id, "pw-12345678")).rejects.toMatchObject({ code: "RESTORE_FAILED" });
+    expect(downloads).toBe(0);
+  });
+
+  it("a server that won't stop drops the side DB, restarts and reports RESTORE_FAILED", async () => {
+    const t = await backedUp();
+    t.server.failStop = true;
+    await expect(t.svc.restore(t.entry.id, "pw-12345678")).rejects.toMatchObject({ code: "RESTORE_FAILED" });
+    expect(t.db.calls).toContain("dropRestoreLeftovers");
+    expect(t.server.calls.at(-1)).toBe("start");
+    expect(t.db.content).toBe("data-v2");
+  });
+
+  it("setPassword is refused while a restore runs", async () => {
+    const t = await backedUp();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const origStop = t.server.stop.bind(t.server);
+    t.server.stop = async () => {
+      await gate;
+      return origStop();
+    };
+    const restoring = t.svc.restore(t.entry.id, "pw-12345678");
+    await new Promise((r) => setTimeout(r, 50));
+    await expect(t.svc.setPassword("another-pass-1")).rejects.toMatchObject({ code: "BUSY" });
+    release();
+    await restoring;
+  });
+
+  it("a failed disconnect keeps the schedule running", async () => {
+    vi.useFakeTimers();
+    try {
+      const t = await ready();
+      t.svc.startSchedule(1000, 500);
+      t.secrets.clear = async () => {
+        throw new Error("keychain locked");
+      };
+      await expect(t.svc.disconnect()).rejects.toThrow();
+      const tick = vi.spyOn(t.svc, "tick").mockResolvedValue();
+      await vi.advanceTimersByTimeAsync(600);
+      expect(tick).toHaveBeenCalled();
+      t.svc.stopSchedule();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -182,6 +182,7 @@ export class BackupService {
   }
 
   async setPassword(password: string): Promise<void> {
+    if (this.running?.kind === "restore") throw new BackupError("BUSY");
     if (normalizePassword(password).length < 8) throw new BackupError("WEAK_PASSWORD");
     if (!this.state.email) throw new BackupError("NOT_CONNECTED");
     const params = this.d.scrypt ?? DEFAULT_SCRYPT;
@@ -311,7 +312,7 @@ export class BackupService {
         console.warn("[backup] could not prune old backups:", err instanceof Error ? err.message : err);
       }
       let cleanupPending = this.state.cleanupPending;
-      if (cleanupPending) {
+      if (cleanupPending && !this.state.restoreRollbackFailed) {
         try {
           await this.dropRestoreLeftovers();
           cleanupPending = false;
@@ -375,6 +376,9 @@ export class BackupService {
 
   restore(id: string, password: string): Promise<void> {
     if (this.running) return Promise.reject(new BackupError("BUSY"));
+    if (this.state.restoreRollbackFailed) {
+      return Promise.reject(new BackupError("RESTORE_FAILED", "an earlier restore could not be rolled back"));
+    }
     const promise: Promise<void> = this.doRestore(id, password)
       .catch((err) => {
         throw toBackupError(err, "RESTORE_FAILED");
@@ -416,12 +420,39 @@ export class BackupService {
       }
 
       // Swap: attachments first (plain renames), then both databases in one transaction.
-      await this.d.server.stop();
       const live = this.d.attachmentsDir;
       const previous = `${live}_before_restore`;
       let liveMoved = false;
       let newInPlace = false;
+      let swapped = false;
+      // Every rollback step is attempted on its own; the server is always restarted.
+      const rollback = async (err: unknown): Promise<never> => {
+        const failures: unknown[] = [];
+        const step = async (fn: () => Promise<unknown>) => {
+          try {
+            await fn();
+          } catch (e) {
+            failures.push(e);
+          }
+        };
+        if (swapped) {
+          try {
+            await this.d.db.undoSwap();
+          } catch (e) {
+            failures.push(e);
+            console.error("[backup] ROLLBACK FAILED: could not undo the database swap; trivio_before_restore is kept:", e);
+            await step(() => this.update({ restoreRollbackFailed: true }));
+          }
+        }
+        await step(() => this.d.db.dropRestoreLeftovers());
+        if (newInPlace) await step(() => fsp.rm(live, { recursive: true, force: true }));
+        if (liveMoved) await step(() => fsp.rename(previous, live));
+        await step(() => this.d.server.start({ signOut: false }));
+        for (const f of failures) console.error("[backup] restore rollback step failed:", f);
+        throw new BackupError("RESTORE_FAILED", err instanceof Error ? err.message : String(err));
+      };
       try {
+        await this.d.server.stop();
         await fsp.rm(previous, { recursive: true, force: true });
         await fsp.mkdir(dirname(live), { recursive: true });
         try {
@@ -432,13 +463,12 @@ export class BackupService {
         }
         await fsp.rename(unpacked.attachmentsDir, live);
         newInPlace = true;
+        // Recorded before the swap so a crash mid-way still gets the leftovers cleaned up later.
+        await this.update({ cleanupPending: true });
         await this.d.db.swapIn();
+        swapped = true;
       } catch (err) {
-        if (newInPlace) await fsp.rm(live, { recursive: true, force: true });
-        if (liveMoved) await fsp.rename(previous, live);
-        await this.d.db.dropRestoreLeftovers().catch(() => {});
-        await this.d.server.start({ signOut: false });
-        throw new BackupError("RESTORE_FAILED", err instanceof Error ? err.message : String(err));
+        return await rollback(err);
       }
 
       this.progress("restarting");
@@ -447,16 +477,20 @@ export class BackupService {
       } catch (err) {
         // The restored database wouldn't start (e.g. its migration failed): put everything back.
         await this.d.server.stop().catch(() => {});
-        await this.d.db.undoSwap();
-        await this.d.db.dropRestoreLeftovers().catch(() => {});
-        await fsp.rm(live, { recursive: true, force: true });
-        if (liveMoved) await fsp.rename(previous, live);
-        await this.d.server.start({ signOut: false });
-        throw new BackupError("RESTORE_FAILED", err instanceof Error ? err.message : String(err));
+        return await rollback(err);
       }
 
-      await this.adoptKey(unpacked.pwKey, unpacked.pwSalt, unpacked.params);
-      await this.update({ cleanupPending: true, fingerprint: null, lastError: null });
+      // The restored data is live: everything below is post-commit and must not fail the restore.
+      try {
+        await this.update({ cleanupPending: true, fingerprint: null, lastError: null });
+      } catch (err) {
+        console.error("[backup] could not record the restore in state:", err);
+      }
+      try {
+        await this.adoptKey(unpacked.pwKey, unpacked.pwSalt, unpacked.params);
+      } catch (err) {
+        console.error("[backup] restored, but could not save the backup key; the password will be asked again:", err);
+      }
       this.progress("done");
     } finally {
       await fsp.rm(work, { recursive: true, force: true });
@@ -465,7 +499,6 @@ export class BackupService {
 
   async disconnect(): Promise<void> {
     if (this.running) throw new BackupError("BUSY");
-    this.stopSchedule();
     await this.d.auth.disconnect();
     await this.d.secrets.clear("key");
     this.pwKey = null;
@@ -480,5 +513,6 @@ export class BackupService {
       failingSince: null,
       failureNotified: false,
     });
+    this.stopSchedule(); // last, so a failed disconnect keeps backups running
   }
 }

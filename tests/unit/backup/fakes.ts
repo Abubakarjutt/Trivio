@@ -62,6 +62,8 @@ export class FakeDb implements DbLike {
   restored: string | null = null;
   failSwap = false;
   failRestore = false;
+  failUndoSwap = false;
+  beforeSwap: (() => Promise<void>) | null = null; // test hook, runs inside swapIn before it fails or succeeds
   failDropPrevious = false;
   fingerprintGate: Promise<void> | null = null;
   async dump(out: string) {
@@ -82,11 +84,13 @@ export class FakeDb implements DbLike {
   }
   async swapIn() {
     this.calls.push("swapIn");
+    if (this.beforeSwap) await this.beforeSwap();
     if (this.failSwap) throw new Error("rename failed");
     this.content = this.restored!;
   }
   async undoSwap() {
     this.calls.push("undoSwap");
+    if (this.failUndoSwap) throw new Error("undo failed");
   }
   async dropRestoreLeftovers() {
     this.calls.push("dropRestoreLeftovers");
@@ -100,8 +104,10 @@ export class FakeDb implements DbLike {
 export class FakeServer implements ServerLike {
   calls: string[] = [];
   failSignOutStart = false;
+  failStop = false;
   async stop() {
     this.calls.push("stop");
+    if (this.failStop) throw new Error("stop failed");
   }
   async start(o: { signOut: boolean }) {
     this.calls.push(o.signOut ? "start:signOut" : "start");

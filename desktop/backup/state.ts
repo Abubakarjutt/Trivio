@@ -20,6 +20,7 @@ export interface BackupState {
   fingerprint: string | null;
   keptCount: number;
   cleanupPending: boolean; // a restore left trivio_before_restore / attachments_before_restore
+  restoreRollbackFailed?: boolean; // a restore could not be undone: keep trivio_before_restore, refuse further restores
 }
 
 export const EMPTY_STATE: BackupState = {
