@@ -60,7 +60,11 @@ export function decodeHeader(b: Buffer): BackupHeader {
   const params = { N: b.readUInt32BE(9), r: b.readUInt8(13), p: b.readUInt8(14) };
   // The header is untrusted until the tag verifies — bound the work it can ask for.
   const powerOfTwo = (params.N & (params.N - 1)) === 0;
-  if (!powerOfTwo || params.N < 2 ** 10 || params.N > 2 ** 20 || params.r < 1 || params.r > 32 || params.p < 1 || params.p > 16) {
+  if (!powerOfTwo || params.N < 2 ** 10 || params.N > 2 ** 20 || params.r < 1 || params.r > 32 || params.p < 1 || params.p > 4) {
+    throw new BackupError("BAD_FORMAT");
+  }
+  // Enforce memory bound compatible with derivePwKey (256 MiB max = 128·N·r bytes)
+  if (128 * params.N * params.r > 256 * 1024 * 1024) {
     throw new BackupError("BAD_FORMAT");
   }
   return {

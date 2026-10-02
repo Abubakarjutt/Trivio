@@ -4,8 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import {
-  packBackup, unpackBackup, encodeHeader, decodeHeader, attachmentsFingerprint, backupFileName,
-  HEADER_LEN, type KeyMaterial,
+  packBackup,
+  unpackBackup,
+  encodeHeader,
+  decodeHeader,
+  attachmentsFingerprint,
+  backupFileName,
+  HEADER_LEN,
+  type KeyMaterial,
 } from "../../../desktop/backup/archive";
 import { derivePwKey } from "../../../desktop/backup/keys";
 
@@ -19,12 +25,22 @@ async function setup(password = "pw-12345678") {
   await mkdir(join(att, "org1"), { recursive: true });
   await writeFile(join(att, "org1", "r.pdf"), "receipt");
   const pwSalt = randomBytes(16);
-  const key: KeyMaterial = { pwKey: await derivePwKey(password, pwSalt, FAST), pwSalt, params: FAST };
+  const key: KeyMaterial = {
+    pwKey: await derivePwKey(password, pwSalt, FAST),
+    pwSalt,
+    params: FAST,
+  };
   const out = join(dir, "b.trivio-backup");
   await mkdir(join(dir, "work"));
   const manifest = await packBackup({
-    workDir: join(dir, "work"), dumpPath: dump, attachmentsDir: att, appVersion: "0.1.25",
-    latestMigration: "20260101000000_init", now: new Date("2026-10-02T14:30:00.123Z"), key, outPath: out,
+    workDir: join(dir, "work"),
+    dumpPath: dump,
+    attachmentsDir: att,
+    appVersion: "0.1.25",
+    latestMigration: "20260101000000_init",
+    now: new Date("2026-10-02T14:30:00.123Z"),
+    key,
+    outPath: out,
   });
   return { dir, dump, att, out, manifest };
 }
@@ -35,25 +51,36 @@ const withPassword = (pw: string) => (h: { pwSalt: Buffer; params: typeof FAST }
 describe("archive", () => {
   it("names files trivio-<UTC, colons→dashes, no ms>.trivio-backup", () => {
     expect(backupFileName(new Date("2026-10-02T14:30:00.123Z"))).toBe(
-      "trivio-2026-10-02T14-30-00Z.trivio-backup",
+      "trivio-2026-10-02T14-30-00Z.trivio-backup"
     );
   });
 
   it("header round-trips and is exactly 60 bytes", () => {
-    const h = { params: FAST, pwSalt: randomBytes(16), fileSalt: randomBytes(16), nonce: randomBytes(12) };
+    const h = {
+      params: FAST,
+      pwSalt: randomBytes(16),
+      fileSalt: randomBytes(16),
+      nonce: randomBytes(12),
+    };
     const b = encodeHeader(h);
     expect(b).toHaveLength(HEADER_LEN);
     expect(b.subarray(0, 8).toString()).toBe("TRIVIOBK");
     const d = decodeHeader(b);
     expect(d.params).toEqual(FAST);
-    expect(d.pwSalt.equals(h.pwSalt) && d.fileSalt.equals(h.fileSalt) && d.nonce.equals(h.nonce)).toBe(true);
+    expect(
+      d.pwSalt.equals(h.pwSalt) && d.fileSalt.equals(h.fileSalt) && d.nonce.equals(h.nonce)
+    ).toBe(true);
   });
 
   it("round-trips dump + attachments with the right password", async () => {
     const { dir, dump, out, manifest } = await setup();
     expect(manifest.attachmentCount).toBe(1);
     await mkdir(join(dir, "w2"));
-    const r = await unpackBackup({ srcPath: out, workDir: join(dir, "w2"), getPwKey: withPassword("pw-12345678") });
+    const r = await unpackBackup({
+      srcPath: out,
+      workDir: join(dir, "w2"),
+      getPwKey: withPassword("pw-12345678"),
+    });
     expect((await readFile(r.dumpPath)).equals(await readFile(dump))).toBe(true);
     expect(await readFile(join(r.attachmentsDir, "org1", "r.pdf"), "utf8")).toBe("receipt");
     expect(r.manifest.latestMigration).toBe("20260101000000_init");
@@ -64,13 +91,18 @@ describe("archive", () => {
     const { dir, out } = await setup();
     await mkdir(join(dir, "w2"));
     await expect(
-      unpackBackup({ srcPath: out, workDir: join(dir, "w2"), getPwKey: withPassword("nope-nope-nope") }),
+      unpackBackup({
+        srcPath: out,
+        workDir: join(dir, "w2"),
+        getPwKey: withPassword("nope-nope-nope"),
+      })
     ).rejects.toMatchObject({ code: "WRONG_PASSWORD" });
     await expect(readFile(join(dir, "w2", "body.tar"))).rejects.toThrow();
   });
 
   it.each([
     ["the header (scrypt salt)", 20],
+    ["the reserved header byte (AAD only)", 59],
     ["the body", HEADER_LEN + 10],
     ["the tag", -1],
   ])("rejects a flipped byte in %s", async (_label, offset) => {
@@ -81,7 +113,11 @@ describe("archive", () => {
     await writeFile(out, buf);
     await mkdir(join(dir, "w2"));
     await expect(
-      unpackBackup({ srcPath: out, workDir: join(dir, "w2"), getPwKey: withPassword("pw-12345678") }),
+      unpackBackup({
+        srcPath: out,
+        workDir: join(dir, "w2"),
+        getPwKey: withPassword("pw-12345678"),
+      })
     ).rejects.toMatchObject({ code: "WRONG_PASSWORD" });
   });
 
@@ -90,19 +126,44 @@ describe("archive", () => {
     await writeFile(join(dir, "junk"), randomBytes(200));
     await mkdir(join(dir, "w2"));
     await expect(
-      unpackBackup({ srcPath: join(dir, "junk"), workDir: join(dir, "w2"), getPwKey: withPassword("x") }),
+      unpackBackup({
+        srcPath: join(dir, "junk"),
+        workDir: join(dir, "w2"),
+        getPwKey: withPassword("x"),
+      })
     ).rejects.toMatchObject({ code: "BAD_FORMAT" });
     const buf = await readFile(out);
     buf[8] = 2;
     await writeFile(out, buf);
     await expect(
-      unpackBackup({ srcPath: out, workDir: join(dir, "w2"), getPwKey: withPassword("pw-12345678") }),
+      unpackBackup({
+        srcPath: out,
+        workDir: join(dir, "w2"),
+        getPwKey: withPassword("pw-12345678"),
+      })
     ).rejects.toMatchObject({ code: "NEWER_BACKUP" });
   });
 
   it("refuses absurd scrypt parameters from an untrusted header", () => {
-    const b = encodeHeader({ params: FAST, pwSalt: randomBytes(16), fileSalt: randomBytes(16), nonce: randomBytes(12) });
+    const b = encodeHeader({
+      params: FAST,
+      pwSalt: randomBytes(16),
+      fileSalt: randomBytes(16),
+      nonce: randomBytes(12),
+    });
     b.writeUInt32BE(2 ** 30, 9);
+    expect(() => decodeHeader(b)).toThrow(/isn't a Trivio backup/);
+  });
+
+  it("refuses scrypt parameters that exceed memory bounds", () => {
+    const b = encodeHeader({
+      params: FAST,
+      pwSalt: randomBytes(16),
+      fileSalt: randomBytes(16),
+      nonce: randomBytes(12),
+    });
+    b.writeUInt32BE(2 ** 20, 9);
+    b.writeUInt8(8, 13);
     expect(() => decodeHeader(b)).toThrow(/isn't a Trivio backup/);
   });
 
