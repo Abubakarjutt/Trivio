@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/lib/hooks/use-toast";
 import { trpc } from "@/lib/trpc/client";
+import { RestoreFromDriveLink } from "@/components/backup/restore-from-drive-link";
 import { Loader2, ArrowLeft, MailCheck } from "lucide-react";
 
 const METRICS = [
@@ -285,6 +286,7 @@ export default function RegisterPage() {
                 <Link href="/login" className="flex items-center justify-center w-full h-12 rounded-xl border-2 border-slate-200 text-slate-700 text-sm font-semibold hover:border-green-600 hover:text-green-700 transition-all">
                   Sign in instead
                 </Link>
+                <RestoreFromDriveLink />
               </>
             )}
           </div>

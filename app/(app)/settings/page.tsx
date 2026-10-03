@@ -9,6 +9,7 @@ import { JurisdictionPicker } from "./_components/jurisdiction-picker";
 import { CurrencyPicker } from "./_components/currency-picker";
 import { TaxRegimePicker } from "./_components/tax-regime-picker";
 import { VoiceInputCard } from "./_components/voice-input-card";
+import { BackupCard } from "./_components/backup-card";
 
 export default async function SettingsPage() {
   const session = await auth();
@@ -143,6 +144,8 @@ export default async function SettingsPage() {
 
           {/* Voice input for the AI assistant */}
           <VoiceInputCard />
+          {/* Encrypted backups to the user's Google Drive (desktop app) */}
+          <BackupCard />
 
           {/* Email Import */}
           {emailImportToken && (

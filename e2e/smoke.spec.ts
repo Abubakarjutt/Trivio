@@ -240,3 +240,9 @@ test("voice input: off by default, turned on in Settings, speech lands in the ch
   await expect(input).toBeVisible();
   await expect(page.getByRole("button", { name: "Speak your message" })).toHaveCount(0);
 });
+
+test("Settings shows the Google Drive backup card (desktop-only notice in the browser)", async () => {
+  await page.goto("/settings");
+  await expect(page.getByRole("heading", { name: "Backup to Google Drive" })).toBeVisible();
+  await expect(page.getByText("Available in the Trivio desktop app.")).toBeVisible();
+});

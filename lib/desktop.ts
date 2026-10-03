@@ -9,13 +9,28 @@
 // status, run the (skippable) first-time setup, and get progress back.
 
 import type {
+  BackupBridge,
+  BackupEntry,
+  BackupProgress,
+  BackupResult,
+  BackupStatus,
   DesktopBridge,
   OllamaBridge,
   OllamaProgress,
   OllamaStatus,
+  RawBackupBridge,
 } from "@/types/trivio-desktop";
 
-export type { DesktopBridge, OllamaBridge, OllamaProgress, OllamaStatus };
+export type {
+  BackupBridge,
+  BackupEntry,
+  BackupProgress,
+  BackupStatus,
+  DesktopBridge,
+  OllamaBridge,
+  OllamaProgress,
+  OllamaStatus,
+};
 
 // The desktop bridge, or undefined in a web build (and during SSR).
 export function getDesktop(): DesktopBridge | undefined {
@@ -82,4 +97,42 @@ export async function ensureOllamaReady(
     // Fall through to setup — the engine may be partially configured.
    }
   return runOllamaSetup(onProgress, b);
+}
+
+// Turn the raw {ok,value}|{ok:false,code,message} IPC result into a resolved
+// value or a thrown Error carrying `code`.
+async function unwrap<T>(result: Promise<BackupResult<T>>): Promise<T> {
+  const r = await result;
+  if (r.ok) return r.value;
+  throw Object.assign(new Error(r.message), { code: r.code });
+}
+
+// Wrap the raw bridge so methods resolve with the value or reject with an Error
+// that has `.code`. Exported for tests.
+export function wrapBackup(raw: RawBackupBridge): BackupBridge {
+  return {
+    status: () => unwrap(raw.status()),
+    connect: () => unwrap(raw.connect()),
+    disconnect: () => unwrap(raw.disconnect()),
+    setPassword: (password) => unwrap(raw.setPassword(password)),
+    backupNow: () => unwrap(raw.backupNow()),
+    list: () => unwrap(raw.list()),
+    restore: (id, password) => unwrap(raw.restore(id, password)),
+    onProgress: (cb) => raw.onProgress(cb),
+  };
+}
+
+const wrappedBackups = new WeakMap<RawBackupBridge, BackupBridge>();
+
+// The Google Drive backup sub-API, or undefined on the web / an older shell.
+// Memoized per raw bridge so the identity is stable across renders.
+export function getBackup(): BackupBridge | undefined {
+  const raw = getDesktop()?.backup;
+  if (!raw) return undefined;
+  let wrapped = wrappedBackups.get(raw);
+  if (!wrapped) {
+    wrapped = wrapBackup(raw);
+    wrappedBackups.set(raw, wrapped);
+  }
+  return wrapped;
 }

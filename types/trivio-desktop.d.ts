@@ -55,6 +55,73 @@ export interface OllamaBridge {
   onStatusChange: (cb: (s: OllamaStatus) => void) => () => void;
 }
 
+// Google Drive backup (desktop/backup). The bridge resolves with the raw IPC
+// result because custom Error properties don't survive contextBridge; lib/desktop
+// getBackup() unwraps it into the BackupBridge below, whose methods reject with an
+// Error whose message is ready to show and whose `code` names the failure.
+export interface BackupStatus {
+  configured: boolean;
+  connected: boolean;
+  email: string | null;
+  passwordSet: boolean;
+  running: "backup" | "restore" | null;
+  lastSuccessAt: string | null;
+  lastAttemptAt: string | null;
+  lastCheckedAt: string | null;
+  lastError: { code: string; message: string } | null;
+  failingSince: string | null;
+  keptCount: number;
+  // A restore could not be undone; the original data is kept aside.
+  restoreRollbackFailed: boolean;
+}
+
+export interface BackupEntry {
+  id: string;
+  name: string;
+  createdAt: string;
+  sizeBytes: number;
+  appVersion: string | null;
+}
+
+export interface BackupProgress {
+  phase:
+    | "dumping"
+    | "encrypting"
+    | "uploading"
+    | "pruning"
+    | "downloading"
+    | "decrypting"
+    | "restoring"
+    | "restarting"
+    | "done";
+}
+
+export type BackupResult<T> = { ok: true; value: T } | { ok: false; code: string; message: string };
+
+// What preload actually exposes.
+export interface RawBackupBridge {
+  status: () => Promise<BackupResult<BackupStatus>>;
+  connect: () => Promise<BackupResult<{ email: string }>>;
+  disconnect: () => Promise<BackupResult<void>>;
+  setPassword: (password: string) => Promise<BackupResult<void>>;
+  backupNow: () => Promise<BackupResult<BackupStatus>>;
+  list: () => Promise<BackupResult<BackupEntry[]>>;
+  restore: (id: string, password: string) => Promise<BackupResult<void>>;
+  onProgress: (cb: (p: BackupProgress) => void) => () => void;
+}
+
+// The public, throwing view of the bridge that components use.
+export interface BackupBridge {
+  status: () => Promise<BackupStatus>;
+  connect: () => Promise<{ email: string }>;
+  disconnect: () => Promise<void>;
+  setPassword: (password: string) => Promise<void>;
+  backupNow: () => Promise<BackupStatus>;
+  list: () => Promise<BackupEntry[]>;
+  restore: (id: string, password: string) => Promise<void>;
+  onProgress: (cb: (p: BackupProgress) => void) => () => void;
+}
+
 // The full bridge exposed on window.trivioDesktop.
 export interface DesktopBridge {
   isDesktop: boolean;
@@ -65,6 +132,8 @@ export interface DesktopBridge {
   navigate: (intent: string) => void;
   onDeepLink: (cb: (info: { raw: string; path: string; query: string }) => void) => () => void;
   ollama: OllamaBridge;
+  // Optional: an older shell running a newer web build has no `backup`.
+  backup?: RawBackupBridge;
 }
 
 declare global {
