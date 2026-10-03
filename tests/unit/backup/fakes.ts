@@ -56,6 +56,8 @@ export class FakeDrive implements DriveLike {
 
 export class FakeDb implements DbLike {
   content = "data-v1"; // what the "live database" holds
+  previous: string | null = null; // what trivio_before_restore holds
+  discard: string | null = null; // what trivio_discard holds
   fp = "fp-1";
   migrations = ["20260101000000_init"];
   calls: string[] = [];
@@ -86,11 +88,31 @@ export class FakeDb implements DbLike {
     this.calls.push("swapIn");
     if (this.beforeSwap) await this.beforeSwap();
     if (this.failSwap) throw new Error("rename failed");
+    this.previous = this.content;
     this.content = this.restored!;
   }
   async undoSwap() {
     this.calls.push("undoSwap");
     if (this.failUndoSwap) throw new Error("undo failed");
+    this.content = this.previous!;
+    this.previous = null;
+  }
+  async swapInKeepingPrevious() {
+    this.calls.push("swapInKeepingPrevious");
+    if (this.beforeSwap) await this.beforeSwap();
+    if (this.failSwap) throw new Error("rename failed");
+    this.discard = this.content;
+    this.content = this.restored!;
+  }
+  async undoSwapKeepingPrevious() {
+    this.calls.push("undoSwapKeepingPrevious");
+    if (this.failUndoSwap) throw new Error("undo failed");
+    this.content = this.discard!;
+    this.discard = null;
+  }
+  async dropDiscard() {
+    this.calls.push("dropDiscard");
+    this.discard = null;
   }
   async dropRestoreLeftovers() {
     this.calls.push("dropRestoreLeftovers");
@@ -98,6 +120,7 @@ export class FakeDb implements DbLike {
   async dropPrevious() {
     this.calls.push("dropPrevious");
     if (this.failDropPrevious) throw new Error("drop failed");
+    this.previous = null;
   }
 }
 

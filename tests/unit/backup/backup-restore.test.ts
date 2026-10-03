@@ -339,6 +339,8 @@ describe("BackupService — restore fix round", () => {
 describe("BackupService — attachments rollback failure", () => {
   it("keeps the only copy of the old attachments and blocks cleanup and restores", async () => {
     const t = await backedUp();
+    // An old, expired restore is pending cleanup, so only the rollback-failed guard keeps the copy below.
+    await (t.svc as unknown as { update(p: object): Promise<void> }).update({ cleanupPending: true, restoredAt: "2026-09-01T00:00:00.000Z" });
     t.db.failSwap = true;
     const realRename = fsp.rename.bind(fsp);
     const spy = vi.spyOn(fsp, "rename").mockImplementation(async (from, to) => {
@@ -355,6 +357,7 @@ describe("BackupService — attachments rollback failure", () => {
     expect(t.server.calls.at(-1)).toBe("start");
 
     await t.svc.backupNow();
+    expect(t.db.calls).not.toContain("dropPrevious");
     expect(await readFile(join(`${t.attachmentsDir}_before_restore`, "org1", "r.pdf"), "utf8")).toBe("receipt-2");
 
     let downloads = 0;
@@ -365,6 +368,65 @@ describe("BackupService — attachments rollback failure", () => {
     };
     await expect(t.svc.restore(t.entry.id, "pw-12345678")).rejects.toMatchObject({ code: "RESTORE_FAILED" });
     expect(downloads).toBe(0);
+  });
+});
+
+describe("BackupService — a second restore within the week", () => {
+  const state = (t: { deps: { dir: string } }) => loadState(join(t.deps.dir, "state.json"));
+  const restoredTwice = async () => {
+    const t = await backedUp();
+    await t.svc.restore(t.entry.id, "pw-12345678");
+    expect(t.db.previous).toBe("data-v2");
+    expect(await readFile(join(`${t.attachmentsDir}_before_restore`, "org1", "r.pdf"), "utf8")).toBe("receipt-2");
+    const firstRestoredAt = (await state(t)).restoredAt;
+    // the user works on the restored data, then restores again
+    t.db.content = "data-v3";
+    await writeFile(join(t.attachmentsDir, "org1", "r.pdf"), "receipt-3");
+    return { ...t, firstRestoredAt };
+  };
+  const dirsNamed = async (t: { attachmentsDir: string }, prefix: string) =>
+    (await readdir(join(t.attachmentsDir, ".."))).filter((n) => n.startsWith(prefix));
+
+  it("keeps the original pre-first-restore data and discards the current data", async () => {
+    const t = await restoredTwice();
+    t.setNow(new Date(Date.parse("2026-10-02T10:00:00Z") + HOUR));
+    t.db.calls.length = 0;
+    await t.svc.restore(t.entry.id, "pw-12345678");
+    expect(t.db.content).toBe("data-v1");
+    expect(await readFile(join(t.attachmentsDir, "org1", "r.pdf"), "utf8")).toBe("receipt-1");
+    expect(t.db.previous).toBe("data-v2");
+    expect(await readFile(join(`${t.attachmentsDir}_before_restore`, "org1", "r.pdf"), "utf8")).toBe("receipt-2");
+    expect(t.db.calls).toEqual(["restore", "swapInKeepingPrevious", "dropDiscard"]);
+    expect(t.db.discard).toBeNull();
+    expect(await dirsNamed(t, "attachments_discard")).toEqual([]);
+    const s = await state(t);
+    expect(s.restoredAt).toBe(t.firstRestoredAt);
+    expect(s.cleanupPending).toBe(true);
+  });
+
+  it("a failed swap on the second restore leaves the live data and the original intact", async () => {
+    const t = await restoredTwice();
+    t.setNow(new Date(Date.parse("2026-10-02T10:00:00Z") + HOUR));
+    t.db.failSwap = true;
+    await expect(t.svc.restore(t.entry.id, "pw-12345678")).rejects.toMatchObject({ code: "RESTORE_FAILED" });
+    expect(t.db.content).toBe("data-v3");
+    expect(await readFile(join(t.attachmentsDir, "org1", "r.pdf"), "utf8")).toBe("receipt-3");
+    expect(t.db.previous).toBe("data-v2");
+    expect(await readFile(join(`${t.attachmentsDir}_before_restore`, "org1", "r.pdf"), "utf8")).toBe("receipt-2");
+    expect(await dirsNamed(t, "attachments_discard")).toEqual([]);
+    expect(t.server.calls.at(-1)).toBe("start");
+    expect(t.svc.status().restoreRollbackFailed).toBe(false);
+  });
+
+  it("a restore after the week uses the normal path and restarts the clock", async () => {
+    const t = await restoredTwice();
+    t.setNow(new Date(Date.parse("2026-10-02T10:00:00Z") + 7 * 24 * HOUR + HOUR));
+    t.db.calls.length = 0;
+    await t.svc.restore(t.entry.id, "pw-12345678");
+    expect(t.db.calls).toEqual(["restore", "swapIn"]);
+    expect(t.db.previous).toBe("data-v3");
+    expect(await readFile(join(`${t.attachmentsDir}_before_restore`, "org1", "r.pdf"), "utf8")).toBe("receipt-3");
+    expect((await state(t)).restoredAt).toBe("2026-10-09T11:00:00.000Z");
   });
 });
 

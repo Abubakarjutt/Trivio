@@ -25,6 +25,7 @@ const GOOGLE_CLIENT = {
 
 const RESTORE_DB = "trivio_restore";
 const PREVIOUS_DB = "trivio_before_restore";
+const DISCARD_DB = "trivio_discard"; // a second restore's replaced data, while trivio_before_restore is kept
 
 export async function createBackupService(o: {
   userData: string;
@@ -60,6 +61,9 @@ export async function createBackupService(o: {
       undoSwap: () => swapDatabases(conn, { live: conn.database, incoming: PREVIOUS_DB, previous: RESTORE_DB }),
       dropRestoreLeftovers: () => dropDatabase(conn, RESTORE_DB),
       dropPrevious: () => dropDatabase(conn, PREVIOUS_DB),
+      swapInKeepingPrevious: () => swapDatabases(conn, { live: conn.database, incoming: RESTORE_DB, previous: DISCARD_DB }),
+      undoSwapKeepingPrevious: () => swapDatabases(conn, { live: conn.database, incoming: DISCARD_DB, previous: RESTORE_DB }),
+      dropDiscard: () => dropDatabase(conn, DISCARD_DB),
     },
     server: o.server,
     notify: (title, body) => {

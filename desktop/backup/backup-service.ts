@@ -31,6 +31,9 @@ export interface DbLike {
   restore(dumpPath: string): Promise<void>; // into trivio_restore (recreated)
   swapIn(): Promise<void>; // trivio→trivio_before_restore, trivio_restore→trivio
   undoSwap(): Promise<void>; // the reverse
+  swapInKeepingPrevious(): Promise<void>; // trivio→trivio_discard, trivio_restore→trivio (trivio_before_restore untouched)
+  undoSwapKeepingPrevious(): Promise<void>; // the reverse
+  dropDiscard(): Promise<void>; // drop trivio_discard
   dropRestoreLeftovers(): Promise<void>; // drop trivio_restore
   dropPrevious(): Promise<void>; // drop trivio_before_restore
 }
@@ -463,7 +466,10 @@ export class BackupService {
 
       // Swap: attachments first (plain renames), then both databases in one transaction.
       const live = this.d.attachmentsDir;
-      const previous = `${live}_before_restore`;
+      // A second restore within the week keeps the ORIGINAL *_before_restore copies
+      // (the data from before the first restore) and discards the current data instead.
+      const keepOriginal = this.state.cleanupPending && !this.restoreLeftoversExpired();
+      const previous = keepOriginal ? `${live}_discard` : `${live}_before_restore`;
       let liveMoved = false;
       let newInPlace = false;
       let swapped = false;
@@ -482,8 +488,8 @@ export class BackupService {
           }
         };
         if (swapped) {
-          await step(() => this.d.db.undoSwap(), true);
-          if (originalAtRisk) console.error("[backup] ROLLBACK FAILED: could not undo the database swap; trivio_before_restore is kept");
+          await step(() => (keepOriginal ? this.d.db.undoSwapKeepingPrevious() : this.d.db.undoSwap()), true);
+          if (originalAtRisk) console.error("[backup] ROLLBACK FAILED: could not undo the database swap; the previous database is kept");
         }
         await step(() => this.d.db.dropRestoreLeftovers());
         if (newInPlace) await step(() => fsp.rm(live, { recursive: true, force: true }), true);
@@ -498,7 +504,8 @@ export class BackupService {
       };
       try {
         await this.d.server.stop();
-        await this.clearPreviousAttachments(previous);
+        if (keepOriginal) await this.setAside(previous); // a stale _discard from a crash
+        else await this.clearPreviousAttachments(previous);
         await fsp.mkdir(dirname(live), { recursive: true });
         try {
           await fsp.rename(live, previous);
@@ -508,11 +515,12 @@ export class BackupService {
         }
         await fsp.rename(unpacked.attachmentsDir, live);
         newInPlace = true;
-        await this.d.db.swapIn();
+        await (keepOriginal ? this.d.db.swapInKeepingPrevious() : this.d.db.swapIn());
         swapped = true;
         // The kept-aside copies only become leftovers once the swap succeeded; recording it
         // earlier would let a later backup delete the only original after a failed swap.
-        await this.update({ cleanupPending: true, restoredAt: this.now().toISOString() });
+        // keepOriginal: the leftovers are still the first restore's, so its clock keeps running.
+        await this.update(keepOriginal ? { cleanupPending: true } : { cleanupPending: true, restoredAt: this.now().toISOString() });
       } catch (err) {
         return await rollback(err);
       }
@@ -528,9 +536,23 @@ export class BackupService {
 
       // The restored data is live: everything below is post-commit and must not fail the restore.
       try {
-        await this.update({ cleanupPending: true, restoredAt: this.now().toISOString(), fingerprint: null, lastError: null });
+        await this.update({
+          cleanupPending: true,
+          ...(keepOriginal ? {} : { restoredAt: this.now().toISOString() }),
+          fingerprint: null,
+          lastError: null,
+        });
       } catch (err) {
         console.error("[backup] could not record the restore in state:", err);
+      }
+      if (keepOriginal) {
+        // The discarded data was the previous restore's; the original is still kept aside.
+        try {
+          await fsp.rm(previous, { recursive: true, force: true });
+          await this.d.db.dropDiscard();
+        } catch (err) {
+          console.warn("[backup] could not drop the discarded data:", err instanceof Error ? err.message : err);
+        }
       }
       try {
         await this.adoptKey(unpacked.pwKey, unpacked.pwSalt, unpacked.params);
@@ -550,10 +572,15 @@ export class BackupService {
       await fsp.rm(previous, { recursive: true, force: true });
       return;
     }
+    await this.setAside(previous);
+  }
+
+  // Renames path to path-<timestamp>, if it exists.
+  private async setAside(path: string): Promise<void> {
     const stamp = this.now().toISOString().replace(/[:.]/g, "-");
     try {
-      await fsp.rename(previous, `${previous}-${stamp}`);
-      console.warn(`[backup] kept an earlier ${previous} as ${previous}-${stamp}`);
+      await fsp.rename(path, `${path}-${stamp}`);
+      console.warn(`[backup] kept an earlier ${path} as ${path}-${stamp}`);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
     }
