@@ -48,8 +48,10 @@ export function BackupCard() {
     const b = getBackup();
     if (!b) return;
     try {
-      setStatus(await b.status());
+      const s = await b.status();
+      setStatus(s);
       setStatusError(null);
+      if (s.running === null) setProgressPhase(null); // a run that ended without a "done" event
     } catch (e) {
       setStatusError((e as Error).message);
     }

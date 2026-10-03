@@ -334,7 +334,6 @@ export class BackupService {
         keptCount: kept,
         cleanupPending,
       });
-      this.progress("done");
     } catch (err) {
       const e = toBackupError(err, "BACKUP_FAILED");
       const now = this.now();
@@ -355,6 +354,7 @@ export class BackupService {
       throw e;
     } finally {
       await fsp.rm(work, { recursive: true, force: true });
+      this.progress("done"); // "run finished", success or failure, so the UI never sticks on "Backing up…"
     }
   }
 

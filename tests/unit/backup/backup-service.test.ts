@@ -189,6 +189,20 @@ describe("BackupService — backups", () => {
     expect(await readdir(join(t.deps.dir, "tmp")).catch(() => [])).toEqual([]);
   });
 
+  it("emits progress \"done\" exactly once per backup run, on success and on failure", async () => {
+    const phases: string[] = [];
+    const t = await ready({ onProgress: (p) => phases.push(p.phase) });
+    await t.svc.backupNow();
+    expect(phases.filter((p) => p === "done")).toHaveLength(1);
+    expect(phases.at(-1)).toBe("done");
+
+    phases.length = 0;
+    t.drive.failUpload = new BackupError("OFFLINE");
+    await expect(t.svc.backupNow()).rejects.toMatchObject({ code: "OFFLINE" });
+    expect(phases.filter((p) => p === "done")).toHaveLength(1);
+    expect(phases.at(-1)).toBe("done");
+  });
+
   it("notifies once when backups have been failing for 48 hours", async () => {
     const t = await ready();
     t.drive.failUpload = new BackupError("OFFLINE");
