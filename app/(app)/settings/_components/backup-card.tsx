@@ -11,7 +11,7 @@ import { getBackup, type BackupProgress, type BackupStatus } from "@/lib/desktop
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { RestoreDialog } from "@/components/backup/restore-dialog";
+import { ROLLBACK_FAILED_TEXT, RestoreDialog } from "@/components/backup/restore-dialog";
 
 const BACKUP_PHASES = new Set<BackupProgress["phase"]>(["dumping", "encrypting", "uploading", "pruning"]);
 
@@ -107,10 +107,27 @@ export function BackupCard() {
 
   const rollbackAlert = status.restoreRollbackFailed ? (
     <p role="alert" className="text-destructive">
-      A restore couldn&apos;t be completed and your previous data was set aside safely. Restores are paused — please
-      contact support.
+      {ROLLBACK_FAILED_TEXT}
     </p>
   ) : null;
+
+  // Restore needs neither a connection nor a password up front: the dialog
+  // connects if needed, and a restore adopts the backup's own password.
+  const restoreButton = status.restoreRollbackFailed ? null : (
+    <Button variant="outline" disabled={busy || status.running !== null || progressPhase !== null} onClick={() => setRestoreOpen(true)}>
+      Restore…
+    </Button>
+  );
+  const restoreDialog = status.restoreRollbackFailed ? null : (
+    <RestoreDialog
+      open={restoreOpen}
+      onOpenChange={(o) => {
+        setRestoreOpen(o);
+        if (!o) void refresh(); // e.g. a failed restore may have paused restores
+      }}
+      confirmReplace
+    />
+  );
 
   if (!status.configured) {
     return (
@@ -128,9 +145,13 @@ export function BackupCard() {
           Encrypted daily backups of your books and attachments to your own Google Drive. Trivio can only see
           the files it creates there.
         </p>
-        <Button disabled={busy} onClick={() => run(() => b.connect(), "Google Drive connected")}>
-          Connect Google Drive
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button disabled={busy} onClick={() => run(() => b.connect(), "Google Drive connected")}>
+            Connect Google Drive
+          </Button>
+          {restoreButton}
+        </div>
+        {restoreDialog}
       </Shell>
     );
   }
@@ -159,24 +180,29 @@ export function BackupCard() {
         </div>
         {pw2 && pw !== pw2 && <p className="text-destructive">The passwords don&apos;t match.</p>}
         {tooShort && pw && <p className="text-muted-foreground text-xs">At least 8 characters.</p>}
-        <Button
-          disabled={busy || tooShort || pw !== pw2}
-          onClick={() =>
-            run(async () => {
-              await b.setPassword(pw);
-              setPw("");
-              setPw2("");
-              await b.backupNow();
-            }, "Backup password set — first backup done")
-          }
-        >
-          Set password and back up
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            disabled={busy || tooShort || pw !== pw2}
+            onClick={() =>
+              run(async () => {
+                await b.setPassword(pw);
+                setPw("");
+                setPw2("");
+                await b.backupNow();
+              }, "Backup password set — first backup done")
+            }
+          >
+            Set password and back up
+          </Button>
+          {restoreButton}
+        </div>
+        {restoreDialog}
       </Shell>
     );
   }
 
-  const authRevoked = status.lastError?.code === "AUTH_REVOKED";
+  // Lost Google access (revoked, or the saved sign-in is gone): offer a reconnect.
+  const authRevoked = status.lastError?.code === "AUTH_REVOKED" || status.lastError?.code === "NOT_CONNECTED";
   const running = status.running !== null || progressPhase !== null;
 
   return (
@@ -216,11 +242,7 @@ export function BackupCard() {
             {status.running === "backup" || progressPhase !== null || busy ? "Backing up…" : "Back up now"}
           </Button>
         )}
-        {!status.restoreRollbackFailed && (
-          <Button variant="outline" disabled={busy || running} onClick={() => setRestoreOpen(true)}>
-            Restore…
-          </Button>
-        )}
+        {restoreButton}
         <Button
           variant="ghost"
           disabled={busy || running}
@@ -229,7 +251,7 @@ export function BackupCard() {
           Disconnect
         </Button>
       </div>
-      {!status.restoreRollbackFailed && <RestoreDialog open={restoreOpen} onOpenChange={setRestoreOpen} confirmReplace />}
+      {restoreDialog}
     </Shell>
   );
 }

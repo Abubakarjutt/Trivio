@@ -33,7 +33,15 @@ function fmtSize(bytes: number) {
   return bytes >= 1_000_000 ? `${(bytes / 1_000_000).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1000))} KB`;
 }
 
-type Step = "connect" | "pick" | "confirm" | "working";
+type Step = "connect" | "pick" | "confirm" | "working" | "paused";
+
+// Shown when a restore could not be undone (status.restoreRollbackFailed).
+export const ROLLBACK_FAILED_TEXT =
+  "A restore couldn't be completed and your previous data was set aside safely. Restores are paused — please contact support.";
+
+// Google access is missing or was revoked: the fix is to (re)connect.
+const NEEDS_CONNECT = new Set(["AUTH_REVOKED", "NOT_CONNECTED"]);
+const codeOf = (e: unknown) => (e as { code?: string }).code;
 
 export function RestoreDialog({
   open,
@@ -69,6 +77,10 @@ export function RestoreDialog({
     setEntries(null);
     try {
       const s = await backup.status();
+      if (s.restoreRollbackFailed) {
+        setStep("paused");
+        return;
+      }
       if (!s.connected) {
         setStep("connect");
         return;
@@ -79,6 +91,7 @@ export function RestoreDialog({
       setChosen(list[0]?.id ?? null);
     } catch (e) {
       setError((e as Error).message);
+      if (NEEDS_CONNECT.has(codeOf(e) ?? "")) setStep("connect");
     }
   }
 
@@ -112,9 +125,18 @@ export function RestoreDialog({
     try {
       await backup.restore(chosen, password);
     } catch (e) {
+      setPhase(null);
+      if (codeOf(e) === "RESTORE_FAILED") {
+        // "your data was not changed" is wrong if the rollback itself failed.
+        const s = await backup.status().catch(() => null);
+        if (s?.restoreRollbackFailed) {
+          setError(null);
+          setStep("paused");
+          return;
+        }
+      }
       setError((e as Error).message);
       setStep("pick");
-      setPhase(null);
     }
   }
 
@@ -184,7 +206,13 @@ export function RestoreDialog({
         {step === "confirm" && chosenEntry && (
           <p className="text-sm">
             This replaces <strong>all data on this computer</strong> with the backup from{" "}
-            {fmtDate(chosenEntry.createdAt)}. Your current data is kept aside until the next successful backup.
+            {fmtDate(chosenEntry.createdAt)}. Your current data is kept on this computer for about a week.
+          </p>
+        )}
+
+        {step === "paused" && (
+          <p className="text-destructive text-sm" role="alert">
+            {ROLLBACK_FAILED_TEXT}
           </p>
         )}
 

@@ -248,27 +248,43 @@ test("Settings shows the Google Drive backup card (desktop-only notice in the br
 });
 
 // A stubbed desktop bridge (the renderer sees window.trivioDesktop.backup).
-// `calls` records restore() so tests can check what ran before it.
-function stubDesktopBackup(statusOverrides: Record<string, unknown>) {
+// `__restoreCalls` records restore() so tests can check what ran before it;
+// `__calls` records every other bridge call by name. `fail` makes a call
+// answer { ok: false, code } (with a "restore" failure, `rollbackFails` also
+// flips status.restoreRollbackFailed, as a rollback that couldn't be undone does).
+function stubDesktopBackup(
+  statusOverrides: Record<string, unknown>,
+  opts: { fail?: Record<string, { code: string; message: string }>; rollbackFails?: boolean } = {},
+) {
   return `
     window.__restoreCalls = [];
+    window.__calls = [];
+    const fail = ${JSON.stringify(opts.fail ?? {})};
+    const rollbackFails = ${JSON.stringify(!!opts.rollbackFails)};
     const status = Object.assign({
       configured: true, connected: true, email: "me@example.test", passwordSet: true,
       running: null, lastSuccessAt: null, lastAttemptAt: null, lastCheckedAt: null,
       lastError: null, failingSince: null, keptCount: 1, restoreRollbackFailed: false,
     }, ${JSON.stringify(statusOverrides)});
-    const ok = (value) => Promise.resolve({ ok: true, value });
+    const answer = (name, value) => {
+      window.__calls.push(name);
+      return Promise.resolve(fail[name] ? { ok: false, ...fail[name] } : { ok: true, value });
+    };
     window.trivioDesktop = {
       isDesktop: true, platform: "darwin", versions: {}, openExternal() {}, openItem() {}, navigate() {},
       onDeepLink: () => () => {}, ollama: {},
       backup: {
-        status: () => ok(status),
-        connect: () => ok({ email: "me@example.test" }),
-        disconnect: () => ok(undefined),
-        setPassword: () => ok(undefined),
-        backupNow: () => ok(status),
-        list: () => ok([{ id: "b1", name: "n", createdAt: "2026-01-02T03:04:00Z", sizeBytes: 5000, appVersion: "1.0.0" }]),
-        restore: (id, pw) => { window.__restoreCalls.push([id, pw]); return ok(undefined); },
+        status: () => answer("status", { ...status }),
+        connect: () => answer("connect", { email: "me@example.test" }),
+        disconnect: () => answer("disconnect", undefined),
+        setPassword: () => answer("setPassword", undefined),
+        backupNow: () => answer("backupNow", status),
+        list: () => answer("list", [{ id: "b1", name: "n", createdAt: "2026-01-02T03:04:00Z", sizeBytes: 5000, appVersion: "1.0.0" }]),
+        restore: (id, pw) => {
+          window.__restoreCalls.push([id, pw]);
+          if (fail.restore && rollbackFails) status.restoreRollbackFailed = true;
+          return answer("restore", undefined);
+        },
         onProgress: () => () => {},
       },
     };`;
@@ -299,5 +315,70 @@ test("register-page restore always asks to confirm before restoring", async ({ b
   await expect
     .poll(() => p.evaluate(() => (window as unknown as { __restoreCalls: unknown[] }).__restoreCalls))
     .toEqual([["b1", "hunter2hunter2"]]);
+  await context.close();
+});
+
+type StubWindow = { __restoreCalls: unknown[]; __calls: string[] };
+
+test("backup card without a password still offers Restore…, which restores without setting one", async () => {
+  const p = await page.context().newPage();
+  await p.addInitScript(stubDesktopBackup({ passwordSet: false }));
+  await p.goto("/settings");
+  await expect(p.getByRole("button", { name: "Set password and back up" })).toBeVisible();
+  await p.getByRole("button", { name: "Restore…" }).click();
+  await p.getByRole("radio").first().check();
+  await p.locator("#restore-password").fill("hunter2hunter2");
+  await p.getByRole("button", { name: "Restore", exact: true }).click();
+  await p.getByRole("button", { name: "Replace my data" }).click();
+  await expect
+    .poll(() => p.evaluate(() => (window as unknown as StubWindow).__restoreCalls))
+    .toEqual([["b1", "hunter2hunter2"]]);
+  const calls = await p.evaluate(() => (window as unknown as StubWindow).__calls);
+  expect(calls).not.toContain("setPassword");
+  expect(calls).not.toContain("backupNow");
+  await p.close();
+});
+
+test("backup card when not connected offers Restore…, hidden after a failed rollback", async () => {
+  const p = await page.context().newPage();
+  await p.addInitScript(stubDesktopBackup({ connected: false, email: null, passwordSet: false }));
+  await p.goto("/settings");
+  await expect(p.getByRole("button", { name: "Connect Google Drive" })).toBeVisible();
+  await expect(p.getByRole("button", { name: "Restore…" })).toBeVisible();
+  await p.close();
+  const q = await page.context().newPage();
+  await q.addInitScript(stubDesktopBackup({ connected: false, email: null, passwordSet: false, restoreRollbackFailed: true }));
+  await q.goto("/settings");
+  await expect(q.getByRole("button", { name: "Connect Google Drive" })).toBeVisible();
+  await expect(q.getByRole("button", { name: "Restore…" })).toHaveCount(0);
+  await q.close();
+});
+
+test("restore dialog: lost Google access while listing goes to the connect step", async () => {
+  const p = await page.context().newPage();
+  await p.addInitScript(stubDesktopBackup({}, { fail: { list: { code: "AUTH_REVOKED", message: "Reconnect Google Drive." } } }));
+  await p.goto("/settings");
+  await p.getByRole("button", { name: "Restore…" }).click();
+  const dialog = p.getByRole("dialog");
+  await expect(dialog.getByRole("button", { name: "Connect Google Drive" })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Try again" })).toHaveCount(0);
+  await p.close();
+});
+
+test("register-page restore whose rollback failed shows the paused-restores alert, not 'data was not changed'", async ({ browser }) => {
+  const context = await browser.newContext(); // logged out
+  const p = await context.newPage();
+  await p.addInitScript(
+    stubDesktopBackup({}, { fail: { restore: { code: "RESTORE_FAILED", message: "Restore failed — your data was not changed." } }, rollbackFails: true }),
+  );
+  await p.goto("/register");
+  await p.getByRole("button", { name: "Restore from Google Drive" }).click();
+  await p.locator("#restore-password").fill("hunter2hunter2");
+  await p.getByRole("button", { name: "Restore", exact: true }).click();
+  await p.getByRole("button", { name: "Replace my data" }).click();
+  const dialog = p.getByRole("dialog");
+  await expect(dialog.getByRole("alert").filter({ hasText: "Restores are paused" })).toBeVisible();
+  await expect(dialog.getByText("your data was not changed")).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: "Restore", exact: true })).toHaveCount(0);
   await context.close();
 });
