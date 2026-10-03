@@ -44,6 +44,7 @@ import {
 import { createBackupService, registerBackupIpc } from "./backup/wire";
 import type { BackupService } from "./backup/backup-service";
 import { moveLegacyAttachments } from "./storage-dir";
+import { terminateChild, terminateChildAndWait } from "./stop-child";
 
 // ── Ollama (local AI) engine lifecycle ─────────────────────────────────────────
 // The desktop shell owns a local Ollama server + Gemma model so the AI chat can
@@ -208,9 +209,13 @@ function getFreePort(): Promise<number> {
 }
 
 // Poll the app's health route until the server answers.
-async function waitForServer(url: string, timeoutMs = 60000): Promise<void> {
+// With `child`, gives up as soon as that process has exited instead of waiting out the timeout.
+async function waitForServer(url: string, timeoutMs = 60000, child?: ChildProcess | null): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
+    if (child && (child.exitCode != null || child.signalCode != null)) {
+      throw new Error(`The app server exited before it was ready (code ${child.exitCode ?? child.signalCode})`);
+    }
     try {
       const res = await fetch(`${url}/api/health`, {
         signal: AbortSignal.timeout(2000),
@@ -334,11 +339,15 @@ async function startLocalServer(): Promise<string> {
   // Uploads live in the per-user data folder, not the replaced-on-update app
   // bundle (lib/storage.ts). Carry over anything an older version left behind.
   if (!env.TRIVIO_STORAGE_DIR) env.TRIVIO_STORAGE_DIR = join(app.getPath("userData"), "storage");
-  const moved = await moveLegacyAttachments(
-    join(dir, "storage", "attachments"),
-    join(env.TRIVIO_STORAGE_DIR, "attachments"),
-  );
-  if (moved) console.log(`[desktop] moved ${moved} attachment(s) out of the app bundle`);
+  try {
+    const moved = await moveLegacyAttachments(
+      join(dir, "storage", "attachments"),
+      join(env.TRIVIO_STORAGE_DIR, "attachments"),
+    );
+    if (moved) console.log(`[desktop] moved ${moved} attachment(s) out of the app bundle`);
+  } catch (err) {
+    console.error("[desktop] could not move legacy attachments:", err);
+  }
 
   // ── Database ──────────────────────────────────────────────────────────────
   // By default the desktop app owns its OWN embedded Postgres inside the user's
@@ -404,7 +413,9 @@ async function startLocalServer(): Promise<string> {
         attachmentsDir: join(env.TRIVIO_STORAGE_DIR!, "attachments"),
         db: dbHandle,
         server: { stop: stopServerAndWait, start: restartAppServer },
-        onProgress: (p) => mainWindow?.webContents.send("backup:progress", p),
+        onProgress: (p) => {
+          if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("backup:progress", p);
+        },
       });
       backupService.startSchedule();
     } catch (err) {
@@ -416,24 +427,26 @@ async function startLocalServer(): Promise<string> {
 
 async function spawnAppServer(launch: AppServerLaunch): Promise<void> {
   console.log(`[desktop] starting app server: ${launch.cmd} ${launch.args.join(" ")} @${launch.url}`);
-  server = spawn(launch.cmd, launch.args, {
+  const child = spawn(launch.cmd, launch.args, {
     cwd: launch.cwd,
     env: launch.env,
     stdio: ["ignore", "pipe", "pipe", "ipc"],
   });
-  server.stdout?.on("data", (d: Buffer) => {
+  server = child;
+  child.stdout?.on("data", (d: Buffer) => {
     const s = String(d).trimEnd();
     if (s) console.log(`[next] ${s}`);
   });
-  server.stderr?.on("data", (d: Buffer) => {
+  child.stderr?.on("data", (d: Buffer) => {
     const s = String(d).trimEnd();
     if (s) console.error(`[next:err] ${s}`);
   });
-  server.on("exit", (code) => {
+  child.on("error", (err) => console.error("[desktop] app server process error:", err));
+  child.on("exit", (code) => {
     console.log(`[desktop] app server exited code=${code ?? 0}`);
-    server = null;
+    if (server === child) server = null;
   });
-  await waitForServer(launch.url);
+  await waitForServer(launch.url, 60000, child);
   console.log(`[desktop] app server ready at ${launch.url}`);
 }
 
@@ -444,31 +457,38 @@ async function restartAppServer(opts: { signOut: boolean }): Promise<void> {
   if (!appServerLaunch) throw new Error("app server was never started");
   await dbHandle?.migrate?.();
   await spawnAppServer(appServerLaunch);
-  if (opts.signOut) await mainWindow?.webContents.session.clearStorageData({ storages: ["cookies"] });
-  await mainWindow?.loadURL(`${appServerLaunch.url}${opts.signOut ? "/login" : ""}`);
+  // The server is up; what follows is cosmetic and must not make start() fail.
+  const win = mainWindow;
+  if (opts.signOut && win && !win.isDestroyed()) {
+    try {
+      await win.webContents.session.clearStorageData({
+        origin: new URL(appServerLaunch.url).origin,
+        storages: ["cookies"],
+      });
+      await win.loadURL(`${appServerLaunch.url}/login`);
+    } catch (err) {
+      console.error("[desktop] could not show the login page after restore:", err);
+    }
+  }
 }
 
 function stopServer(): void {
   if (server && !server.killed) {
     console.log("[desktop] stopping embedded app server");
-    server.kill("SIGTERM");
-    const kill = setTimeout(() => {
-      if (server && !server.killed) server.kill("SIGKILL");
-    }, 5000);
-    server.once("exit", () => clearTimeout(kill));
+    const child = server;
     server = null;
+    terminateChild(child);
   }
 }
 
 // Stop the app server and resolve once the process has actually exited, so
 // its database connections are gone (a restore renames the database next).
-function stopServerAndWait(): Promise<void> {
+async function stopServerAndWait(): Promise<void> {
   const child = server;
-  if (!child || child.exitCode !== null) return Promise.resolve();
-  return new Promise((resolve) => {
-    child.once("exit", () => resolve());
-    stopServer();
-  });
+  if (!child) return;
+  console.log("[desktop] stopping embedded app server");
+  server = null;
+  await terminateChildAndWait(child);
 }
 
 // ── Window ───────────────────────────────────────────────────────────────────
@@ -962,12 +982,26 @@ async function stopDatabase(): Promise<void> {
 }
 
 app.on("window-all-closed", () => {
-  void stopAll();
+  // A restore in flight owns the server; before-quit waits for it.
+  if (backupService?.status().running !== "restore") void stopAll();
   // Keep the app alive in the dock on macOS (standard behaviour).
   if (process.platform !== "darwin") app.quit();
 });
 
-app.on("before-quit", () => {
+let quitWaitingForRestore = false;
+app.on("before-quit", (event) => {
+  // Quitting mid-restore would kill the server and leave the databases half swapped.
+  if (backupService?.status().running === "restore") {
+    event.preventDefault();
+    if (!quitWaitingForRestore) {
+      quitWaitingForRestore = true;
+      void backupService.whenIdle().finally(() => {
+        quitWaitingForRestore = false;
+        app.quit();
+      });
+    }
+    return;
+  }
   void stopAll();
 });
 process.on("SIGINT", () => {

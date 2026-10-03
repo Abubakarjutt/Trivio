@@ -376,6 +376,11 @@ export class BackupService {
     }));
   }
 
+  // Resolves when no backup/restore is in flight (errors are the caller's, not ours).
+  async whenIdle(): Promise<void> {
+    while (this.running) await this.running.promise.catch(() => {});
+  }
+
   restore(id: string, password: string): Promise<void> {
     if (this.running) return Promise.reject(new BackupError("BUSY"));
     if (this.state.restoreRollbackFailed) {
@@ -468,10 +473,11 @@ export class BackupService {
         }
         await fsp.rename(unpacked.attachmentsDir, live);
         newInPlace = true;
-        // Recorded before the swap so a crash mid-way still gets the leftovers cleaned up later.
-        await this.update({ cleanupPending: true });
         await this.d.db.swapIn();
         swapped = true;
+        // The kept-aside copies only become leftovers once the swap succeeded; recording it
+        // earlier would let a later backup delete the only original after a failed swap.
+        await this.update({ cleanupPending: true });
       } catch (err) {
         return await rollback(err);
       }

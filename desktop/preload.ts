@@ -100,16 +100,11 @@ const ollama = {
 } as const;
 
 // Google Drive backup. The main process answers {ok,value} or {ok:false,code,
-// message}; unwrap it here so the renderer gets a plain value or an Error whose
-// message is ready to show and whose `code` identifies the failure.
-async function invokeBackup<T>(channel: string, ...args: unknown[]): Promise<T> {
-  const r = (await ipcRenderer.invoke(channel, ...args)) as
-    | { ok: true; value: T }
-    | { ok: false; code: string; message: string };
-  if (r.ok) return r.value;
-  const err = new Error(r.message) as Error & { code?: string };
-  err.code = r.code;
-  throw err;
+// message}. That object is returned as-is: custom Error properties (`code`) do
+// not survive contextBridge, so the renderer unwraps it and throws itself.
+type BackupResult<T = unknown> = { ok: true; value: T } | { ok: false; code: string; message: string };
+function invokeBackup<T = unknown>(channel: string, ...args: unknown[]): Promise<BackupResult<T>> {
+  return ipcRenderer.invoke(channel, ...args);
 }
 
 const backup = {
@@ -168,13 +163,9 @@ const api = {
   },
 };
 
-// Expose the bridge only on the expected global and only in the main frame.
-if (typeof window !== "undefined") {
-  Object.defineProperty(window, "trivioDesktop", {
-    value: Object.freeze(api),
-    configurable: false,
-    writable: false,
-  });
-}
+// Expose the bridge only on the expected global. contextIsolation is on, so
+// this must go through contextBridge (a plain window property is invisible to
+// the page).
+contextBridge.exposeInMainWorld("trivioDesktop", Object.freeze(api));
 
 // The bridge is intentionally small and frozen; no extra imports are needed.

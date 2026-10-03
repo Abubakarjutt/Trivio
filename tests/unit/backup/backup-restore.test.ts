@@ -335,3 +335,33 @@ describe("BackupService — attachments rollback failure", () => {
     expect(downloads).toBe(0);
   });
 });
+
+describe("BackupService — quit and cleanup guards", () => {
+  it("a failure before swapIn succeeds leaves cleanupPending false, so the next backup keeps the copies", async () => {
+    const t = await backedUp();
+    t.db.failSwap = true;
+    await expect(t.svc.restore(t.entry.id, "pw-12345678")).rejects.toMatchObject({ code: "RESTORE_FAILED" });
+    const state = JSON.parse(await readFile(join(t.root, "backup", "state.json"), "utf8"));
+    expect(state.cleanupPending).toBe(false);
+    t.db.calls.length = 0;
+    await t.svc.backupNow();
+    expect(t.db.calls).not.toContain("dropPrevious");
+  });
+
+  it("whenIdle waits for an in-flight restore and swallows its error", async () => {
+    const t = await backedUp();
+    let release!: () => void;
+    t.server.stop = () => new Promise<void>((r) => (release = r));
+    t.db.failSwap = true;
+    const restoring = t.svc.restore(t.entry.id, "pw-12345678").catch(() => {});
+    await vi.waitFor(() => expect(t.svc.status().running).toBe("restore"));
+    let idle = false;
+    const w = t.svc.whenIdle().then(() => (idle = true));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(idle).toBe(false);
+    release();
+    await w;
+    await restoring;
+    expect(t.svc.status().running).toBeNull();
+  });
+});

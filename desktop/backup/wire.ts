@@ -107,8 +107,8 @@ export function registerBackupIpc(getService: () => BackupService | null): void 
   handle("backup:status", () => getService()?.status() ?? UNAVAILABLE);
   handle("backup:connect", () => svc().connect());
   handle("backup:disconnect", () => svc().disconnect());
-  handle("backup:setPassword", (pw: string) => svc().setPassword(String(pw)));
+  handle("backup:setPassword", (pw: string) => svc().setPassword(typeof pw === "string" ? pw : ""));
   handle("backup:backupNow", () => svc().backupNow());
   handle("backup:list", () => svc().list());
-  handle("backup:restore", (id: string, pw: string) => svc().restore(String(id), String(pw)));
+  handle("backup:restore", (id: string, pw: string) => svc().restore(typeof id === "string" ? id : "", typeof pw === "string" ? pw : ""));
 }

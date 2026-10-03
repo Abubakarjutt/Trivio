@@ -23,6 +23,7 @@
     "preload.ts",
     "backup/*.ts",
     "storage-dir.ts",
+    "stop-child.ts",
     "embedded/embedded-db.ts",
     "embedded/ollama.ts"
   ]
