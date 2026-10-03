@@ -151,6 +151,25 @@ describe("DriveClient", () => {
     expect(d.files.has(id)).toBe(false);
   });
 
+  it("encodes file ids placed in a URL path", async () => {
+    const paths: string[] = [];
+    const c = new DriveClient({
+      token: async () => "t",
+      fetch: (async (input: string, init: RequestInit = {}) => {
+        paths.push(`${init.method ?? "GET"} ${new URL(input).pathname}`);
+        if (init.method === "DELETE") return new Response(null, { status: 204 });
+        if (new URL(input).searchParams.get("alt") === "media") return new Response("x");
+        return new Response(JSON.stringify({ id: "a/b", trashed: false }), { status: 200 });
+      }) as unknown as typeof fetch,
+      sleep: async () => {},
+    });
+    const { dir } = await tmpFile(Buffer.alloc(0));
+    expect(await c.ensureFolder("a/b")).toBe("a/b");
+    await c.download("a/b", join(dir, "out"));
+    await c.delete("a/b");
+    expect(paths).toEqual(["GET /drive/v3/files/a%2Fb", "GET /drive/v3/files/a%2Fb", "DELETE /drive/v3/files/a%2Fb"]);
+  });
+
   it("maps a full Drive to DRIVE_FULL", async () => {
     const d = fakeDrive();
     const c = client(d);

@@ -189,7 +189,13 @@ export class GoogleAuth {
   }
 
   async disconnect(): Promise<void> {
-    const refreshToken = await this.store.load("google-token");
+    let refreshToken: string | null = null;
+    try {
+      refreshToken = await this.store.load("google-token");
+    } catch (err) {
+      // Unreadable token: nothing to revoke, but still forget it locally.
+      console.warn("[backup] could not read the Google token; skipping revoke:", err instanceof Error ? err.message : err);
+    }
     this.cached = null;
     await this.store.clear("google-token");
     if (refreshToken) {

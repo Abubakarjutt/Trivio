@@ -195,6 +195,8 @@ interface AppServerLaunch {
   url: string;
 }
 let appServerLaunch: AppServerLaunch | null = null;
+// Origin of the app the main window shows; backup IPC answers only this origin.
+let appOrigin: string | null = null;
 let backupService: BackupService | null = null;
 
 function getFreePort(): Promise<number> {
@@ -902,7 +904,7 @@ if (!gotLock) {
   app.whenReady().then(async () => {
     buildMenu();
     registerIpc();
-    registerBackupIpc(() => backupService);
+    registerBackupIpc(() => backupService, () => appOrigin);
     setupUpdater();
 
     const mode = resolveMode();
@@ -948,6 +950,7 @@ You can also run Trivio in thin-client mode by setting DESKTOP_MODE=remote.`
       }
     }
 
+    appOrigin = new URL(url).origin;
     const win = createWindow();
     win
       .loadURL(url)

@@ -88,15 +88,36 @@ const UNAVAILABLE: BackupStatus = {
 
 type Result = { ok: true; value: unknown } | { ok: false; code: string; message: string };
 
-export function registerBackupIpc(getService: () => BackupService | null): void {
+function originOf(url: string | undefined): string | null {
+  try {
+    return url ? new URL(url).origin : null;
+  } catch {
+    return null;
+  }
+}
+
+const failed = (): Result => {
+  const e = new BackupError("BACKUP_FAILED");
+  return { ok: false, code: e.code, message: e.userMessage };
+};
+
+// getAllowedOrigin: the app server's origin, known only once it has launched.
+// Calls from any other page (or before launch) are refused.
+export function registerBackupIpc(getService: () => BackupService | null, getAllowedOrigin: () => string | null): void {
   const handle = (channel: string, fn: (...args: any[]) => unknown) =>
-    ipcMain.handle(channel, async (_e, ...args): Promise<Result> => {
+    ipcMain.handle(channel, async (e, ...args): Promise<Result> => {
+      const allowed = getAllowedOrigin();
+      const sender = originOf(e.senderFrame?.url);
+      if (!allowed || sender !== allowed) {
+        console.error(`[backup] ${channel} refused: sender ${sender ?? "unknown"} is not the app (${allowed ?? "not started"})`);
+        return failed();
+      }
       try {
         return { ok: true, value: await fn(...args) };
       } catch (err) {
         console.error(`[backup] ${channel} failed:`, err);
         if (err instanceof BackupError) return { ok: false, code: err.code, message: err.userMessage };
-        return { ok: false, code: "BACKUP_FAILED", message: err instanceof Error ? err.message : String(err) };
+        return failed(); // never show raw internal error text; the detail is logged above
       }
     });
   const svc = () => {

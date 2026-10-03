@@ -116,7 +116,7 @@ export class DriveClient implements DriveLike {
 
   async ensureFolder(knownId: string | null): Promise<string> {
     if (knownId) {
-      const res = await this.call(`${API}/files/${knownId}?fields=id,trashed`, {}, [200, 404]);
+      const res = await this.call(`${API}/files/${encodeURIComponent(knownId)}?fields=id,trashed`, {}, [200, 404]);
       if (res.status === 200 && !((await res.json()) as RawFile).trashed) return knownId;
     }
     const q = `mimeType='${FOLDER_MIME}' and name='${FOLDER_NAME}' and trashed=false`;
@@ -207,12 +207,12 @@ export class DriveClient implements DriveLike {
   }
 
   async download(fileId: string, destPath: string): Promise<void> {
-    const res = await this.call(`${API}/files/${fileId}?alt=media`);
+    const res = await this.call(`${API}/files/${encodeURIComponent(fileId)}?alt=media`);
     if (!res.body) throw new Error("Drive returned an empty download");
     await pipeline(Readable.fromWeb(res.body as import("node:stream/web").ReadableStream), createWriteStream(destPath));
   }
 
   async delete(fileId: string): Promise<void> {
-    await this.call(`${API}/files/${fileId}`, { method: "DELETE" }, [204, 404]);
+    await this.call(`${API}/files/${encodeURIComponent(fileId)}`, { method: "DELETE" }, [204, 404]);
   }
 }

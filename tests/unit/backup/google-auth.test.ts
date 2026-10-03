@@ -99,4 +99,17 @@ describe("GoogleAuth", () => {
     await auth.disconnect();
     expect(await store.load("google-token")).toBeNull();
   });
+
+  it("disconnect still clears the token, and skips the revoke, when the store can't be read", async () => {
+    const clear = vi.fn(async () => {});
+    const store = { load: async () => { throw new Error("decrypt failed"); }, save: async () => {}, clear };
+    const { fetchImpl } = tokenEndpoint([]);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const auth = new GoogleAuth(client, store, { fetch: fetchImpl, openExternal: async () => {} });
+    await expect(auth.disconnect()).resolves.toBeUndefined();
+    expect(clear).toHaveBeenCalledWith("google-token");
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
 });
