@@ -51,10 +51,22 @@ export function RestoreDialog({
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [phase, setPhase] = useState<BackupProgress["phase"] | null>(null);
+  const [connecting, setConnecting] = useState(false);
+
+  function reset() {
+    setStep("pick");
+    setEntries(null);
+    setChosen(null);
+    setPassword("");
+    setError(null);
+    setPhase(null);
+    setConnecting(false);
+  }
 
   async function load() {
     if (!backup) return;
     setError(null);
+    setEntries(null);
     try {
       const s = await backup.status();
       if (!s.connected) {
@@ -71,6 +83,7 @@ export function RestoreDialog({
   }
 
   useEffect(() => {
+    reset(); // fresh state on open and on close (drops the typed password)
     if (open) void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -78,13 +91,16 @@ export function RestoreDialog({
   useEffect(() => backup?.onProgress((p) => setPhase(p.phase)), [backup]);
 
   async function connect() {
-    if (!backup) return;
+    if (!backup || connecting) return;
     setError(null);
+    setConnecting(true);
     try {
       await backup.connect();
       await load();
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      setConnecting(false);
     }
   }
 
@@ -103,6 +119,7 @@ export function RestoreDialog({
   }
 
   const busy = step === "working";
+  const chosenEntry = entries?.find((b) => b.id === chosen);
 
   return (
     <Dialog open={open} onOpenChange={(o) => !busy && onOpenChange(o)}>
@@ -119,13 +136,19 @@ export function RestoreDialog({
         {step === "connect" && (
           <div className="space-y-3 text-sm">
             <p>Sign in with the Google account your backups are in.</p>
-            <Button onClick={connect}>Connect Google Drive</Button>
+            <Button disabled={connecting} onClick={connect}>
+              Connect Google Drive
+            </Button>
           </div>
         )}
 
         {step === "pick" && (
           <div className="space-y-4 text-sm">
-            {entries === null ? (
+            {entries === null && error ? (
+              <Button variant="outline" onClick={() => void load()}>
+                Try again
+              </Button>
+            ) : entries === null ? (
               <p className="text-muted-foreground">Loading backups…</p>
             ) : entries.length === 0 ? (
               <p className="text-muted-foreground">No backups found in this Google account.</p>
@@ -158,11 +181,10 @@ export function RestoreDialog({
           </div>
         )}
 
-        {step === "confirm" && (
+        {step === "confirm" && chosenEntry && (
           <p className="text-sm">
             This replaces <strong>all data on this computer</strong> with the backup from{" "}
-            {fmtDate(entries?.find((b) => b.id === chosen)?.createdAt ?? new Date().toISOString())}. Your current data is
-            kept aside until the next successful backup.
+            {fmtDate(chosenEntry.createdAt)}. Your current data is kept aside until the next successful backup.
           </p>
         )}
 
@@ -187,7 +209,7 @@ export function RestoreDialog({
               Restore
             </Button>
           )}
-          {step === "confirm" && (
+          {step === "confirm" && chosenEntry && (
             <>
               <Button variant="outline" onClick={() => setStep("pick")}>
                 Back

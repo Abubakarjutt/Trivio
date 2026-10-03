@@ -246,3 +246,58 @@ test("Settings shows the Google Drive backup card (desktop-only notice in the br
   await expect(page.getByRole("heading", { name: "Backup to Google Drive" })).toBeVisible();
   await expect(page.getByText("Available in the Trivio desktop app.")).toBeVisible();
 });
+
+// A stubbed desktop bridge (the renderer sees window.trivioDesktop.backup).
+// `calls` records restore() so tests can check what ran before it.
+function stubDesktopBackup(statusOverrides: Record<string, unknown>) {
+  return `
+    window.__restoreCalls = [];
+    const status = Object.assign({
+      configured: true, connected: true, email: "me@example.test", passwordSet: true,
+      running: null, lastSuccessAt: null, lastAttemptAt: null, lastCheckedAt: null,
+      lastError: null, failingSince: null, keptCount: 1, restoreRollbackFailed: false,
+    }, ${JSON.stringify(statusOverrides)});
+    const ok = (value) => Promise.resolve({ ok: true, value });
+    window.trivioDesktop = {
+      isDesktop: true, platform: "darwin", versions: {}, openExternal() {}, openItem() {}, navigate() {},
+      onDeepLink: () => () => {}, ollama: {},
+      backup: {
+        status: () => ok(status),
+        connect: () => ok({ email: "me@example.test" }),
+        disconnect: () => ok(undefined),
+        setPassword: () => ok(undefined),
+        backupNow: () => ok(status),
+        list: () => ok([{ id: "b1", name: "n", createdAt: "2026-01-02T03:04:00Z", sizeBytes: 5000, appVersion: "1.0.0" }]),
+        restore: (id, pw) => { window.__restoreCalls.push([id, pw]); return ok(undefined); },
+        onProgress: () => () => {},
+      },
+    };`;
+}
+
+test("backup card after a failed restore rollback: alert shown, Restore hidden, backups still available", async () => {
+  const p = await page.context().newPage();
+  await p.addInitScript(stubDesktopBackup({ restoreRollbackFailed: true }));
+  await p.goto("/settings");
+  await expect(p.getByRole("alert").filter({ hasText: "Restores are paused" })).toBeVisible();
+  await expect(p.getByRole("button", { name: "Back up now" })).toBeVisible();
+  await expect(p.getByRole("button", { name: "Disconnect" })).toBeVisible();
+  await expect(p.getByRole("button", { name: "Restore…" })).toHaveCount(0);
+  await p.close();
+});
+
+test("register-page restore always asks to confirm before restoring", async ({ browser }) => {
+  const context = await browser.newContext(); // logged out
+  const p = await context.newPage();
+  await p.addInitScript(stubDesktopBackup({}));
+  await p.goto("/register");
+  await p.getByRole("button", { name: "Restore from Google Drive" }).click();
+  await p.locator("#restore-password").fill("hunter2hunter2");
+  await p.getByRole("button", { name: "Restore", exact: true }).click();
+  await expect(p.getByText("all data on this computer", { exact: false }).first()).toBeVisible();
+  expect(await p.evaluate(() => (window as unknown as { __restoreCalls: unknown[] }).__restoreCalls)).toEqual([]);
+  await p.getByRole("button", { name: "Replace my data" }).click();
+  await expect
+    .poll(() => p.evaluate(() => (window as unknown as { __restoreCalls: unknown[] }).__restoreCalls))
+    .toEqual([["b1", "hunter2hunter2"]]);
+  await context.close();
+});

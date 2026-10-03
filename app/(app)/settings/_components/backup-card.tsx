@@ -7,11 +7,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { CloudUpload } from "lucide-react";
 import { toast } from "sonner";
-import { getBackup, type BackupStatus } from "@/lib/desktop";
+import { getBackup, type BackupProgress, type BackupStatus } from "@/lib/desktop";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RestoreDialog } from "@/components/backup/restore-dialog";
+
+const BACKUP_PHASES = new Set<BackupProgress["phase"]>(["dumping", "encrypting", "uploading", "pruning"]);
 
 function when(iso: string | null): string {
   if (!iso) return "never";
@@ -39,20 +41,31 @@ export function BackupCard() {
   const [pw2, setPw2] = useState("");
   const [busy, setBusy] = useState(false);
   const [restoreOpen, setRestoreOpen] = useState(false);
+  const [statusError, setStatusError] = useState<string | null>(null);
+  const [progressPhase, setProgressPhase] = useState<BackupProgress["phase"] | null>(null);
 
   const refresh = useCallback(async () => {
     const b = getBackup();
     if (!b) return;
     try {
       setStatus(await b.status());
-    } catch {
-      // Keep showing the last known status.
+      setStatusError(null);
+    } catch (e) {
+      setStatusError((e as Error).message);
     }
   }, []);
 
   useEffect(() => {
     setIsDesktop(getBackup() !== undefined);
     void refresh();
+    return getBackup()?.onProgress((p) => {
+      if (p.phase === "done") {
+        setProgressPhase(null);
+        void refresh();
+      } else if (BACKUP_PHASES.has(p.phase)) {
+        setProgressPhase(p.phase); // restore phases are shown by the restore dialog
+      }
+    });
   }, [refresh]);
 
   async function run(fn: () => Promise<unknown>, ok?: string) {
@@ -77,7 +90,25 @@ export function BackupCard() {
     );
   }
   const b = getBackup()!;
-  if (!status) return null;
+  if (!status) {
+    return statusError ? (
+      <Shell>
+        <p role="alert" className="text-destructive">
+          {statusError}
+        </p>
+        <Button variant="outline" onClick={() => void refresh()}>
+          Try again
+        </Button>
+      </Shell>
+    ) : null;
+  }
+
+  const rollbackAlert = status.restoreRollbackFailed ? (
+    <p role="alert" className="text-destructive">
+      A restore couldn&apos;t be completed and your previous data was set aside safely. Restores are paused — please
+      contact support.
+    </p>
+  ) : null;
 
   if (!status.configured) {
     return (
@@ -87,20 +118,10 @@ export function BackupCard() {
     );
   }
 
-  if (status.restoreRollbackFailed) {
-    return (
-      <Shell>
-        <p role="alert" className="text-destructive">
-          A restore couldn&apos;t be completed and your previous data was set aside safely. Backups and restores are
-          paused — please contact support.
-        </p>
-      </Shell>
-    );
-  }
-
   if (!status.connected) {
     return (
       <Shell>
+        {rollbackAlert}
         <p className="text-muted-foreground">
           Encrypted daily backups of your books and attachments to your own Google Drive. Trivio can only see
           the files it creates there.
@@ -116,6 +137,7 @@ export function BackupCard() {
     const tooShort = pw.normalize("NFC").length < 8;
     return (
       <Shell>
+        {rollbackAlert}
         <p>
           Connected as <strong>{status.email}</strong>. Choose a backup password.
         </p>
@@ -152,8 +174,12 @@ export function BackupCard() {
     );
   }
 
+  const authRevoked = status.lastError?.code === "AUTH_REVOKED";
+  const running = status.running !== null || progressPhase !== null;
+
   return (
     <Shell>
+      {rollbackAlert}
       <p>
         Connected as <strong>{status.email}</strong>. Backs up once a day while Trivio is open, if anything
         changed, and keeps the last 10.
@@ -168,33 +194,40 @@ export function BackupCard() {
           <dd>{status.keptCount}</dd>
         </div>
       </dl>
+      {status.failingSince && (
+        <p className="text-muted-foreground">Backups failing since {when(status.failingSince)}.</p>
+      )}
       {status.lastError && (
         <p role="alert" className="text-destructive">
-          Last backup failed: {status.lastError.message}
+          {authRevoked
+            ? "Google Drive access expired — reconnect to keep backing up."
+            : `Last backup failed: ${status.lastError.message}`}
         </p>
       )}
       <div className="flex flex-wrap gap-2">
-        {status.lastError?.code === "AUTH_REVOKED" ? (
+        {authRevoked ? (
           <Button disabled={busy} onClick={() => run(() => b.connect(), "Google Drive reconnected")}>
             Reconnect Google Drive
           </Button>
         ) : (
-          <Button disabled={busy || status.running !== null} onClick={() => run(() => b.backupNow(), "Backed up")}>
-            {status.running === "backup" || busy ? "Backing up…" : "Back up now"}
+          <Button disabled={busy || running} onClick={() => run(() => b.backupNow(), "Backed up")}>
+            {status.running === "backup" || progressPhase !== null || busy ? "Backing up…" : "Back up now"}
           </Button>
         )}
-        <Button variant="outline" disabled={busy || status.running !== null} onClick={() => setRestoreOpen(true)}>
-          Restore…
-        </Button>
+        {!status.restoreRollbackFailed && (
+          <Button variant="outline" disabled={busy || running} onClick={() => setRestoreOpen(true)}>
+            Restore…
+          </Button>
+        )}
         <Button
           variant="ghost"
-          disabled={busy || status.running !== null}
+          disabled={busy || running}
           onClick={() => run(() => b.disconnect(), "Disconnected. Your backups stay in Google Drive.")}
         >
           Disconnect
         </Button>
       </div>
-      <RestoreDialog open={restoreOpen} onOpenChange={setRestoreOpen} confirmReplace />
+      {!status.restoreRollbackFailed && <RestoreDialog open={restoreOpen} onOpenChange={setRestoreOpen} confirmReplace />}
     </Shell>
   );
 }
