@@ -16,6 +16,7 @@ import { loadState, saveState, type BackupState } from "./state";
 
 const DAY = 24 * 3600_000;
 const NOTIFY_AFTER = 48 * 3600_000;
+const KEEP_RESTORE_LEFTOVERS = 7 * DAY; // the pre-restore data stays on this computer for about a week
 const KEEP = 10;
 
 export interface AuthLike {
@@ -208,8 +209,39 @@ export class BackupService {
   }
 
   async tick(): Promise<void> {
-    if (this.running || !this.isDue()) return;
-    await this.runBackup(false).catch(() => {}); // recorded in state; shown in Settings
+    if (this.running) return;
+    if (this.isDue()) {
+      await this.runBackup(false).catch(() => {}); // recorded in state; shown in Settings
+      return;
+    }
+    // Revoked access stops the runs, so the failure notice must come from here.
+    const err = this.state.lastError;
+    if (err?.code === "AUTH_REVOKED" && this.d.configured && this.state.email && this.pwKey) {
+      if (!this.failureNoticeDue(this.state.failingSince)) return;
+      try {
+        await this.update({ failureNotified: true });
+      } catch (saveErr) {
+        console.warn("[backup] could not record the failure notice:", saveErr instanceof Error ? saveErr.message : saveErr);
+      }
+      this.notifyFailing(err.message);
+    }
+  }
+
+  // Backups have been failing for 48 h and the user hasn't been told yet.
+  private failureNoticeDue(failingSince: string | null): boolean {
+    if (this.state.failureNotified || !failingSince) return false;
+    return this.now().getTime() - Date.parse(failingSince) >= NOTIFY_AFTER;
+  }
+
+  private notifyFailing(userMessage: string): void {
+    this.d.notify("Trivio backups are failing", `${userMessage} Open Settings → Backup for details.`);
+  }
+
+  // The pre-restore copies are dropped only a week after the restore, so the
+  // user can still ask for the old data back. Older state has no restoredAt.
+  private restoreLeftoversExpired(): boolean {
+    const at = this.state.restoredAt ? Date.parse(this.state.restoredAt) : NaN;
+    return Number.isNaN(at) || this.now().getTime() - at >= KEEP_RESTORE_LEFTOVERS;
   }
 
   async backupNow(): Promise<BackupStatus> {
@@ -314,10 +346,12 @@ export class BackupService {
         console.warn("[backup] could not prune old backups:", err instanceof Error ? err.message : err);
       }
       let cleanupPending = this.state.cleanupPending;
-      if (cleanupPending && !this.state.restoreRollbackFailed) {
+      let restoredAt = this.state.restoredAt ?? null;
+      if (cleanupPending && !this.state.restoreRollbackFailed && this.restoreLeftoversExpired()) {
         try {
           await this.dropRestoreLeftovers();
           cleanupPending = false;
+          restoredAt = null;
         } catch (err) {
           console.warn("[backup] could not drop restore leftovers:", err instanceof Error ? err.message : err);
         }
@@ -333,12 +367,13 @@ export class BackupService {
         failureNotified: false,
         keptCount: kept,
         cleanupPending,
+        restoredAt,
       });
     } catch (err) {
       const e = toBackupError(err, "BACKUP_FAILED");
       const now = this.now();
       const failingSince = this.state.failingSince ?? now.toISOString();
-      const notify = !this.state.failureNotified && now.getTime() - Date.parse(failingSince) >= NOTIFY_AFTER;
+      const notify = this.failureNoticeDue(failingSince);
       try {
         await this.update({
           lastAttemptAt: now.toISOString(),
@@ -349,7 +384,7 @@ export class BackupService {
       } catch (saveErr) {
         console.warn("[backup] could not record the failure:", saveErr instanceof Error ? saveErr.message : saveErr);
       }
-      if (notify) this.d.notify("Trivio backups are failing", `${e.userMessage} Open Settings → Backup for details.`);
+      if (notify) this.notifyFailing(e.userMessage);
       console.error("[backup] failed:", e.message);
       throw e;
     } finally {
@@ -463,7 +498,7 @@ export class BackupService {
       };
       try {
         await this.d.server.stop();
-        await fsp.rm(previous, { recursive: true, force: true });
+        await this.clearPreviousAttachments(previous);
         await fsp.mkdir(dirname(live), { recursive: true });
         try {
           await fsp.rename(live, previous);
@@ -477,7 +512,7 @@ export class BackupService {
         swapped = true;
         // The kept-aside copies only become leftovers once the swap succeeded; recording it
         // earlier would let a later backup delete the only original after a failed swap.
-        await this.update({ cleanupPending: true });
+        await this.update({ cleanupPending: true, restoredAt: this.now().toISOString() });
       } catch (err) {
         return await rollback(err);
       }
@@ -493,7 +528,7 @@ export class BackupService {
 
       // The restored data is live: everything below is post-commit and must not fail the restore.
       try {
-        await this.update({ cleanupPending: true, fingerprint: null, lastError: null });
+        await this.update({ cleanupPending: true, restoredAt: this.now().toISOString(), fingerprint: null, lastError: null });
       } catch (err) {
         console.error("[backup] could not record the restore in state:", err);
       }
@@ -505,6 +540,22 @@ export class BackupService {
       this.progress("done");
     } finally {
       await fsp.rm(work, { recursive: true, force: true });
+    }
+  }
+
+  // A *_before_restore folder not marked as a leftover may be the only copy of
+  // the original attachments (e.g. after a crash mid-restore): set it aside, never delete it.
+  private async clearPreviousAttachments(previous: string): Promise<void> {
+    if (this.state.cleanupPending) {
+      await fsp.rm(previous, { recursive: true, force: true });
+      return;
+    }
+    const stamp = this.now().toISOString().replace(/[:.]/g, "-");
+    try {
+      await fsp.rename(previous, `${previous}-${stamp}`);
+      console.warn(`[backup] kept an earlier ${previous} as ${previous}-${stamp}`);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
     }
   }
 

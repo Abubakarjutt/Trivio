@@ -1,9 +1,12 @@
 import { describe, it, expect, vi } from "vitest";
 import { promises as fsp } from "node:fs";
-import { readFile, writeFile, readdir, rm } from "node:fs/promises";
+import { readFile, writeFile, readdir, rm, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { BackupService } from "../../../desktop/backup/backup-service";
+import { loadState } from "../../../desktop/backup/state";
 import { makeService, ready } from "./fakes";
+
+const HOUR = 3600_000;
 
 async function backedUp() {
   const t = await ready();
@@ -49,12 +52,40 @@ describe("BackupService — restore", () => {
     expect(t.server.calls).toEqual(["stop", "start:signOut"]);
   });
 
-  it("drops the kept-aside copies after the next successful backup", async () => {
+  it("keeps the kept-aside copies for a week, then drops them on the next successful backup", async () => {
     const t = await backedUp();
+    const restoredAt = Date.parse("2026-10-02T10:00:00Z");
     await t.svc.restore(t.entry.id, "pw-12345678");
+    expect((await loadState(join(t.deps.dir, "state.json"))).restoredAt).toBe("2026-10-02T10:00:00.000Z");
+
+    t.setNow(new Date(restoredAt + HOUR));
+    await t.svc.backupNow();
+    expect(t.db.calls).not.toContain("dropPrevious");
+    expect(await readFile(join(`${t.attachmentsDir}_before_restore`, "org1", "r.pdf"), "utf8")).toBe("receipt-2");
+    expect((await loadState(join(t.deps.dir, "state.json"))).cleanupPending).toBe(true);
+
+    t.setNow(new Date(restoredAt + 7 * 24 * HOUR + HOUR));
     await t.svc.backupNow();
     expect(t.db.calls.at(-1)).toBe("dropPrevious");
     await expect(readdir(`${t.attachmentsDir}_before_restore`)).rejects.toThrow();
+    const state = await loadState(join(t.deps.dir, "state.json"));
+    expect(state.cleanupPending).toBe(false);
+    expect(state.restoredAt).toBeNull();
+  });
+
+  it("sets an earlier attachments_before_restore aside instead of deleting it when it isn't a known leftover", async () => {
+    const t = await backedUp();
+    const previous = `${t.attachmentsDir}_before_restore`;
+    await mkdir(join(previous, "org1"), { recursive: true });
+    await writeFile(join(previous, "org1", "only.pdf"), "only-copy");
+    expect((await loadState(join(t.deps.dir, "state.json"))).cleanupPending).toBe(false);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await t.svc.restore(t.entry.id, "pw-12345678");
+    warn.mockRestore();
+    const aside = (await readdir(join(t.attachmentsDir, ".."))).filter((n) => n.startsWith("attachments_before_restore-"));
+    expect(aside).toEqual(["attachments_before_restore-2026-10-02T10-00-00-000Z"]);
+    expect(await readFile(join(t.attachmentsDir, "..", aside[0], "org1", "only.pdf"), "utf8")).toBe("only-copy");
+    expect(await readFile(join(previous, "org1", "r.pdf"), "utf8")).toBe("receipt-2");
   });
 
   it("a wrong password changes nothing and never stops the server", async () => {
@@ -311,7 +342,8 @@ describe("BackupService — attachments rollback failure", () => {
     t.db.failSwap = true;
     const realRename = fsp.rename.bind(fsp);
     const spy = vi.spyOn(fsp, "rename").mockImplementation(async (from, to) => {
-      if (String(from).endsWith("_before_restore")) throw Object.assign(new Error("busy"), { code: "EBUSY" });
+      // only the rollback's move back into place fails
+      if (String(from).endsWith("_before_restore") && String(to) === t.attachmentsDir) throw Object.assign(new Error("busy"), { code: "EBUSY" });
       return realRename(from, to);
     });
     try {

@@ -222,6 +222,27 @@ describe("BackupService — backups", () => {
     expect(t.svc.status().failingSince).toBeNull();
   });
 
+  it("notifies once after 48 hours of revoked Google access, although no runs happen", async () => {
+    const t = await ready();
+    const t0 = Date.parse("2026-10-02T10:00:00Z");
+    t.drive.failUpload = new BackupError("AUTH_REVOKED");
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    await t.svc.tick(); // the one run that discovers the revocation, at t0
+    err.mockRestore();
+    expect(t.svc.status()).toMatchObject({ lastError: { code: "AUTH_REVOKED" }, failingSince: "2026-10-02T10:00:00.000Z" });
+    t.setNow(new Date(t0 + 47 * HOUR));
+    await t.svc.tick();
+    expect(t.notes).toHaveLength(0);
+    t.setNow(new Date(t0 + 48 * HOUR));
+    await t.svc.tick();
+    expect(t.notes).toEqual(["Trivio backups are failing"]);
+    expect((await loadState(join(t.deps.dir, "state.json"))).failureNotified).toBe(true);
+    t.setNow(new Date(t0 + 60 * HOUR));
+    await t.svc.tick();
+    expect(t.notes).toHaveLength(1);
+    expect(t.drive.files.size).toBe(0);
+  });
+
   it("a second backupNow during a run joins it instead of starting another", async () => {
     const t = await ready();
     let open!: () => void;

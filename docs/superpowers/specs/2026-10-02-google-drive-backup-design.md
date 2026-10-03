@@ -17,6 +17,8 @@ These override the text below where they conflict.
 7. `server/routers/gdpr.ts:154` also hard-codes `process.cwd()/storage`; it uses the same `storageRoot()`.
 8. `pg_restore` into `trivio_restore` runs while the server is still up; the server is stopped only for the attachment + database swap.
 9. Extra error codes: `BACKUP_FAILED` (generic backup failure) and `BUSY` (backup and restore never interleave).
+10. (Final review) The `*_before_restore` leftovers are kept for about a week: a restore records `restoredAt`, and they are dropped after the first successful backup at least 7 days after the restore (§4.3 step 8), never while a rollback failure is recorded. State written before this change (no `restoredAt`) is treated as eligible.
+11. (Final review) The register-page "Restore from Google Drive" also asks to confirm replacing this computer's data (§4.3 entry points, step 4): `/register` is reachable by a logged-out user who already has books on this computer.
 **Scope:** Trivio desktop app (Electron + embedded Postgres), macOS and Windows
 
 ## 1. Goal
@@ -216,7 +218,9 @@ Steps:
 7. `startServer()`. The existing startup runs `prisma migrate deploy`, which upgrades a backup
    from an older version. Navigate to `/login`, where the user signs in with the account that
    came back with the data.
-8. The `*_before_restore` database and folder are dropped after the next successful backup.
+8. The `*_before_restore` database and folder are dropped after the first successful backup at
+   least 7 days after the restore (§0.10), so the previous data stays on this computer for about
+   a week.
 9. If anything fails in steps 5–6:
    - drop `trivio_restore`;
    - undo whichever renames happened;
