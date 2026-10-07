@@ -29,6 +29,12 @@ import { crmDealsRouter } from "@/server/routers/crmDeals";
 import { crmActivitiesRouter } from "@/server/routers/crmActivities";
 import { crmPipelinesRouter } from "@/server/routers/crmPipelines";
 import { crmReportsRouter } from "@/server/routers/crmReports";
+import { outreachSettingsRouter } from "@/server/routers/outreachSettings";
+import { outreachProspectsRouter } from "@/server/routers/outreachProspects";
+import { outreachDraftsRouter } from "@/server/routers/outreachDrafts";
+import { outreachDocsRouter } from "@/server/routers/outreachDocs";
+import { outreachTodayRouter } from "@/server/routers/outreachToday";
+import { outreachVoiceRouter } from "@/server/routers/outreachVoice";
 
 export const appRouter = createTRPCRouter({
   auth: authRouter,
@@ -61,6 +67,12 @@ export const appRouter = createTRPCRouter({
   crmActivities: crmActivitiesRouter,
   crmPipelines: crmPipelinesRouter,
   crmReports: crmReportsRouter,
+  outreachSettings: outreachSettingsRouter,
+  outreachProspects: outreachProspectsRouter,
+  outreachDrafts: outreachDraftsRouter,
+  outreachDocs: outreachDocsRouter,
+  outreachToday: outreachTodayRouter,
+  outreachVoice: outreachVoiceRouter,
 });
 
 export type AppRouter = typeof appRouter;

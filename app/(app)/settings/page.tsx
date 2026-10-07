@@ -2,7 +2,7 @@ import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { CreditCard, User, Building2, ChevronRight, Download, Globe } from "lucide-react";
+import { CreditCard, User, Building2, ChevronRight, Download, Globe, Send } from "lucide-react";
 import { EmailImportCard } from "./_components/email-import-card";
 import { PrivacyTab } from "./_components/privacy-tab";
 import { JurisdictionPicker } from "./_components/jurisdiction-picker";
@@ -146,6 +146,21 @@ export default async function SettingsPage() {
           <VoiceInputCard />
           {/* Encrypted backups to the user's Google Drive (desktop app) */}
           <BackupCard />
+
+          {/* LinkedIn outreach assistant */}
+          <Link
+            href="/outreach/settings"
+            className="rounded-2xl border border-border/40 bg-card shadow-card p-6 flex items-center gap-4 hover:bg-accent/30 transition-colors group"
+          >
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted">
+              <Send className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <div className="flex-1">
+              <h2 className="font-semibold">Outreach</h2>
+              <p className="text-sm text-muted-foreground mt-0.5">Seller profile, offers, signal weights and daily limits</p>
+            </div>
+            <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+          </Link>
 
           {/* Email Import */}
           {emailImportToken && (

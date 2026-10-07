@@ -28,6 +28,9 @@ import {
   Calendar,
   MessageSquare,
   PieChart,
+  Send,
+  ListChecks,
+  Mic,
 } from "lucide-react";
 
 type NavItem = {
@@ -84,6 +87,14 @@ const NAV_GROUPS: NavGroup[] = [
       { label: "Companies", href: "/crm/companies", icon: Building2, matchPrefix: true },
       { label: "Deals", href: "/crm/deals", icon: Handshake, matchPrefix: true },
       { label: "Activities", href: "/crm/activities", icon: Calendar, matchPrefix: true },
+    ],
+  },
+  {
+    label: "Outreach",
+    items: [
+      { label: "Today", href: "/outreach", icon: ListChecks, matchPrefix: false },
+      { label: "Prospects", href: "/outreach/prospects", icon: Send, matchPrefix: true },
+      { label: "Voice", href: "/outreach/voice", icon: Mic, matchPrefix: true },
     ],
   },
 ];

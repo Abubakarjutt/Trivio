@@ -20,6 +20,10 @@ const DENYLIST: (string | RegExp)[] = [
   "gdpr.recordConsent", // consent must come from the human, not the model
   "gdpr.exportData", // bulk dump, not useful in a chat reply
   "invoices.getPdfData", // feeds the PDF renderer, not a user action
+  "outreachProspects.delete", // erases a prospect and adds a do-not-contact entry — UI only
+  "outreachProspects.markDnc", // do-not-contact must come from the human
+  "outreachVoice.delete",
+  "outreachProspects.extract", // fetches a website: the URL must come from the paste-and-review UI
 ];
 
 const MAX_RESULT_CHARS = 4000;
@@ -49,6 +53,9 @@ const AREA_LABELS: Record<string, string> = {
   bankAccounts: "business bank accounts & reconciliation",
   accounts: "business chart of accounts",
   org: "business/app settings",
+  outreachToday:
+    "LinkedIn OUTREACH: today's to-do list (Trivio never sends messages; the user sends them by hand)",
+  outreachProspects: "LinkedIn OUTREACH prospects and their pipeline stage",
 };
 
 export interface AppAction {

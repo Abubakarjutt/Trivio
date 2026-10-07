@@ -160,6 +160,17 @@ model Organisation {
   crmDeals          CrmDeal[]
   crmActivities     CrmActivity[]
 
+  // Outreach
+  outreachSettings      OutreachSettings?
+  outreachOffers        OutreachOffer[]
+  outreachProspects     OutreachProspect[]
+  outreachEvents        OutreachEvent[]
+  outreachDrafts        OutreachDraft[]
+  outreachConversations OutreachConversation[]
+  outreachDocs          OutreachDoc[]
+  outreachVoiceExamples OutreachVoiceExample[]
+  outreachDnc           OutreachDnc[]
+
   @@index([emailImportToken])
   @@index([lsCustomerId])
 }
@@ -790,6 +801,33 @@ enum CrmActivityType {
   TASK
 }
 
+// ─── Outreach ─────────────────────────────────────────────────────────────────
+
+enum OutreachStage {
+  QUEUED
+  REQUEST_SENT
+  CONNECTED
+  VALUE_SENT
+  ENGAGED
+  TEARDOWN
+  PILOT
+  WON
+  LOST
+  NURTURE
+  DNC
+}
+
+enum OutreachDraftKind {
+  CONNECTION_NOTE
+  VALUE_MESSAGE
+  REPLY
+}
+
+enum OutreachDocKind {
+  TEARDOWN_PREP
+  PROPOSAL
+}
+
 model CrmLead {
   id                 String        @id @default(cuid())
   organisationId     String
@@ -812,6 +850,7 @@ model CrmLead {
   convertedContact   Contact?      @relation("CrmLeadContact", fields: [convertedContactId], references: [id])
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
+  outreachProspect   OutreachProspect?
 
   @@index([organisationId, status])
   @@index([organisationId, source])
@@ -891,6 +930,7 @@ model CrmDeal {
   activities        CrmActivity[]
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
+  outreachProspect  OutreachProspect?
 
   @@index([organisationId, stageId])
   @@index([organisationId, pipelineId])
@@ -919,6 +959,163 @@ model CrmActivity {
   @@index([organisationId, contactId])
   @@index([organisationId, dealId])
   @@index([organisationId, dueDate])
+}
+
+// ─── Outreach ─────────────────────────────────────────────────────────────────
+
+model OutreachSettings {
+  id             String       @id @default(cuid())
+  organisationId String       @unique
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  sellerProfile  String
+  signalWeights  Json
+  dailyCap       Int          @default(20)
+  weeklyCap      Int          @default(100)
+  cadence        Json
+  hiringKeywords String[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
+
+model OutreachOffer {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  name           String
+  description    String       @default("")
+  price          Decimal?     @db.Decimal(19, 4)
+  fittingSignals String[]
+  archived       Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organisationId])
+}
+
+model OutreachProspect {
+  id               String                 @id @default(cuid())
+  organisationId   String
+  organisation     Organisation           @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  profileUrl       String
+  name             String
+  title            String                 @default("")
+  company          String                 @default("")
+  companyWebsite   String?
+  companySize      String?
+  location         String?
+  profileText      String
+  stack            String[]
+  signals          Json
+  score            Int                    @default(0)
+  primarySignal    String?
+  scoreReasons     String[]
+  enrichmentStatus String
+  stage            OutreachStage          @default(QUEUED)
+  stageChangedAt   DateTime
+  unansweredCount  Int                    @default(0)
+  lightTouchDone   Boolean                @default(false)
+  awaitingReply    Boolean                @default(false)
+  lastMessageAt    DateTime?
+  lastReplyAt      DateTime?
+  lastTouchAt      DateTime?
+  source           String
+  crmLeadId        String?                @unique
+  crmLead          CrmLead?               @relation(fields: [crmLeadId], references: [id], onDelete: SetNull)
+  crmDealId        String?                @unique
+  crmDeal          CrmDeal?               @relation(fields: [crmDealId], references: [id], onDelete: SetNull)
+  events           OutreachEvent[]
+  drafts           OutreachDraft[]
+  conversations    OutreachConversation[]
+  docs             OutreachDoc[]
+  voiceExamples    OutreachVoiceExample[]
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  @@unique([organisationId, profileUrl])
+  @@index([organisationId, stage])
+  @@index([organisationId, score])
+}
+
+// Append-only. meta never holds personal data: it survives prospect deletion.
+model OutreachEvent {
+  id             String            @id @default(cuid())
+  organisationId String
+  organisation   Organisation      @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  prospectId     String?
+  prospect       OutreachProspect? @relation(fields: [prospectId], references: [id], onDelete: SetNull)
+  kind           String
+  at             DateTime          @default(now())
+  meta           Json              @default("{}")
+
+  @@index([organisationId, kind, at])
+  @@index([prospectId])
+}
+
+model OutreachDraft {
+  id             String            @id @default(cuid())
+  organisationId String
+  organisation   Organisation      @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  prospectId     String
+  prospect       OutreachProspect  @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+  kind           OutreachDraftKind
+  variant        String
+  body           String
+  violations     String[]
+  createdAt      DateTime          @default(now())
+
+  @@index([organisationId, prospectId, kind])
+}
+
+model OutreachConversation {
+  id             String           @id @default(cuid())
+  organisationId String
+  organisation   Organisation     @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  prospectId     String
+  prospect       OutreachProspect @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+  thread         String
+  analysis       Json
+  createdAt      DateTime         @default(now())
+
+  @@index([organisationId, prospectId])
+}
+
+model OutreachDoc {
+  id             String           @id @default(cuid())
+  organisationId String
+  organisation   Organisation     @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  prospectId     String
+  prospect       OutreachProspect @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+  kind           OutreachDocKind
+  body           Json
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@unique([prospectId, kind])
+  @@index([organisationId])
+}
+
+model OutreachVoiceExample {
+  id             String            @id @default(cuid())
+  organisationId String
+  organisation   Organisation      @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  prospectId     String?
+  prospect       OutreachProspect? @relation(fields: [prospectId], references: [id], onDelete: SetNull)
+  kind           String
+  body           String
+  createdAt      DateTime          @default(now())
+
+  @@index([organisationId, createdAt])
+}
+
+model OutreachDnc {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  profileUrl     String
+  addedAt        DateTime     @default(now())
+  reason         String
+
+  @@unique([organisationId, profileUrl])
 }
 
 // ─── Usage Tracking ───────────────────────────────────────────────────────────
