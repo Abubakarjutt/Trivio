@@ -32,14 +32,14 @@ Signals are a fixed set in code: `hiring, pain_post, funding, demo_stage, warm_p
 
 | Model | Fields | Notes |
 |---|---|---|
-| `OutreachSettings` | `organisationId @unique`, `sellerProfile` (Markdown text), `signalWeights` (Json, `{signal: int}`), `dailyCap` (20), `weeklyCap` (100), `cadence` (Json, days: requestWithin 2, withdrawAfter 21, lightTouch 5, secondValue 7, nurtureEvery 30, teardownFollowUp 3) | One row per organisation. No row means the feature isn't set up yet (first-run card). Default weights: hiring 3, pain_post 3, funding 2, demo_stage 2, warm_path 2, stack_match 1 |
+| `OutreachSettings` | `organisationId @unique`, `sellerProfile` (Markdown text), `signalWeights` (Json, `{signal: int}`), `dailyCap` (20), `weeklyCap` (100), `cadence` (Json, days: withdrawAfter 21, lightTouch 5, secondValue 7, nurtureAfterSecond 7, nurtureEvery 30, teardownFollowUp 3), `hiringKeywords String[]` (default `ai, ml, llm, genai, machine learning, applied ai, agent`: the roles the website check looks for on careers pages) | One row per organisation. No row means the feature isn't set up yet (first-run card). Default weights: hiring 3, pain_post 3, funding 2, demo_stage 2, warm_path 2, stack_match 1 |
 | `OutreachOffer` | `name`, `description`, `price Decimal(19,4)?`, `fittingSignals String[]`, `archived Boolean` | Replaces the hard-coded pilots and the `OUTREACH_PRICE_*` settings. If `price` is empty, proposals show `[price]` |
 | `OutreachProspect` | `profileUrl` (normalised), `name`, `title`, `company`, `companyWebsite?`, `companySize?`, `location?`, `profileText`, `stack String[]`, `signals Json` (`[{name, evidence}]`), `score Int`, `primarySignal?`, `scoreReasons String[]`, `enrichmentStatus`, `stage OutreachStage`, `stageChangedAt`, `unansweredCount`, `lightTouchDone`, `awaitingReply`, `lastMessageAt?`, `lastReplyAt?`, `lastTouchAt?`, `source`, `crmLeadId? @unique`, `crmDealId? @unique` | `@@unique([organisationId, profileUrl])`. Adding a URL that's already there updates the existing prospect and records a `refreshed` event. CRM links use `onDelete: SetNull` |
 | `OutreachEvent` | `prospectId?`, `kind`, `at`, `meta Json` | Append-only log. `prospectId` is set to null when the prospect is deleted. `meta` never holds personal data (scores, signal names and stage names only) |
 | `OutreachDraft` | `prospectId`, `kind OutreachDraftKind`, `variant` (`A`/`B`), `body`, `violations String[]` | Regenerating replaces the drafts of that kind. Cascades with the prospect |
 | `OutreachConversation` | `prospectId`, `thread` (text), `analysis Json` | The latest pasted thread per prospect. Cascades |
 | `OutreachDoc` | `prospectId`, `kind OutreachDocKind`, `body Json` | One per kind per prospect. Cascades |
-| `OutreachVoiceExample` | `prospectId?`, `body` | What the user actually sent, with the prospect's name replaced by "X". `prospectId` is set to null on delete, so the anonymised text survives |
+| `OutreachVoiceExample` | `prospectId?`, `kind` (the event it was sent with: `request_sent`, `message_sent` or `light_touch`), `body` | What the user actually sent, with the prospect's name replaced by "X". `prospectId` is set to null on delete, so the anonymised text survives |
 | `OutreachDnc` | `profileUrl`, `addedAt`, `reason` | `@@unique([organisationId, profileUrl])`. Checked before any prospect is saved |
 
 **Deleting a prospect** removes the prospect, its drafts, conversation and docs. Its URL stays in `OutreachDnc` with the reason "deleted on request". A `deleted` event is recorded with no prospect reference.
@@ -67,6 +67,8 @@ All files below are in `server/services/outreach/`.
 - `urls.ts`: normalising profile URLs.
 - `voice.ts`: anonymising names.
 - `prompts.ts`: builds each prompt from `OutreachSettings.sellerProfile`, the 8 most recent voice examples and the fields the task needs.
+
+**Prompts are generalised for every organisation.** The Python prompts were written for one seller of AI engineering. The ported prompts keep their structure and rules but describe signals relative to the seller profile: `pain_post` is a problem the seller's offer solves, `stack_match` is a tool or technology the seller profile names, and the free first step (the "teardown") is described by the seller profile rather than assumed. The teardown helper and proposal pick from the organisation's active `OutreachOffer`s instead of the two hard-coded pilots. Extraction never returns `funding`; funding and warm path can be ticked by hand on the review form.
 
 **Prices** are inserted into proposals by code from `OutreachOffer.price`, formatted in the organisation's currency, and never by the model.
 
@@ -136,7 +138,7 @@ If step 2 fails (no pipeline with stages, or anything else), the stage change is
 **Rules**
 - **No LinkedIn automation.** The server never sends a request to a LinkedIn host. The only LinkedIn links are Sales Navigator links that the user clicks.
 - **Nothing is sent for the user.** No email, message or scheduled send. Mark done only records what the user did.
-- **Caps** are a warning shown on Today and on the request action, not a hard stop.
+- **Caps** work as in the Python app: logging `request_sent` is refused once the daily or weekly cap is reached, and Today lists only as many connection requests as remain. Days and weeks (starting Monday) use the machine's local time zone, since organisations have no time zone setting.
 - **Do-not-contact:** URLs are normalised, then checked against `OutreachDnc` before any save. A URL on the list can't be added again, including after deletion.
 
 **Privacy**
@@ -147,6 +149,7 @@ If step 2 fails (no pipeline with stages, or anything else), the stage change is
 - Deletion works as in Section 1.
 
 **Security**
+- Trivio's AI chat can call any tRPC procedure not on the `DENYLIST` in `server/services/chat-actions.ts`. `outreachProspects.delete`, `outreachProspects.markDnc` and `outreachVoice.delete` go on the denylist: erasing someone or blocking them must come from the person using Trivio, not from the model.
 - All routers use `orgProcedure`. Inputs are validated with zod. Pasted text is limited to 50 KB per field and never rendered as HTML.
 - The website check is hardened as in Section 2.
 
