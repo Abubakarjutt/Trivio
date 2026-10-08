@@ -19,7 +19,16 @@ export function TodayCard({ item }: { item: TodayItem }) {
   const [sent, setSent] = useState("");
   const [showSent, setShowSent] = useState(false);
   const refresh = () => utils.outreachToday.get.invalidate();
-  const done = trpc.outreachProspects.logEvent.useMutation({ onSuccess: refresh });
+  const done = trpc.outreachProspects.logEvent.useMutation({
+    onSuccess: () => {
+      setSent("");
+      setShowSent(false);
+      return refresh();
+    },
+    onError: () => {
+      void refresh();
+    },
+  });
   const generate = trpc.outreachDrafts.generate.useMutation({ onSuccess: refresh });
   const savesVoice = (VOICE_EVENTS as readonly string[]).includes(event);
 

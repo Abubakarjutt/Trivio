@@ -39,7 +39,17 @@ export default function OutreachTodayPage() {
 }
 
 function TodayBody() {
-  const { data, isLoading } = trpc.outreachToday.get.useQuery();
+  const { data, isLoading, isError, refetch } = trpc.outreachToday.get.useQuery();
+  if (isError) {
+    return (
+      <div className="border-border/60 space-y-3 rounded-xl border p-4">
+        <p className="text-destructive text-sm">Couldn&apos;t load today&apos;s list.</p>
+        <Button size="sm" variant="outline" onClick={() => refetch()}>
+          Retry
+        </Button>
+      </div>
+    );
+  }
   if (isLoading || !data) {
     return (
       <div className="space-y-4">
