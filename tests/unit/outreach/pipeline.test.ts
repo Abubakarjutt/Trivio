@@ -1,11 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
-  eventsFor, InvalidTransition, nextAction, transition, validSequence,
+  eventsFor,
+  InvalidTransition,
+  nextAction,
+  transition,
+  validSequence,
 } from "@/server/services/outreach/pipeline";
 import { DEFAULT_CADENCE, type ProspectState } from "@/server/services/outreach/types";
 import { at, DAY, makeState, NOW } from "./helpers";
 
-const apply = (p: ProspectState, event: string, when: Date) => ({ ...p, ...transition(p, event, when) });
+const apply = (p: ProspectState, event: string, when: Date) => ({
+  ...p,
+  ...transition(p, event, when),
+});
 
 describe("transition", () => {
   it("walks the happy path to teardown", () => {
@@ -21,15 +28,21 @@ describe("transition", () => {
   });
 
   it("refuses a third unanswered message", () => {
-    expect(() => transition(makeState({ stage: "VALUE_SENT", unansweredCount: 2 }), "message_sent", NOW)).toThrow(/nurture/);
+    expect(() =>
+      transition(makeState({ stage: "VALUE_SENT", unansweredCount: 2 }), "message_sent", NOW)
+    ).toThrow(/nurture/);
   });
 
   it("resets the unanswered count on a reply", () => {
-    expect(apply(makeState({ stage: "VALUE_SENT", unansweredCount: 2 }), "replied", NOW).unansweredCount).toBe(0);
+    expect(
+      apply(makeState({ stage: "VALUE_SENT", unansweredCount: 2 }), "replied", NOW).unansweredCount
+    ).toBe(0);
   });
 
   it("refuses accepted before a request was sent", () => {
-    expect(() => transition(makeState({ stage: "QUEUED" }), "accepted", NOW)).toThrow(InvalidTransition);
+    expect(() => transition(makeState({ stage: "QUEUED" }), "accepted", NOW)).toThrow(
+      InvalidTransition
+    );
   });
 
   it("rejects an unknown event", () => {
@@ -37,7 +50,9 @@ describe("transition", () => {
   });
 
   it("moves stageChangedAt only when the stage changes", () => {
-    expect(transition(makeState({ stage: "ENGAGED" }), "message_sent", at(DAY))).not.toHaveProperty("stageChangedAt");
+    expect(transition(makeState({ stage: "ENGAGED" }), "message_sent", at(DAY))).not.toHaveProperty(
+      "stageChangedAt"
+    );
   });
 });
 
@@ -58,13 +73,19 @@ describe("nextAction", () => {
   });
 
   it("makes a pending request due for withdrawal after 21 days", () => {
-    expect(nextAction(makeState({ stage: "REQUEST_SENT" }), DEFAULT_CADENCE)).toEqual({ kind: "withdraw", dueAt: at(21 * DAY) });
+    expect(nextAction(makeState({ stage: "REQUEST_SENT" }), DEFAULT_CADENCE)).toEqual({
+      kind: "withdraw",
+      dueAt: at(21 * DAY),
+    });
   });
 
   it("does a light touch, then a second value message", () => {
     const p = makeState({ stage: "VALUE_SENT", unansweredCount: 1, lastMessageAt: NOW });
     expect(nextAction(p, DEFAULT_CADENCE)).toEqual({ kind: "light_touch", dueAt: at(5 * DAY) });
-    expect(nextAction({ ...p, lightTouchDone: true }, DEFAULT_CADENCE)).toEqual({ kind: "second_value", dueAt: at(7 * DAY) });
+    expect(nextAction({ ...p, lightTouchDone: true }, DEFAULT_CADENCE)).toEqual({
+      kind: "second_value",
+      dueAt: at(7 * DAY),
+    });
   });
 
   it("moves to nurture 7 days after two unanswered messages", () => {
@@ -78,11 +99,17 @@ describe("nextAction", () => {
   });
 
   it("touches nurture prospects every 30 days", () => {
-    expect(nextAction(makeState({ stage: "NURTURE", lastTouchAt: NOW }), DEFAULT_CADENCE)).toEqual({ kind: "nurture_touch", dueAt: at(30 * DAY) });
+    expect(nextAction(makeState({ stage: "NURTURE", lastTouchAt: NOW }), DEFAULT_CADENCE)).toEqual({
+      kind: "nurture_touch",
+      dueAt: at(30 * DAY),
+    });
   });
 
   it("uses the organisation's cadence", () => {
-    expect(nextAction(makeState({ stage: "REQUEST_SENT" }), { ...DEFAULT_CADENCE, withdrawAfter: 10 })?.dueAt).toEqual(at(10 * DAY));
+    expect(
+      nextAction(makeState({ stage: "REQUEST_SENT" }), { ...DEFAULT_CADENCE, withdrawAfter: 10 })
+        ?.dueAt
+    ).toEqual(at(10 * DAY));
   });
 
   it.each(["PILOT", "WON", "LOST", "DNC"] as const)("has no action for %s", (stage) => {
@@ -93,7 +120,9 @@ describe("nextAction", () => {
 describe("validSequence", () => {
   it("keeps only events valid in order, without changing the prospect", () => {
     const p = makeState({ stage: "REQUEST_SENT" });
-    expect(validSequence(p, ["won", "accepted", "message_sent", "replied", "accepted"], NOW)).toEqual(["accepted", "message_sent", "replied"]);
+    expect(
+      validSequence(p, ["won", "accepted", "message_sent", "replied", "accepted"], NOW)
+    ).toEqual(["accepted", "message_sent", "replied"]);
     expect(p.stage).toBe("REQUEST_SENT");
   });
 });
