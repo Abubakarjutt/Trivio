@@ -1,5 +1,6 @@
 import type { OutreachProspect } from "@prisma/client";
 import type { z } from "zod";
+import { vi, type Mock } from "vitest";
 import type { Llm } from "@/server/services/outreach/llm";
 import type { Prompt } from "@/server/services/outreach/prompts";
 import type { ProspectState } from "@/server/services/outreach/types";
@@ -65,4 +66,27 @@ export class FakeLlm implements Llm {
     if (next instanceof Error) throw next;
     return schema.parse(next);
   }
+}
+
+export type MockDb = Record<string, Record<string, Mock>> & { $transaction: Mock };
+
+/** A Prisma stand-in: db.<model>.<method> is a vi.fn() created on first use; $transaction(fn) runs fn(db). */
+export function makeDb(): MockDb {
+  const models = new Map<string, Record<string, Mock>>();
+  const model = (name: string) => {
+    if (!models.has(name)) {
+      const fns: Record<string, Mock> = {};
+      models.set(name, new Proxy(fns, { get: (t, k: string) => (t[k] ??= vi.fn()) }));
+    }
+    return models.get(name)!;
+  };
+  const db: MockDb = new Proxy({} as MockDb, {
+    get: (_t, k: string | symbol) => {
+      if (k === "$transaction") return transaction;
+      if (typeof k !== "string" || k === "then") return undefined;
+      return model(k);
+    },
+  });
+  const transaction = vi.fn(async (fn: (tx: MockDb) => unknown) => fn(db));
+  return db;
 }
