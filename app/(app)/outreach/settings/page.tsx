@@ -143,9 +143,12 @@ function SettingsTabs() {
   });
 
   const upsert = trpc.outreachSettings.upsert.useMutation({
-    onSuccess: () => {
-      void utils.outreachSettings.get.invalidate();
-      void utils.outreachToday.get.invalidate();
+    // Returned so the mutation stays pending until the cache is fresh: the next save reads it.
+    onSuccess: async () => {
+      await Promise.all([
+        utils.outreachSettings.get.invalidate(),
+        utils.outreachToday.get.invalidate(),
+      ]);
     },
   });
   const archive = trpc.outreachSettings.offerArchive.useMutation({

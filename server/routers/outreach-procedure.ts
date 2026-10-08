@@ -19,4 +19,3 @@ export const outreachProcedure = orgProcedure.use(async ({ next }) => {
 });
 
 export const MAX_PASTE = 50_000;
-export const PRICE = /^\d+(\.\d{1,4})?$/;

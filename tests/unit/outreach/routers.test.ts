@@ -273,6 +273,20 @@ describe("outreachSettings and outreachToday", () => {
     expect(db.outreachOffer.create).not.toHaveBeenCalled();
   });
 
+  it("accepts a 15-digit price and refuses a 16-digit one (NUMERIC(19,4))", async () => {
+    db.outreachOffer.create.mockResolvedValue({ id: "o9" });
+    const make = (price: string) =>
+      caller().outreachSettings.offerCreate({
+        name: "X",
+        description: "",
+        price,
+        fittingSignals: [],
+      });
+    await expect(make("1".repeat(16))).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect(db.outreachOffer.create).not.toHaveBeenCalled();
+    await expect(make("1".repeat(15) + ".5")).resolves.toEqual({ id: "o9" });
+  });
+
   it("reports Today as not configured without settings", async () => {
     db.outreachSettings.findUnique.mockResolvedValue(null);
     expect(await caller().outreachToday.get()).toEqual({ configured: false });

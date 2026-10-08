@@ -6,15 +6,17 @@ import { loadConfig } from "@/server/services/outreach/config";
 import {
   CadenceSchema,
   NotFoundError,
+  PRICE,
+  PRICE_MESSAGE,
   SIGNAL_NAMES,
   WeightsSchema,
 } from "@/server/services/outreach/types";
-import { MAX_PASTE, outreachProcedure, PRICE } from "./outreach-procedure";
+import { MAX_PASTE, outreachProcedure } from "./outreach-procedure";
 
 const OfferInput = z.object({
   name: z.string().trim().min(1).max(120),
   description: z.string().max(2000),
-  price: z.union([z.literal(""), z.string().regex(PRICE, "Enter a price like 4000 or 4000.50")]),
+  price: z.union([z.literal(""), z.string().regex(PRICE, PRICE_MESSAGE)]),
   fittingSignals: z.array(z.enum(SIGNAL_NAMES)).max(SIGNAL_NAMES.length),
 });
 const toPrice = (p: string) => (p === "" ? null : new Prisma.Decimal(p));

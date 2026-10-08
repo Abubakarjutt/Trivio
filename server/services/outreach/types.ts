@@ -104,3 +104,7 @@ export class NotFoundError extends OutreachError {
     this.name = "NotFoundError";
   }
 }
+
+// Offer prices are strings. At most 15 integer digits so the value fits NUMERIC(19,4).
+export const PRICE = /^\d{1,15}(\.\d{1,4})?$/;
+export const PRICE_MESSAGE = "Enter a price like 4000 or 4000.50";

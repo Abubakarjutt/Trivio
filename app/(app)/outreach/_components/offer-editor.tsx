@@ -6,7 +6,12 @@ import { trpc } from "@/lib/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { SIGNAL_NAMES, type SignalName } from "@/server/services/outreach/types";
+import {
+  PRICE,
+  PRICE_MESSAGE,
+  SIGNAL_NAMES,
+  type SignalName,
+} from "@/server/services/outreach/types";
 import { SIGNAL_LABEL } from "./labels";
 import type { Outputs } from "./types";
 
@@ -28,7 +33,23 @@ export function OfferEditor({ offer, onDone }: { offer?: Offer; onDone: () => vo
   const create = trpc.outreachSettings.offerCreate.useMutation({ onSuccess: done });
   const update = trpc.outreachSettings.offerUpdate.useMutation({ onSuccess: done });
   const busy = create.isPending || update.isPending;
-  const error = create.error?.message ?? update.error?.message;
+  const [priceError, setPriceError] = useState<string | null>(null);
+  const serverError = create.error ?? update.error;
+  // Zod failures arrive as a JSON string in `message`: never show that raw.
+  const fieldPrice = serverError?.data?.zodError?.fieldErrors?.price?.[0];
+  const serverMessage = serverError?.message.startsWith("[")
+    ? (fieldPrice ?? "Couldn't save the offer.")
+    : (fieldPrice ?? serverError?.message);
+  const error = priceError ?? serverMessage;
+  const submit = () => {
+    if (form.price !== "" && !PRICE.test(form.price)) {
+      setPriceError(PRICE_MESSAGE);
+      return;
+    }
+    setPriceError(null);
+    if (offer) update.mutate({ id: offer.id, ...form });
+    else create.mutate(form);
+  };
   const toggle = (s: SignalName) =>
     setForm((f) => ({
       ...f,
@@ -83,11 +104,7 @@ export function OfferEditor({ offer, onDone }: { offer?: Offer; onDone: () => vo
       </div>
       {error && <p className="text-destructive text-sm">{error}</p>}
       <div className="flex gap-2">
-        <Button
-          size="sm"
-          disabled={busy || !form.name.trim()}
-          onClick={() => (offer ? update.mutate({ id: offer.id, ...form }) : create.mutate(form))}
-        >
+        <Button size="sm" disabled={busy || !form.name.trim()} onClick={submit}>
           {busy && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
           {offer ? "Save offer" : "Add offer"}
         </Button>
