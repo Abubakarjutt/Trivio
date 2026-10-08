@@ -71,13 +71,14 @@ export function parseSellerMarkdown(md: string): { profile: string; voiceExample
       continue;
     }
 
-    // Unindented non-bullet line ends the voice section
+    // Unindented non-bullet line: flush current example and drop the line
+    // (don't add to profile, section continues until next heading)
     if (currentExample) {
       voiceExamples.push(currentExample.trim());
       currentExample = "";
     }
-    inVoice = false;
-    kept.push(line);
+    // Drop the line, don't add it to kept
+    continue;
   }
 
   // Flush any remaining example at EOF

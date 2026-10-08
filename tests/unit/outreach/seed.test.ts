@@ -88,6 +88,17 @@ describe("parseSellerMarkdown", () => {
     const crlfResult = parseSellerMarkdown("# Voice examples\r\n- a\r\n- b\r\n# Next");
     expect(crlfResult).toEqual(lfResult);
   });
+
+  it("drops unindented non-bullet lines inside the voice section", () => {
+    const { voiceExamples, profile } = parseSellerMarkdown(
+      "## Voice examples\nHere are messages I actually sent:\n- one\n- two\n## Next"
+    );
+    expect(voiceExamples).toEqual(["one", "two"]);
+    expect(profile).not.toContain("Here are messages");
+    expect(profile).not.toContain("- one");
+    expect(profile).not.toContain("- two");
+    expect(profile).toContain("## Next");
+  });
 });
 
 describe("seedOutreach", () => {
