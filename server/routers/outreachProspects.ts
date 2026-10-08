@@ -3,7 +3,7 @@ import { createTRPCRouter } from "@/server/trpc";
 import { extractProfile } from "@/server/services/outreach/ai";
 import { requireConfig } from "@/server/services/outreach/config";
 import { linkCrmLead, tryStartPilot } from "@/server/services/outreach/crm-handoff";
-import { enrichCompany } from "@/server/services/outreach/enrich";
+import { enrichCompany, websiteNamedIn } from "@/server/services/outreach/enrich";
 import { createLlm } from "@/server/services/outreach/llm";
 import { EVENTS, eventsFor, nextAction } from "@/server/services/outreach/pipeline";
 import {
@@ -131,8 +131,11 @@ export const outreachProspectsRouter = createTRPCRouter({
       }
       const config = await requireConfig(ctx.db, ctx.organisationId);
       const extracted = await extractProfile(createLlm(), input.profileText, config.sellerProfile);
-      // A website the person typed beats one the model read off the profile.
-      const website = input.companyWebsite?.trim() || extracted.companyWebsite;
+      // A website the person typed beats one the model read off the profile. The model's
+      // choice is only fetched if the paste names that host, and only at its origin.
+      const website =
+        input.companyWebsite?.trim() ||
+        websiteNamedIn(input.profileText, extracted.companyWebsite);
       const enrichment = await enrichCompany(website, createPageFetcher(), config.hiringKeywords);
       return { profileUrl, extracted, enrichment };
     }),

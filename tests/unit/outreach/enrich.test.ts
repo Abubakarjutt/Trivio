@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { enrichCompany, hiringPattern } from "@/server/services/outreach/enrich";
+import { enrichCompany, hiringPattern, websiteNamedIn } from "@/server/services/outreach/enrich";
 import { DEFAULT_HIRING_KEYWORDS } from "@/server/services/outreach/types";
 import { RefusedError, type FetchPage } from "@/server/services/outreach/website";
 
@@ -100,5 +100,27 @@ describe("hiringPattern", () => {
   it("escapes keywords and ignores blanks", () => {
     expect(hiringPattern(["c++", " "]).test("Senior C++ Developer")).toBe(true);
     expect(hiringPattern([]).test("AI Engineer")).toBe(false);
+  });
+});
+
+describe("websiteNamedIn", () => {
+  const paste = "Jane Doe, CTO. Reach me at jane@acme.ai or see Acme.ai.";
+
+  it("returns the origin when the paste names the host", () => {
+    expect(websiteNamedIn(paste, "https://acme.ai/pricing?x=1")).toBe("https://acme.ai");
+    expect(websiteNamedIn(paste, "www.acme.ai")).toBe("https://www.acme.ai");
+  });
+
+  it("refuses hosts the paste never names", () => {
+    expect(websiteNamedIn(paste, "notacme.ai")).toBeNull();
+    expect(websiteNamedIn(paste, "acme.ai.collect.example")).toBeNull();
+    expect(websiteNamedIn(paste, "collect.example")).toBeNull();
+  });
+
+  it("refuses non-web schemes, bare words and empty values", () => {
+    expect(websiteNamedIn(paste + " ftp://acme.ai", "ftp://acme.ai")).toBeNull();
+    expect(websiteNamedIn("acme", "acme")).toBeNull();
+    expect(websiteNamedIn(paste, null)).toBeNull();
+    expect(websiteNamedIn(paste, "  ")).toBeNull();
   });
 });

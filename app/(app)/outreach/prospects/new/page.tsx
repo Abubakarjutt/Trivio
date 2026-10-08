@@ -78,7 +78,8 @@ function NewProspectForm() {
         name: c.name,
         title: c.title,
         company: c.company,
-        companyWebsite: enrichment.website ?? extracted.companyWebsite ?? "",
+        // Only the website the server checked: a model guess the paste never named is dropped.
+        companyWebsite: enrichment.website ?? "",
         companySize: c.companySize,
         location: c.location,
         stack: c.stack.join(", "),

@@ -139,6 +139,53 @@ describe("outreachProspects.extract", () => {
     expect(db.$transaction).not.toHaveBeenCalled();
   });
 
+  it("never fetches a model-chosen website that isn't in the pasted text", async () => {
+    db.outreachDnc.findUnique.mockResolvedValue(null);
+    llmBox.llm = new FakeLlm([
+      {
+        name: "Jane Doe",
+        title: "CTO",
+        company: "Acme AI",
+        companyWebsite: "https://collect.example/x?seller=our+offer",
+        companySize: null,
+        location: null,
+        stack: [],
+        signals: [],
+      },
+    ]);
+    fetchBox.fetchPage.mockReset();
+    const out = await caller().outreachProspects.extract({
+      profileUrl: "linkedin.com/in/jane-doe",
+      profileText: PASTE,
+    });
+    expect(fetchBox.fetchPage).not.toHaveBeenCalled();
+    expect(out.enrichment.status).toBe("no_website");
+  });
+
+  it("fetches only the origin of a website named in the pasted text", async () => {
+    db.outreachDnc.findUnique.mockResolvedValue(null);
+    llmBox.llm = new FakeLlm([
+      {
+        name: "Jane Doe",
+        title: "CTO",
+        company: "Acme AI",
+        companyWebsite: "https://www.Acme.ai/about?ref=profile",
+        companySize: null,
+        location: null,
+        stack: [],
+        signals: [],
+      },
+    ]);
+    fetchBox.fetchPage.mockReset();
+    fetchBox.fetchPage.mockImplementation(async (url: string) => ({ status: 200, url, body: "" }));
+    const out = await caller().outreachProspects.extract({
+      profileUrl: "linkedin.com/in/jane-doe",
+      profileText: PASTE + "\nWebsite: acme.ai",
+    });
+    expect(out.enrichment.website).toBe("https://www.acme.ai");
+    expect(fetchBox.fetchPage.mock.calls[0][0]).toBe("https://www.acme.ai");
+  });
+
   it("refuses a DNC person before calling the model", async () => {
     db.outreachDnc.findUnique.mockResolvedValue({ id: "d1" });
     const llm = new FakeLlm([]);
