@@ -21,3 +21,17 @@ export function remainingAfterApply(
   );
   return suggested.filter((s) => !done.has(s.i));
 }
+
+// The thread is written by the prospect, so it can steer the model. Events that start CRM records
+// or close the funnel are never pre-ticked: the user ticks them on purpose.
+const OPT_IN: ReadonlySet<OutreachEventKind> = new Set([
+  "pilot_started",
+  "won",
+  "lost",
+  "withdrawn",
+]);
+
+/** Indexes of the suggestions ticked by default. */
+export function defaultPicked(events: OutreachEventKind[]): number[] {
+  return events.flatMap((e, i) => (OPT_IN.has(e) ? [] : [i]));
+}

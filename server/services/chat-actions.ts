@@ -23,6 +23,7 @@ const DENYLIST: (string | RegExp)[] = [
   "outreachProspects.delete", // erases a prospect and adds a do-not-contact entry — UI only
   "outreachProspects.markDnc", // do-not-contact must come from the human
   "outreachVoice.delete",
+  "outreachProspects.extract", // fetches a website: the URL must come from the paste-and-review UI
 ];
 
 const MAX_RESULT_CHARS = 4000;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { remainingAfterApply } from "@/app/(app)/outreach/_components/suggestions";
+import { defaultPicked, remainingAfterApply } from "@/app/(app)/outreach/_components/suggestions";
 
 const s = [
   { i: 0, event: "message_sent" as const },
@@ -24,5 +24,13 @@ describe("remainingAfterApply", () => {
   it("returns only the unpicked rows after a full apply", () => {
     expect(remainingAfterApply(s, [0, 1, 2], 3)).toEqual([]);
     expect(remainingAfterApply(s, [0, 2], 2)).toEqual([s[1]]);
+  });
+});
+
+describe("defaultPicked", () => {
+  it("leaves events that start CRM records or close the funnel for the user to tick", () => {
+    expect(
+      defaultPicked(["message_sent", "pilot_started", "replied", "won", "lost", "withdrawn"])
+    ).toEqual([0, 2]);
   });
 });

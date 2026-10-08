@@ -186,6 +186,31 @@ describe("outreachProspects.extract", () => {
     expect(fetchBox.fetchPage.mock.calls[0][0]).toBe("https://www.acme.ai");
   });
 
+  it("fetches only the origin of a typed website, never its path or query (I-1)", async () => {
+    db.outreachDnc.findUnique.mockResolvedValue(null);
+    llmBox.llm = new FakeLlm([
+      {
+        name: "Jane Doe",
+        title: "CTO",
+        company: "Acme AI",
+        companyWebsite: null,
+        companySize: null,
+        location: null,
+        stack: [],
+        signals: [],
+      },
+    ]);
+    fetchBox.fetchPage.mockReset();
+    fetchBox.fetchPage.mockImplementation(async (url: string) => ({ status: 200, url, body: "" }));
+    const out = await caller().outreachProspects.extract({
+      profileUrl: "linkedin.com/in/jane-doe",
+      profileText: PASTE,
+      companyWebsite: "https://collect.example/x?d=secret",
+    });
+    expect(out.enrichment.website).toBe("https://collect.example");
+    for (const [url] of fetchBox.fetchPage.mock.calls) expect(url).not.toContain("secret");
+  });
+
   it("refuses a DNC person before calling the model", async () => {
     db.outreachDnc.findUnique.mockResolvedValue({ id: "d1" });
     const llm = new FakeLlm([]);
@@ -268,6 +293,26 @@ describe("outreachDocs", () => {
   });
 });
 
+describe("do-not-contact prospects", () => {
+  it("refuses every AI generation call, so the chat can't draft for them either", async () => {
+    db.outreachProspect.findFirst.mockResolvedValue(makeProspect({ stage: "DNC" }));
+    llmBox.llm = new FakeLlm([]);
+    const c = caller();
+    for (const call of [
+      () => c.outreachDrafts.generate({ id: "p1", kind: "CONNECTION_NOTE" }),
+      () => c.outreachDocs.analyseConversation({ id: "p1", thread: "Hi" }),
+      () => c.outreachDocs.teardown({ id: "p1" }),
+      () => c.outreachDocs.proposal({ id: "p1", callNotes: "notes" }),
+    ]) {
+      await expect(call()).rejects.toMatchObject({
+        code: "BAD_REQUEST",
+        message: "This person is on your do-not-contact list.",
+      });
+    }
+    expect((llmBox.llm as FakeLlm).calls).toHaveLength(0);
+  });
+});
+
 describe("organisation scoping of prospect ids", () => {
   it("gives NOT_FOUND for a foreign-org prospect on every id-taking procedure, before any write", async () => {
     db.outreachProspect.findFirst.mockResolvedValue(null);
@@ -346,6 +391,8 @@ describe("chat denylist", () => {
     expect(names).not.toContain("outreachProspects.delete");
     expect(names).not.toContain("outreachProspects.markDnc");
     expect(names).not.toContain("outreachVoice.delete");
+    // extract fetches a website: a model-written input would let a prompt injection pick the URL.
+    expect(names).not.toContain("outreachProspects.extract");
     expect(names).toContain("outreachToday.get");
   });
 });

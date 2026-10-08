@@ -2,8 +2,8 @@ import { z } from "zod";
 import { createTRPCRouter } from "@/server/trpc";
 import { extractProfile } from "@/server/services/outreach/ai";
 import { requireConfig } from "@/server/services/outreach/config";
-import { linkCrmLead, tryStartPilot } from "@/server/services/outreach/crm-handoff";
-import { enrichCompany, websiteNamedIn } from "@/server/services/outreach/enrich";
+import { CONVERT_MARKER, linkCrmLead, tryStartPilot } from "@/server/services/outreach/crm-handoff";
+import { enrichCompany, websiteNamedIn, websiteOrigin } from "@/server/services/outreach/enrich";
 import { createLlm } from "@/server/services/outreach/llm";
 import { EVENTS, eventsFor, nextAction } from "@/server/services/outreach/pipeline";
 import {
@@ -84,7 +84,11 @@ export const outreachProspectsRouter = createTRPCRouter({
       }),
       ctx.db.outreachConversation.findFirst({ where: scope, orderBy: { createdAt: "desc" } }),
       ctx.db.outreachDoc.findMany({ where: scope }),
-      ctx.db.outreachEvent.findMany({ where: scope, orderBy: { at: "desc" }, take: 50 }),
+      ctx.db.outreachEvent.findMany({
+        where: { ...scope, kind: { not: CONVERT_MARKER } },
+        orderBy: { at: "desc" },
+        take: 50,
+      }),
       prospect.crmLeadId
         ? ctx.db.crmLead.findFirst({
             where: { id: prospect.crmLeadId, organisationId: orgId },
@@ -132,9 +136,11 @@ export const outreachProspectsRouter = createTRPCRouter({
       const config = await requireConfig(ctx.db, ctx.organisationId);
       const extracted = await extractProfile(createLlm(), input.profileText, config.sellerProfile);
       // A website the person typed beats one the model read off the profile. The model's
-      // choice is only fetched if the paste names that host, and only at its origin.
-      const website =
-        input.companyWebsite?.trim() || websiteNamedIn(input.profileText, extracted.companyWebsite);
+      // choice is only fetched if the paste names that host. Either way, only the origin.
+      const typed = input.companyWebsite?.trim();
+      const website = typed
+        ? (websiteOrigin(typed) ?? typed)
+        : websiteNamedIn(input.profileText, extracted.companyWebsite);
       const enrichment = await enrichCompany(website, createPageFetcher(), config.hiringKeywords);
       return { profileUrl, extracted, enrichment };
     }),

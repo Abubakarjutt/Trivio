@@ -11,7 +11,7 @@ import { useAiReady } from "./ai-notice";
 import { DraftList } from "./draft-list";
 import { EVENT_LABEL } from "./labels";
 import { Textarea } from "./textarea";
-import { remainingAfterApply, type Suggestion } from "./suggestions";
+import { defaultPicked, remainingAfterApply, type Suggestion } from "./suggestions";
 import type { DraftRow, ProspectDetail } from "./types";
 
 export function ConversationPanel({
@@ -44,7 +44,7 @@ export function ConversationPanel({
     onSuccess: (r) => {
       setAnalysed(true);
       setSuggested(r.events.map((event, i) => ({ i, event })));
-      setPicked(r.events.map((_, i) => i));
+      setPicked(defaultPicked(r.events));
       setApplyError(null);
       void utils.outreachProspects.get.invalidate({ id });
     },
@@ -146,10 +146,12 @@ export function ConversationPanel({
             <Button
               size="sm"
               disabled={apply.isPending || picked.length === 0}
-              onClick={() => apply.mutate({
+              onClick={() =>
+                apply.mutate({
                   id,
                   events: suggested.filter((s) => picked.includes(s.i)).map((s) => s.event),
-                })}
+                })
+              }
             >
               {apply.isPending && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
               Apply

@@ -12,7 +12,7 @@ import { requireConfig } from "@/server/services/outreach/config";
 import { createLlm } from "@/server/services/outreach/llm";
 import { renderProposal } from "@/server/services/outreach/prompts";
 import {
-  getProspect,
+  getContactableProspect,
   recentVoice,
   saveConversation,
   saveDoc,
@@ -40,7 +40,7 @@ export const outreachDocsRouter = createTRPCRouter({
     .input(z.object({ id: z.string(), thread: z.string().max(MAX_PASTE) }))
     .mutation(async ({ ctx, input }) => {
       const orgId = ctx.organisationId;
-      const p = await getProspect(ctx.db, orgId, input.id);
+      const p = await getContactableProspect(ctx.db, orgId, input.id);
       const config = await requireConfig(ctx.db, orgId);
       const voice = await recentVoice(ctx.db, orgId);
       const result = await analyzeConversation(
@@ -61,7 +61,7 @@ export const outreachDocsRouter = createTRPCRouter({
     .input(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
       const orgId = ctx.organisationId;
-      const p = await getProspect(ctx.db, orgId, input.id);
+      const p = await getContactableProspect(ctx.db, orgId, input.id);
       const config = await requireConfig(ctx.db, orgId);
       const offers = await ctx.db.outreachOffer.findMany({
         where: { organisationId: orgId, archived: false },
@@ -91,7 +91,7 @@ export const outreachDocsRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const orgId = ctx.organisationId;
-      const p = await getProspect(ctx.db, orgId, input.id);
+      const p = await getContactableProspect(ctx.db, orgId, input.id);
       const config = await requireConfig(ctx.db, orgId);
       let offer;
       if (input.offerId) {

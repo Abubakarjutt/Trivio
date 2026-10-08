@@ -6,6 +6,8 @@ import { convertLeadToContact } from "@/server/services/crm.service";
 import { NotFoundError, OutreachError } from "./types";
 
 export type Actor = { orgId: string; userId: string };
+/** OutreachEvent kind written just before this handoff converts a lead; internal, not shown. */
+export const CONVERT_MARKER = "crm_convert_started";
 type LinkableProspect = Pick<
   OutreachProspect,
   "id" | "name" | "title" | "company" | "primarySignal" | "score" | "crmLeadId"
@@ -31,16 +33,21 @@ export async function linkCrmLead(
   if (p.crmLeadId) return p.crmLeadId;
   const { firstName, lastName } = splitName(p.name);
   const companyName = p.company.trim() || null;
-  const existing = await tx.crmLead.findFirst({
-    where: {
-      organisationId: orgId,
-      firstName,
-      lastName,
-      companyName,
-      outreachProspect: { is: null },
-    },
-    select: { id: true },
-  });
+  // Adopt a hand-made lead only on a name + company match, and only while it is still open:
+  // a converted or disqualified lead is the user's history, not this prospect.
+  const existing = companyName
+    ? await tx.crmLead.findFirst({
+        where: {
+          organisationId: orgId,
+          firstName,
+          lastName,
+          companyName,
+          status: { in: ["NEW", "CONTACTED", "QUALIFIED"] },
+          outreachProspect: { is: null },
+        },
+        select: { id: true },
+      })
+    : null;
   const lead =
     existing ??
     (await tx.crmLead.create({
@@ -96,14 +103,30 @@ export async function startPilotHandoff(
   if (!lead) throw new OutreachError("The linked CRM lead is missing. Retry to create a new one.");
   const offer = await latestProposalOffer(db, orgId, p.id);
 
+  if (lead.status === "UNQUALIFIED") {
+    throw new OutreachError(
+      "This lead is marked unqualified in CRM. Change its status there, then retry."
+    );
+  }
   if (lead.status === "CONVERTED") {
-    // A previous attempt converted the lead but failed before storing the deal: resume it.
-    const deal = lead.convertedContactId
-      ? await db.crmDeal.findFirst({
-          where: { organisationId: orgId, contactId: lead.convertedContactId },
-          orderBy: { createdAt: "desc" },
-        })
-      : null;
+    // Resume only a conversion this handoff started (its marker names this lead) that failed
+    // before storing the deal. Anything else is the user's own conversion: report it, don't adopt.
+    const marker = await db.outreachEvent.findFirst({
+      where: { organisationId: orgId, prospectId: p.id, kind: CONVERT_MARKER },
+      orderBy: { at: "desc" },
+    });
+    const ours = (marker?.meta as { leadId?: unknown } | undefined)?.leadId === leadId;
+    const deal =
+      ours && marker && lead.convertedContactId
+        ? await db.crmDeal.findFirst({
+            where: {
+              organisationId: orgId,
+              contactId: lead.convertedContactId,
+              createdAt: { gte: marker.at },
+            },
+            orderBy: { createdAt: "desc" },
+          })
+        : null;
     if (!deal || !lead.convertedContactId) {
       throw new OutreachError(
         "This lead is already converted in CRM. Open it there to find the deal."
@@ -117,6 +140,9 @@ export async function startPilotHandoff(
     where: { id: leadId },
     // Don't clear an estimate the user may have set on a lead that was matched by name.
     data: { status: "QUALIFIED", ...(offer?.price ? { estimatedValue: offer.price } : {}) },
+  });
+  await db.outreachEvent.create({
+    data: { organisationId: orgId, prospectId: p.id, kind: CONVERT_MARKER, meta: { leadId } },
   });
   const { contactId, dealId } = await convertLeadToContact(db, leadId, orgId);
   await storePilotDeal(db, actor, p, offer, dealId, contactId, true);

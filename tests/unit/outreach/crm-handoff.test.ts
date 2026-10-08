@@ -11,7 +11,7 @@ import {
   startPilotHandoff,
   tryStartPilot,
 } from "@/server/services/outreach/crm-handoff";
-import { makeDb, makeProspect, type MockDb } from "./helpers";
+import { makeDb, makeProspect, NOW, type MockDb } from "./helpers";
 
 const actor = { orgId: "org-1", userId: "user-1" };
 let db: MockDb;
@@ -47,6 +47,7 @@ describe("linkCrmLead", () => {
         firstName: "Jane",
         lastName: "Doe",
         companyName: "Acme AI",
+        status: { in: ["NEW", "CONTACTED", "QUALIFIED"] },
         outreachProspect: { is: null },
       },
       select: { id: true },
@@ -56,6 +57,13 @@ describe("linkCrmLead", () => {
       where: { id: "p1" },
       data: { crmLeadId: "lead-1" },
     });
+  });
+
+  it("never matches by name alone when the prospect has no company", async () => {
+    db.crmLead.create.mockResolvedValue({ id: "lead-2" });
+    await linkCrmLead(asTx(db), "org-1", makeProspect({ company: " " }));
+    expect(db.crmLead.findFirst).not.toHaveBeenCalled();
+    expect(db.crmLead.create).toHaveBeenCalled();
   });
 
   it("creates a lead for a one-word name with no company (Review Focus #3)", async () => {
@@ -192,6 +200,7 @@ describe("startPilotHandoff", () => {
       convertedContactId: "c1",
     });
     db.outreachDoc.findFirst.mockResolvedValue(null); // no offer: a rewrite would zero the value
+    db.outreachEvent.findFirst.mockResolvedValue({ at: NOW, meta: { leadId: "lead-1" } });
     db.crmDeal.findFirst.mockResolvedValue({
       id: "d1",
       name: "Manual deal",
@@ -200,7 +209,7 @@ describe("startPilotHandoff", () => {
     });
     expect(await tryStartPilot(asClient(db), actor, "p1")).toBeNull();
     expect(db.crmDeal.findFirst).toHaveBeenCalledWith({
-      where: { organisationId: "org-1", contactId: "c1" },
+      where: { organisationId: "org-1", contactId: "c1", createdAt: { gte: NOW } },
       orderBy: { createdAt: "desc" },
     });
     expect(crm.convertLeadToContact).not.toHaveBeenCalled();
@@ -226,6 +235,62 @@ describe("startPilotHandoff", () => {
     expect(await tryStartPilot(asClient(db), actor, "p1")).toBe(
       "This lead is already converted in CRM. Open it there to find the deal."
     );
+  });
+
+  it("records a marker before converting, so only its own conversion is resumed", async () => {
+    ready();
+    await startPilotHandoff(asClient(db), actor, "p1");
+    expect(db.outreachEvent.create).toHaveBeenCalledWith({
+      data: {
+        organisationId: "org-1",
+        prospectId: "p1",
+        kind: "crm_convert_started",
+        meta: { leadId: "lead-1" },
+      },
+    });
+    expect(db.outreachEvent.create.mock.invocationCallOrder[0]).toBeLessThan(
+      crm.convertLeadToContact.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("won't adopt the deal of a lead the user converted before Outreach (I-2)", async () => {
+    ready();
+    db.crmLead.findFirst.mockResolvedValue({
+      id: "lead-1",
+      status: "CONVERTED",
+      convertedContactId: "c1",
+    });
+    db.outreachEvent.findFirst.mockResolvedValue(null); // no conversion of ours on record
+    db.crmDeal.findFirst.mockResolvedValue({ id: "d-old" });
+    expect(await tryStartPilot(asClient(db), actor, "p1")).toBe(
+      "This lead is already converted in CRM. Open it there to find the deal."
+    );
+    expect(db.crmActivity.create).not.toHaveBeenCalled();
+    expect(db.outreachProspect.update).not.toHaveBeenCalled();
+  });
+
+  it("ignores a marker left for a different lead", async () => {
+    ready();
+    db.crmLead.findFirst.mockResolvedValue({
+      id: "lead-1",
+      status: "CONVERTED",
+      convertedContactId: "c1",
+    });
+    db.outreachEvent.findFirst.mockResolvedValue({ at: NOW, meta: { leadId: "lead-other" } });
+    db.crmDeal.findFirst.mockResolvedValue({ id: "d-old" });
+    expect(await tryStartPilot(asClient(db), actor, "p1")).toBe(
+      "This lead is already converted in CRM. Open it there to find the deal."
+    );
+  });
+
+  it("won't re-qualify a lead the user marked unqualified (I-2)", async () => {
+    ready();
+    db.crmLead.findFirst.mockResolvedValue({ id: "lead-1", status: "UNQUALIFIED" });
+    expect(await tryStartPilot(asClient(db), actor, "p1")).toBe(
+      "This lead is marked unqualified in CRM. Change its status there, then retry."
+    );
+    expect(db.crmLead.update).not.toHaveBeenCalled();
+    expect(crm.convertLeadToContact).not.toHaveBeenCalled();
   });
 
   it("refuses to convert a lead twice", async () => {

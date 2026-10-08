@@ -147,6 +147,17 @@ export async function getProspect(
   return p;
 }
 
+/** getProspect for AI work: nothing is drafted or analysed for a do-not-contact person. */
+export async function getContactableProspect(
+  db: PrismaClient | Tx,
+  orgId: string,
+  id: string
+): Promise<OutreachProspect> {
+  const p = await getProspect(db, orgId, id);
+  if (p.stage === "DNC") throw new OutreachError("This person is on your do-not-contact list.");
+  return p;
+}
+
 export async function saveVoiceExample(
   tx: PrismaClient | Tx,
   orgId: string,

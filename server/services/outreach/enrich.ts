@@ -44,21 +44,25 @@ async function get(fetchPage: FetchPage, url: string): Promise<string | null> {
  * URL, with whatever the model put in its path or query.
  */
 export function websiteNamedIn(text: string, website: string | null): string | null {
+  const origin = websiteOrigin(website);
+  if (!origin) return null;
+  const bare = new URL(origin).hostname.replace(/^www\./, "");
+  if (!bare.includes(".")) return null;
+  const named = new RegExp(`(^|[^a-z0-9.-])(www\\.)?${escapeRegExp(bare)}($|[^a-z0-9-])`);
+  return named.test(text.normalize("NFKC").toLowerCase()) ? origin : null;
+}
+
+/** `protocol//hostname` of an http(s) website, so no path, query or port can carry data out. */
+export function websiteOrigin(website: string | null | undefined): string | null {
   const raw = website?.trim();
   if (!raw) return null;
-  let parsed: URL;
   try {
-    parsed = new URL(raw.includes("://") ? raw : `https://${raw}`);
+    const parsed = new URL(raw.includes("://") ? raw : `https://${raw}`);
+    if (!["http:", "https:"].includes(parsed.protocol) || !parsed.hostname) return null;
+    return `${parsed.protocol}//${parsed.hostname}`;
   } catch {
     return null;
   }
-  if (!["http:", "https:"].includes(parsed.protocol)) return null;
-  const bare = parsed.hostname.replace(/^www\./, "");
-  if (!bare.includes(".")) return null;
-  const named = new RegExp(`(^|[^a-z0-9.-])(www\\.)?${escapeRegExp(bare)}($|[^a-z0-9-])`);
-  return named.test(text.normalize("NFKC").toLowerCase())
-    ? `${parsed.protocol}//${parsed.hostname}`
-    : null;
 }
 
 export async function enrichCompany(

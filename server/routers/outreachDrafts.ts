@@ -3,7 +3,12 @@ import { createTRPCRouter } from "@/server/trpc";
 import { generateDrafts, toBrief } from "@/server/services/outreach/ai";
 import { requireConfig } from "@/server/services/outreach/config";
 import { createLlm } from "@/server/services/outreach/llm";
-import { getProspect, recentVoice, saveDrafts } from "@/server/services/outreach/prospects";
+import {
+  getContactableProspect,
+  getProspect,
+  recentVoice,
+  saveDrafts,
+} from "@/server/services/outreach/prospects";
 import { DRAFT_KINDS } from "@/server/services/outreach/types";
 import { outreachProcedure } from "./outreach-procedure";
 
@@ -12,7 +17,7 @@ export const outreachDraftsRouter = createTRPCRouter({
     .input(z.object({ id: z.string(), kind: z.enum(DRAFT_KINDS) }))
     .mutation(async ({ ctx, input }) => {
       const orgId = ctx.organisationId;
-      const p = await getProspect(ctx.db, orgId, input.id);
+      const p = await getContactableProspect(ctx.db, orgId, input.id);
       const config = await requireConfig(ctx.db, orgId);
       const voice = await recentVoice(ctx.db, orgId);
       const drafts = await generateDrafts(
