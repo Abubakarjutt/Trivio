@@ -3,6 +3,8 @@
 // Settings → Backup to Google Drive: connect, set the backup password, see
 // when the last backup ran, back up now, restore, disconnect. All of it runs
 // in the desktop shell (desktop/backup); a browser build only shows a notice.
+// Folder mode (no Google keys built in) saves into the Google Drive app's folder
+// instead of signing in to Google, so "connect" means "turn on / pick a folder".
 
 import { useCallback, useEffect, useState } from "react";
 import { CloudUpload } from "lucide-react";
@@ -14,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { ROLLBACK_FAILED_TEXT, RestoreDialog } from "@/components/backup/restore-dialog";
 
 const BACKUP_PHASES = new Set<BackupProgress["phase"]>(["dumping", "encrypting", "uploading", "pruning"]);
+const DRIVE_APP_URL = "https://www.google.com/drive/download/";
 
 function when(iso: string | null): string {
   if (!iso) return "never";
@@ -137,6 +140,56 @@ export function BackupCard() {
     );
   }
 
+  const folderMode = status.mode === "folder";
+  const chooseFolder = (label: string, variant: "outline" | "ghost" = "outline") => (
+    <Button variant={variant} disabled={busy || status.running !== null} onClick={() =>
+        run(async () => {
+          await b.connect({ choose: true });
+          if (status.passwordSet) await b.backupNow(); // the new folder gets a backup straight away
+        }, "Backup folder chosen")
+      }
+    >
+      {label}
+    </Button>
+  );
+
+  if (!status.connected && folderMode) {
+    return (
+      <Shell>
+        {rollbackAlert}
+        {status.suggestion ? (
+          <p className="text-muted-foreground">
+            Encrypted daily backups of your books and attachments, saved to your Google Drive (
+            <strong className="text-foreground">{status.suggestion}</strong>) through the Google Drive app on this computer.
+          </p>
+        ) : (
+          <p className="text-muted-foreground">
+            To back up to Google Drive, install{" "}
+            <a href={DRIVE_APP_URL} target="_blank" rel="noopener noreferrer" className="font-medium text-primary hover:underline">
+              Google Drive for desktop
+            </a>{" "}
+            and sign in with your Google account, then click Check again. Or choose any folder that syncs — iCloud Drive,
+            Dropbox, OneDrive — or a USB drive.
+          </p>
+        )}
+        <div className="flex flex-wrap gap-2">
+          {status.suggestion ? (
+            <Button disabled={busy} onClick={() => run(() => b.connect(), "Backups turned on")}>
+              Turn on backups
+            </Button>
+          ) : (
+            <Button disabled={busy} onClick={() => void refresh()}>
+              Check again
+            </Button>
+          )}
+          {chooseFolder(status.suggestion ? "Choose another folder…" : "Choose a folder…")}
+          {restoreButton}
+        </div>
+        {restoreDialog}
+      </Shell>
+    );
+  }
+
   if (!status.connected) {
     return (
       <Shell>
@@ -162,7 +215,8 @@ export function BackupCard() {
       <Shell>
         {rollbackAlert}
         <p>
-          Connected as <strong>{status.email}</strong>. Choose a backup password.
+          {folderMode ? "Backups will go to " : "Connected as "}
+          <strong>{status.email}</strong>. Choose a backup password.
         </p>
         <p className="text-muted-foreground">
           Backups are encrypted with it. <strong>If you forget it, your backups can&apos;t be restored</strong> — Trivio
@@ -202,15 +256,16 @@ export function BackupCard() {
   }
 
   // Lost Google access (revoked, or the saved sign-in is gone): offer a reconnect.
-  const authRevoked = status.lastError?.code === "AUTH_REVOKED" || status.lastError?.code === "NOT_CONNECTED";
+  const authRevoked = !folderMode && (status.lastError?.code === "AUTH_REVOKED" || status.lastError?.code === "NOT_CONNECTED");
   const running = status.running !== null || progressPhase !== null;
 
   return (
     <Shell>
       {rollbackAlert}
       <p>
-        Connected as <strong>{status.email}</strong>. Backs up once a day while Trivio is open, if anything
-        changed, and keeps the last 10.
+        {folderMode ? "Backing up to " : "Connected as "}
+        <strong>{status.email}</strong>. Backs up once a day while Trivio is open, if anything changed, and keeps
+        the last 10.
       </p>
       <dl className="grid grid-cols-2 gap-3">
         <div>
@@ -218,7 +273,7 @@ export function BackupCard() {
           <dd>{when(status.lastSuccessAt)}</dd>
         </div>
         <div>
-          <dt className="text-[10px] font-bold uppercase tracking-[0.08em] text-muted-foreground mb-0.5">Kept in Drive</dt>
+          <dt className="text-[10px] font-bold uppercase tracking-[0.08em] text-muted-foreground mb-0.5">{folderMode ? "Kept" : "Kept in Drive"}</dt>
           <dd>{status.keptCount}</dd>
         </div>
       </dl>
@@ -243,12 +298,18 @@ export function BackupCard() {
           </Button>
         )}
         {restoreButton}
+        {folderMode && chooseFolder("Change folder…", "ghost")}
         <Button
           variant="ghost"
           disabled={busy || running}
-          onClick={() => run(() => b.disconnect(), "Disconnected. Your backups stay in Google Drive.")}
+          onClick={() =>
+            run(
+              () => b.disconnect(),
+              folderMode ? "Backups turned off. Your backup files stay in the folder." : "Disconnected. Your backups stay in Google Drive.",
+            )
+          }
         >
-          Disconnect
+          {folderMode ? "Turn off" : "Disconnect"}
         </Button>
       </div>
       {restoreDialog}

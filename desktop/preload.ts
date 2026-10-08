@@ -109,7 +109,7 @@ function invokeBackup<T = unknown>(channel: string, ...args: unknown[]): Promise
 
 const backup = {
   status: () => invokeBackup(CHANNELS.BACKUP_STATUS),
-  connect: () => invokeBackup(CHANNELS.BACKUP_CONNECT),
+  connect: (opts?: { choose?: boolean }) => invokeBackup(CHANNELS.BACKUP_CONNECT, { choose: opts?.choose === true }),
   disconnect: () => invokeBackup(CHANNELS.BACKUP_DISCONNECT),
   setPassword: (password: string) => invokeBackup(CHANNELS.BACKUP_SET_PASSWORD, password),
   backupNow: () => invokeBackup(CHANNELS.BACKUP_NOW),

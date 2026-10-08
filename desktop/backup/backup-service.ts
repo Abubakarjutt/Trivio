@@ -20,7 +20,7 @@ const KEEP_RESTORE_LEFTOVERS = 7 * DAY; // the pre-restore data stays on this co
 const KEEP = 10;
 
 export interface AuthLike {
-  connect(): Promise<{ email: string }>;
+  connect(opts?: { choose?: boolean }): Promise<{ email: string }>; // choose: folder mode, always show the folder picker
   disconnect(): Promise<void>;
 }
 
@@ -45,6 +45,8 @@ export interface ServerLike {
 
 export interface BackupStatus {
   configured: boolean;
+  mode: "google" | "folder"; // Drive API sign-in, or a synced folder such as the Google Drive app's
+  suggestion: string | null; // folder mode, not connected yet: the detected Google Drive account
   connected: boolean;
   email: string | null;
   passwordSet: boolean;
@@ -83,7 +85,9 @@ export interface ServiceDeps {
   dir: string; // userData/backup
   attachmentsDir: string; // userData/storage/attachments
   appVersion: string;
-  configured: boolean; // a Google client ID was built in
+  configured: boolean; // a Google client ID was built in, or folder mode
+  mode?: "google" | "folder"; // default "google"
+  suggestion?: () => string | null; // folder mode: the detected Google Drive account
   secrets: SecretStoreLike;
   auth: AuthLike;
   drive: DriveLike;
@@ -164,6 +168,8 @@ export class BackupService {
     const s = this.state;
     return {
       configured: this.d.configured,
+      mode: this.d.mode ?? "google",
+      suggestion: s.email ? null : (this.d.suggestion?.() ?? null),
       connected: !!s.email,
       email: s.email,
       passwordSet: !!this.pwKey,
@@ -178,9 +184,10 @@ export class BackupService {
     };
   }
 
-  async connect(): Promise<{ email: string }> {
+  async connect(opts?: { choose?: boolean }): Promise<{ email: string }> {
     if (!this.d.configured) throw new BackupError("NOT_CONFIGURED");
-    const { email } = await this.d.auth.connect();
+    if (this.running) throw new BackupError("BUSY"); // never switch folders under a running backup
+    const { email } = await this.d.auth.connect(opts);
     await this.update({ email, lastError: null });
     // disconnect() stops the schedule; a later reconnect resumes it.
     if (this.schedule && this.timers.length === 0) this.startSchedule(this.schedule.everyMs, this.schedule.firstAfterMs);

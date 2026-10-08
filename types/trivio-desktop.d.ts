@@ -61,6 +61,10 @@ export interface OllamaBridge {
 // Error whose message is ready to show and whose `code` names the failure.
 export interface BackupStatus {
   configured: boolean;
+  // "folder": backups go to a synced folder (the Google Drive app's), no Google sign-in.
+  mode: "google" | "folder";
+  // Folder mode, not connected yet: the Google Drive account found on this computer.
+  suggestion: string | null;
   connected: boolean;
   email: string | null;
   passwordSet: boolean;
@@ -101,7 +105,7 @@ export type BackupResult<T> = { ok: true; value: T } | { ok: false; code: string
 // What preload actually exposes.
 export interface RawBackupBridge {
   status: () => Promise<BackupResult<BackupStatus>>;
-  connect: () => Promise<BackupResult<{ email: string }>>;
+  connect: (opts?: { choose?: boolean }) => Promise<BackupResult<{ email: string }>>;
   disconnect: () => Promise<BackupResult<void>>;
   setPassword: (password: string) => Promise<BackupResult<void>>;
   backupNow: () => Promise<BackupResult<BackupStatus>>;
@@ -113,7 +117,8 @@ export interface RawBackupBridge {
 // The public, throwing view of the bridge that components use.
 export interface BackupBridge {
   status: () => Promise<BackupStatus>;
-  connect: () => Promise<{ email: string }>;
+  // choose: folder mode, always open the folder picker
+  connect: (opts?: { choose?: boolean }) => Promise<{ email: string }>;
   disconnect: () => Promise<void>;
   setPassword: (password: string) => Promise<void>;
   backupNow: () => Promise<BackupStatus>;

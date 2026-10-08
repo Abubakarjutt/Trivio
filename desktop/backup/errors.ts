@@ -17,7 +17,10 @@ export type BackupErrorCode =
   | "DRIVE_FULL"
   | "DUMP_FAILED"
   | "BACKUP_FAILED"
-  | "RESTORE_FAILED";
+  | "RESTORE_FAILED"
+  | "FOLDER_MISSING"
+  | "FOLDER_NOT_CHOSEN"
+  | "NO_SPACE";
 
 const MESSAGES: Record<BackupErrorCode, string> = {
   NOT_CONFIGURED: "Google Drive backup isn't configured in this build.",
@@ -36,6 +39,9 @@ const MESSAGES: Record<BackupErrorCode, string> = {
   DUMP_FAILED: "Backup failed while reading your data.",
   BACKUP_FAILED: "Backup failed.",
   RESTORE_FAILED: "Restore failed — your data was not changed.",
+  FOLDER_MISSING: "The backup folder isn't available. Make sure Google Drive is running and signed in, or choose another folder.",
+  FOLDER_NOT_CHOSEN: "No folder was chosen.",
+  NO_SPACE: "There isn't enough space in the backup folder.",
 };
 
 export class BackupError extends Error {

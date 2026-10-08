@@ -1,6 +1,6 @@
 "use client";
 
-// Restore a Google Drive backup: (connect if needed) → pick a backup → enter
+// Restore a Google Drive backup: (connect / choose the folder if needed) → pick a backup → enter
 // its password → (confirm replacing current data) → progress. On success the
 // desktop shell restarts the app server and loads the login page itself, so
 // this dialog never "finishes" in place.
@@ -11,7 +11,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 
 const PHASE_LABEL: Record<BackupProgress["phase"], string> = {
@@ -30,7 +35,9 @@ function fmtDate(iso: string) {
   return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 function fmtSize(bytes: number) {
-  return bytes >= 1_000_000 ? `${(bytes / 1_000_000).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1000))} KB`;
+  return bytes >= 1_000_000
+    ? `${(bytes / 1_000_000).toFixed(1)} MB`
+    : `${Math.max(1, Math.round(bytes / 1000))} KB`;
 }
 
 type Step = "connect" | "pick" | "confirm" | "working" | "paused";
@@ -40,7 +47,7 @@ export const ROLLBACK_FAILED_TEXT =
   "A restore couldn't be completed and your previous data was set aside safely. Restores are paused — please contact support.";
 
 // Google access is missing or was revoked: the fix is to (re)connect.
-const NEEDS_CONNECT = new Set(["AUTH_REVOKED", "NOT_CONNECTED"]);
+const NEEDS_CONNECT = new Set(["AUTH_REVOKED", "NOT_CONNECTED", "FOLDER_MISSING"]);
 const codeOf = (e: unknown) => (e as { code?: string }).code;
 
 export function RestoreDialog({
@@ -60,6 +67,8 @@ export function RestoreDialog({
   const [error, setError] = useState<string | null>(null);
   const [phase, setPhase] = useState<BackupProgress["phase"] | null>(null);
   const [connecting, setConnecting] = useState(false);
+  const [folderMode, setFolderMode] = useState(false);
+  const [suggestion, setSuggestion] = useState<string | null>(null);
 
   function reset() {
     setStep("pick");
@@ -77,6 +86,8 @@ export function RestoreDialog({
     setEntries(null);
     try {
       const s = await backup.status();
+      setFolderMode(s.mode === "folder");
+      setSuggestion(s.suggestion);
       if (s.restoreRollbackFailed) {
         setStep("paused");
         return;
@@ -103,12 +114,12 @@ export function RestoreDialog({
 
   useEffect(() => backup?.onProgress((p) => setPhase(p.phase)), [backup]);
 
-  async function connect() {
+  async function connect(choose = false) {
     if (!backup || connecting) return;
     setError(null);
     setConnecting(true);
     try {
-      await backup.connect();
+      await backup.connect({ choose });
       await load();
     } catch (e) {
       setError((e as Error).message);
@@ -155,12 +166,41 @@ export function RestoreDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {step === "connect" && (
+        {step === "connect" && !folderMode && (
           <div className="space-y-3 text-sm">
             <p>Sign in with the Google account your backups are in.</p>
-            <Button disabled={connecting} onClick={connect}>
+            <Button disabled={connecting} onClick={() => void connect()}>
               Connect Google Drive
             </Button>
+          </div>
+        )}
+
+        {step === "connect" && folderMode && (
+          <div className="space-y-3 text-sm">
+            <p>
+              {suggestion
+                ? `Use the Google Drive account on this computer (${suggestion}), or choose the folder your backups are in.`
+                : "Install Google Drive for desktop and sign in with the Google account your backups are in, or choose the folder your backups are in."}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {suggestion && (
+                <Button disabled={connecting} onClick={() => void connect()}>
+                  Use Google Drive
+                </Button>
+              )}
+              <Button
+                variant={suggestion ? "outline" : "default"}
+                disabled={connecting}
+                onClick={() => void connect(true)}
+              >
+                Choose folder…
+              </Button>
+              {!suggestion && (
+                <Button variant="outline" disabled={connecting} onClick={() => void load()}>
+                  Check again
+                </Button>
+              )}
+            </div>
           </div>
         )}
 
@@ -173,12 +213,28 @@ export function RestoreDialog({
             ) : entries === null ? (
               <p className="text-muted-foreground">Loading backups…</p>
             ) : entries.length === 0 ? (
-              <p className="text-muted-foreground">No backups found in this Google account.</p>
+              <p className="text-muted-foreground">
+                {folderMode
+                  ? "No Trivio backups found in this folder."
+                  : "No backups found in this Google account."}
+              </p>
             ) : (
-              <div role="radiogroup" aria-label="Backups" className="max-h-56 space-y-1 overflow-y-auto">
+              <div
+                role="radiogroup"
+                aria-label="Backups"
+                className="max-h-56 space-y-1 overflow-y-auto"
+              >
                 {entries.map((b) => (
-                  <label key={b.id} className="flex cursor-pointer items-center gap-3 rounded-lg border border-border/40 px-3 py-2">
-                    <input type="radio" name="backup" checked={chosen === b.id} onChange={() => setChosen(b.id)} />
+                  <label
+                    key={b.id}
+                    className="border-border/40 flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2"
+                  >
+                    <input
+                      type="radio"
+                      name="backup"
+                      checked={chosen === b.id}
+                      onChange={() => setChosen(b.id)}
+                    />
                     <span className="flex-1">{fmtDate(b.createdAt)}</span>
                     <span className="text-muted-foreground text-xs">
                       {fmtSize(b.sizeBytes)}
@@ -187,6 +243,16 @@ export function RestoreDialog({
                   </label>
                 ))}
               </div>
+            )}
+            {folderMode && entries !== null && (
+              <Button
+                variant="link"
+                className="h-auto p-0"
+                disabled={connecting}
+                onClick={() => void connect(true)}
+              >
+                Look in another folder…
+              </Button>
             )}
             {entries && entries.length > 0 && (
               <div className="space-y-1.5">
@@ -206,7 +272,8 @@ export function RestoreDialog({
         {step === "confirm" && chosenEntry && (
           <p className="text-sm">
             This replaces <strong>all data on this computer</strong> with the backup from{" "}
-            {fmtDate(chosenEntry.createdAt)}. Your current data is kept on this computer for about a week.
+            {fmtDate(chosenEntry.createdAt)}. Your current data is kept on this computer for about a
+            week.
           </p>
         )}
 

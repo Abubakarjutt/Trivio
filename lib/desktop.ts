@@ -112,7 +112,7 @@ async function unwrap<T>(result: Promise<BackupResult<T>>): Promise<T> {
 export function wrapBackup(raw: RawBackupBridge): BackupBridge {
   return {
     status: () => unwrap(raw.status()),
-    connect: () => unwrap(raw.connect()),
+    connect: (opts) => unwrap(raw.connect(opts)),
     disconnect: () => unwrap(raw.disconnect()),
     setPassword: (password) => unwrap(raw.setPassword(password)),
     backupNow: () => unwrap(raw.backupNow()),
