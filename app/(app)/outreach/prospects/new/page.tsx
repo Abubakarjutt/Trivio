@@ -89,7 +89,7 @@ function NewProspectForm() {
     onSuccess: ({ id, created }) => {
       void utils.outreachProspects.list.invalidate();
       void utils.outreachToday.get.invalidate();
-      if (!created) toast.info("This person is already in Outreach. Opening their page.");
+      if (!created) toast.info("Already saved. Updated their details and opened their page.");
       router.push(`/outreach/prospects/${id}`);
     },
     onError: (e) => toast.error(e.message),
@@ -226,8 +226,13 @@ function NewProspectForm() {
               </p>
             )}
             {create.error && <p className="text-destructive text-sm">{create.error.message}</p>}
-            <Button disabled={create.isPending || !form.name.trim() || !url.trim()} onClick={save}>
-              {create.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
+            <Button
+              disabled={create.isPending || create.isSuccess || !form.name.trim() || !url.trim()}
+              onClick={save}
+            >
+              {(create.isPending || create.isSuccess) && (
+                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+              )}
               Save prospect
             </Button>
           </CardContent>

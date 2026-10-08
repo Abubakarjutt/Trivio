@@ -22,6 +22,8 @@ export function SignalsEditor({
 }) {
   const set = (i: number, patch: Partial<Signal>) =>
     onChange(value.map((s, j) => (j === i ? { ...s, ...patch } : s)));
+  const used = new Set(value.map((s) => s.name));
+  const nextFree = SIGNAL_NAMES.find((n) => !used.has(n));
   return (
     <div className="space-y-2">
       {value.map((s, i) => (
@@ -32,7 +34,11 @@ export function SignalsEditor({
             </SelectTrigger>
             <SelectContent>
               {SIGNAL_NAMES.map((n) => (
-                <SelectItem key={n} value={n}>
+                <SelectItem
+                  key={n}
+                  value={n}
+                  disabled={n !== s.name && value.some((o, j) => j !== i && o.name === n)}
+                >
                   {SIGNAL_LABEL[n]}
                 </SelectItem>
               ))}
@@ -57,8 +63,8 @@ export function SignalsEditor({
       <Button
         size="sm"
         variant="outline"
-        disabled={value.length >= 20}
-        onClick={() => onChange([...value, { name: "pain_post", evidence: "" }])}
+        disabled={value.length >= 20 || !nextFree}
+        onClick={() => nextFree && onChange([...value, { name: nextFree, evidence: "" }])}
       >
         <Plus className="mr-1 h-3.5 w-3.5" /> Add signal
       </Button>
