@@ -109,7 +109,7 @@ export async function startPilotHandoff(
         "This lead is already converted in CRM. Open it there to find the deal."
       );
     }
-    await storePilotDeal(db, actor, p, offer, deal.id, lead.convertedContactId);
+    await storePilotDeal(db, actor, p, offer, deal.id, lead.convertedContactId, false);
     return { dealId: deal.id };
   }
 
@@ -118,7 +118,7 @@ export async function startPilotHandoff(
     data: { status: "QUALIFIED", estimatedValue: offer?.price ?? null },
   });
   const { contactId, dealId } = await convertLeadToContact(db, leadId, orgId);
-  await storePilotDeal(db, actor, p, offer, dealId, contactId);
+  await storePilotDeal(db, actor, p, offer, dealId, contactId, true);
   return { dealId };
 }
 
@@ -128,17 +128,21 @@ async function storePilotDeal(
   p: Pick<OutreachProspect, "id" | "name" | "company">,
   offer: { name: string; price: Prisma.Decimal | null } | null,
   dealId: string,
-  contactId: string
+  contactId: string,
+  updateDeal: boolean
 ): Promise<void> {
   await db.$transaction(async (tx) => {
-    await tx.crmDeal.update({
-      where: { id: dealId },
-      data: {
-        name: `${offer?.name ?? "Pilot"} — ${p.company.trim() || p.name}`,
-        value: offer?.price ?? 0,
-        source: "Outreach",
-      },
-    });
+    // Only the deal this handoff just created is renamed and priced; a resumed deal may be the user's.
+    if (updateDeal) {
+      await tx.crmDeal.update({
+        where: { id: dealId },
+        data: {
+          name: `${offer?.name ?? "Pilot"} — ${p.company.trim() || p.name}`,
+          value: offer?.price ?? 0,
+          source: "Outreach",
+        },
+      });
+    }
     await tx.crmActivity.create({
       data: {
         organisationId: orgId,

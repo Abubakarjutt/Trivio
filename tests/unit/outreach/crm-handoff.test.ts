@@ -181,16 +181,23 @@ describe("startPilotHandoff", () => {
       status: "CONVERTED",
       convertedContactId: "c1",
     });
-    db.crmDeal.findFirst.mockResolvedValue({ id: "d1" });
+    db.outreachDoc.findFirst.mockResolvedValue(null); // no offer: a rewrite would zero the value
+    db.crmDeal.findFirst.mockResolvedValue({
+      id: "d1",
+      name: "Manual deal",
+      value: new Prisma.Decimal("1500"),
+      source: "Referral",
+    });
     expect(await tryStartPilot(asClient(db), actor, "p1")).toBeNull();
     expect(db.crmDeal.findFirst).toHaveBeenCalledWith({
       where: { organisationId: "org-1", contactId: "c1" },
       orderBy: { createdAt: "desc" },
     });
     expect(crm.convertLeadToContact).not.toHaveBeenCalled();
-    expect(db.crmDeal.update).toHaveBeenCalledWith({
-      where: { id: "d1" },
-      data: expect.objectContaining({ source: "Outreach", name: "RAG Audit — Lexora" }),
+    // The user's deal (name, value, source) is left untouched.
+    expect(db.crmDeal.update).not.toHaveBeenCalled();
+    expect(db.crmActivity.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ type: "NOTE", dealId: "d1", contactId: "c1" }),
     });
     expect(db.outreachProspect.update).toHaveBeenCalledWith({
       where: { id: "p1" },
