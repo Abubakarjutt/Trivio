@@ -20,6 +20,8 @@ vi.mock("@/lib/queue", () => ({ extractionQueue: { add: vi.fn() } }));
 vi.mock("@/lib/storage", () => {
   const files = new Map<string, Buffer>();
   return {
+    // Files live in the Map above; account deletion only force-removes a folder under here.
+    storageRoot: () => "/tmp/trivio-qa-storage-unused",
     getAttachmentPath: (org: string, id: string, ext: string) => `attachments/${org}/${id}.${ext}`,
     ensureDir: vi.fn(),
     saveFile: vi.fn(async (org: string, id: string, ext: string, buf: Buffer) => {
