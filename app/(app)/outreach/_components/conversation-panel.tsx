@@ -7,10 +7,10 @@ import { trpc } from "@/lib/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { ConversationAnalysis } from "@/server/services/outreach/schemas";
-import type { OutreachEventKind } from "@/server/services/outreach/pipeline";
 import { DraftList } from "./draft-list";
 import { EVENT_LABEL } from "./labels";
 import { Textarea } from "./textarea";
+import { remainingAfterApply, type Suggestion } from "./suggestions";
 import type { DraftRow, ProspectDetail } from "./types";
 
 export function ConversationPanel({
@@ -26,8 +26,8 @@ export function ConversationPanel({
   const utils = trpc.useUtils();
   const [thread, setThread] = useState(data.conversation?.thread ?? "");
   const [analysed, setAnalysed] = useState(false);
-  const [suggested, setSuggested] = useState<OutreachEventKind[]>([]);
-  const [picked, setPicked] = useState<OutreachEventKind[]>([]);
+  const [suggested, setSuggested] = useState<Suggestion[]>([]);
+  const [picked, setPicked] = useState<number[]>([]);
   const [applyError, setApplyError] = useState<string | null>(null);
   const analysis = (data.conversation?.analysis ?? null) as ConversationAnalysis | null;
   const replies: DraftRow[] = data.drafts.filter((d) => d.kind === "REPLY");
@@ -41,8 +41,8 @@ export function ConversationPanel({
   const analyse = trpc.outreachDocs.analyseConversation.useMutation({
     onSuccess: (r) => {
       setAnalysed(true);
-      setSuggested(r.events);
-      setPicked(r.events);
+      setSuggested(r.events.map((event, i) => ({ i, event })));
+      setPicked(r.events.map((_, i) => i));
       setApplyError(null);
       void utils.outreachProspects.get.invalidate({ id });
     },
@@ -51,9 +51,9 @@ export function ConversationPanel({
     onSuccess: (r) => {
       onHandoffError(r.handoffError);
       // Keep whatever did not get applied so the person can fix the cause and try again.
-      const left = suggested.filter((e) => !r.applied.includes(e));
+      const left = remainingAfterApply(suggested, picked, r.applied.length);
       setSuggested(left);
-      setPicked(picked.filter((e) => left.includes(e)));
+      setPicked(picked.filter((i) => left.some((s) => s.i === i)));
       if (!r.error) setAnalysed(false); // what was applied is in the toast and the event log
       setApplyError(r.error);
       if (r.applied.length > 0) {
@@ -70,8 +70,8 @@ export function ConversationPanel({
     },
   });
 
-  const toggle = (e: OutreachEventKind, on: boolean) =>
-    setPicked(suggested.filter((x) => (x === e ? on : picked.includes(x))));
+  const toggle = (i: number, on: boolean) =>
+    setPicked(suggested.filter((s) => (s.i === i ? on : picked.includes(s.i))).map((s) => s.i));
 
   return (
     <Card>
@@ -130,21 +130,24 @@ export function ConversationPanel({
         {suggested.length > 0 && (
           <div className="space-y-2">
             <p className="text-sm font-medium">Suggested updates. Tick what really happened:</p>
-            {suggested.map((e) => (
-              <label key={e} className="flex items-center gap-2 text-sm">
+            {suggested.map((s) => (
+              <label key={s.i} className="flex items-center gap-2 text-sm">
                 <input
                   type="checkbox"
-                  checked={picked.includes(e)}
+                  checked={picked.includes(s.i)}
                   disabled={apply.isPending}
-                  onChange={(ev) => toggle(e, ev.target.checked)}
+                  onChange={(ev) => toggle(s.i, ev.target.checked)}
                 />
-                {EVENT_LABEL[e]}
+                {EVENT_LABEL[s.event]}
               </label>
             ))}
             <Button
               size="sm"
               disabled={apply.isPending || picked.length === 0}
-              onClick={() => apply.mutate({ id, events: picked })}
+              onClick={() => apply.mutate({
+                  id,
+                  events: suggested.filter((s) => picked.includes(s.i)).map((s) => s.event),
+                })}
             >
               {apply.isPending && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
               Apply
