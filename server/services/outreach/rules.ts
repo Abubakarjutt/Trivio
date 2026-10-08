@@ -2,8 +2,13 @@
 import type { DraftKind } from "./types";
 
 export const BANNED = [
-  "hope this finds you well", "hope this message finds you", "came across your profile",
-  "synergy", "quick call", "pick your brain", "touch base",
+  "hope this finds you well",
+  "hope this message finds you",
+  "came across your profile",
+  "synergy",
+  "quick call",
+  "pick your brain",
+  "touch base",
 ] as const;
 const URL_RE = /https?:\/\/\S+|\bwww\.\S+/gi;
 const EMOJI = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{1F1E6}-\u{1F1FF}]/u;
@@ -13,7 +18,8 @@ const wordCount = (text: string) => text.split(/\s+/).filter(Boolean).length;
 export function checkDraft(kind: DraftKind, text: string): string[] {
   const problems: string[] = [];
   const lowered = text.toLowerCase();
-  for (const phrase of BANNED) if (lowered.includes(phrase)) problems.push(`Banned phrase: "${phrase}"`);
+  for (const phrase of BANNED)
+    if (lowered.includes(phrase)) problems.push(`Banned phrase: “${phrase}”`);
   if (text.includes("!")) problems.push("Contains an exclamation mark");
   if (EMOJI.test(text)) problems.push("Contains an emoji");
   if (text.includes("$")) problems.push("Mentions a price");
