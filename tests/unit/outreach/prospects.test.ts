@@ -12,6 +12,7 @@ import {
   deleteProspect,
   markDnc,
   recentVoice,
+  rescoreProspects,
   saveDrafts,
   saveProspect,
   type ProspectInput,
@@ -369,5 +370,51 @@ describe("voice and drafts", () => {
         violations: [],
       },
     ]);
+  });
+});
+
+describe("rescoreProspects", () => {
+  const pain = { name: "pain_post" as const, evidence: "Post: agents loop" };
+  const hiring = { name: "hiring" as const, evidence: "Hiring an LLM engineer" };
+
+  it("rescores saved signals with the given weights, writing only rows that changed", async () => {
+    db.outreachProspect.findMany.mockResolvedValue([
+      // Scored under old weights (pain_post 3): now pain_post is worth 5.
+      { id: "p1", signals: [pain], score: 3, primarySignal: "pain_post", scoreReasons: ["old"] },
+      // Already matches the new weights: left alone.
+      {
+        id: "p2",
+        signals: [hiring],
+        score: 3,
+        primarySignal: "hiring",
+        scoreReasons: ["hiring (+3): Hiring an LLM engineer"],
+      },
+    ]);
+    const weights = { ...DEFAULT_WEIGHTS, pain_post: 5 };
+    expect(await rescoreProspects(client(), "org-1", weights)).toEqual({ total: 2, changed: 1 });
+    expect(db.outreachProspect.findMany).toHaveBeenCalledWith({
+      where: { organisationId: "org-1" },
+      select: { id: true, signals: true, score: true, primarySignal: true, scoreReasons: true },
+    });
+    expect(db.outreachProspect.updateMany).toHaveBeenCalledTimes(1);
+    expect(db.outreachProspect.updateMany).toHaveBeenCalledWith({
+      where: { id: "p1", organisationId: "org-1" },
+      data: {
+        score: 5,
+        primarySignal: "pain_post",
+        scoreReasons: ["pain_post (+5): Post: agents loop"],
+      },
+    });
+  });
+
+  it("skips a row whose stored signals no longer parse, instead of zeroing its score", async () => {
+    db.outreachProspect.findMany.mockResolvedValue([
+      { id: "p1", signals: [{ name: "vibes" }], score: 4, primarySignal: null, scoreReasons: [] },
+    ]);
+    expect(await rescoreProspects(client(), "org-1", DEFAULT_WEIGHTS)).toEqual({
+      total: 1,
+      changed: 0,
+    });
+    expect(db.outreachProspect.updateMany).not.toHaveBeenCalled();
   });
 });

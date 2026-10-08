@@ -121,7 +121,20 @@ describe("adding a prospect", () => {
     expect(list.map((p) => [p.name, p.title, p.stage])).toEqual([
       ["Jane Doe", "CTO & co-founder", "QUEUED"],
     ]);
-    expect(list[0]!.score).toBeGreaterThan(0);
+    expect(list[0]!.score).toBe(SETTINGS.signalWeights.pain_post);
+
+    // Changing weights leaves saved scores alone until the user rescores.
+    await u.api.outreachSettings.upsert({
+      ...SETTINGS,
+      signalWeights: { ...SETTINGS.signalWeights, pain_post: 7 },
+    });
+    expect((await u.api.outreachProspects.list())[0]!.score).toBe(SETTINGS.signalWeights.pain_post);
+    expect(await u.api.outreachProspects.rescoreAll()).toEqual({ total: 1, changed: 1 });
+    expect((await u.api.outreachProspects.list())[0]!.score).toBe(7);
+    // Back to the original weights, so the rest of the file sees the usual scores.
+    await u.api.outreachSettings.upsert(SETTINGS);
+    expect(await u.api.outreachProspects.rescoreAll()).toEqual({ total: 1, changed: 1 });
+
     expect(await other.api.outreachProspects.list()).toEqual([]);
     await expect(other.api.outreachProspects.get({ id: prospectId })).rejects.toMatchObject({
       code: "NOT_FOUND",
@@ -219,7 +232,9 @@ describe("voice, do-not-contact and delete", () => {
   it("keeps sent text as anonymised voice examples that can be deleted", async () => {
     const voice = await u.api.outreachVoice.list();
     expect(voice.length).toBeGreaterThan(0);
-    expect(voice.map((v) => v.text).join(" ")).not.toContain("Jane");
+    const bodies = voice.map((v) => v.body).join(" ");
+    expect(bodies).toContain("saw your post about looping agents");
+    expect(bodies).not.toContain("Jane");
     await expect(other.api.outreachVoice.delete({ id: voice[0]!.id })).rejects.toMatchObject({
       code: "NOT_FOUND",
     });

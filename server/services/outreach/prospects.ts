@@ -9,6 +9,7 @@ import { scoreSignals } from "./scoring";
 import {
   NotFoundError,
   OutreachError,
+  SignalsSchema,
   type Draft,
   type DraftKind,
   type Signal,
@@ -145,6 +146,48 @@ export async function getProspect(
   const p = await db.outreachProspect.findFirst({ where: { id, organisationId: orgId } });
   if (!p) throw new NotFoundError("Prospect not found.");
   return p;
+}
+
+/**
+ * Rescore every saved prospect with `weights` (after the user changes them in settings).
+ * Only rows whose score or reasons change are written; a row whose stored signals no longer
+ * parse is left as it is rather than zeroed.
+ */
+export async function rescoreProspects(
+  db: PrismaClient,
+  orgId: string,
+  weights: Weights
+): Promise<{ total: number; changed: number }> {
+  const rows = await db.outreachProspect.findMany({
+    where: { organisationId: orgId },
+    select: { id: true, signals: true, score: true, primarySignal: true, scoreReasons: true },
+  });
+  const updates = rows.flatMap((row) => {
+    const signals = SignalsSchema.safeParse(row.signals);
+    if (!signals.success) return [];
+    const scored = scoreSignals(signals.data, weights);
+    const data = {
+      score: scored.score,
+      primarySignal: scored.primary?.name ?? null,
+      scoreReasons: scored.reasons,
+    };
+    const same =
+      row.score === data.score &&
+      row.primarySignal === data.primarySignal &&
+      JSON.stringify(row.scoreReasons) === JSON.stringify(data.scoreReasons);
+    return same ? [] : [{ id: row.id, data }];
+  });
+  if (updates.length > 0) {
+    await db.$transaction(async (tx) => {
+      for (const u of updates) {
+        await tx.outreachProspect.updateMany({
+          where: { id: u.id, organisationId: orgId },
+          data: u.data,
+        });
+      }
+    });
+  }
+  return { total: rows.length, changed: updates.length };
 }
 
 /** getProspect for AI work: nothing is drafted or analysed for a do-not-contact person. */

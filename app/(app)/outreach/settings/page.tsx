@@ -151,6 +151,19 @@ function SettingsTabs() {
       ]);
     },
   });
+  const rescore = trpc.outreachProspects.rescoreAll.useMutation({
+    onSuccess: ({ total, changed }) => {
+      void utils.outreachProspects.list.invalidate();
+      void utils.outreachProspects.get.invalidate();
+      void utils.outreachToday.get.invalidate();
+      toast.success(
+        total === 0
+          ? "No prospects to rescore yet."
+          : `Rescored ${total} prospect${total === 1 ? "" : "s"}: ${changed} changed.`
+      );
+    },
+    onError: (e) => toast.error(e.message),
+  });
   const archive = trpc.outreachSettings.offerArchive.useMutation({
     onSuccess: () => utils.outreachSettings.get.invalidate(),
     // The offer may have changed elsewhere: refresh so the list is truthful.
@@ -338,9 +351,6 @@ function SettingsTabs() {
               </p>
               {err("weights", weightsErrors.keywords)}
             </div>
-            <p className="text-muted-foreground text-xs">
-              New weights apply to prospects you add or edit from now on.
-            </p>
             {saveRow("weights", weightsDirty, () =>
               trySave(
                 "weights",
@@ -354,6 +364,22 @@ function SettingsTabs() {
                 })
               )
             )}
+            <div className="border-border/60 flex flex-wrap items-center gap-3 border-t pt-4">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={weightsDirty || upsert.isPending || rescore.isPending}
+                onClick={() => rescore.mutate()}
+              >
+                {rescore.isPending && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
+                Rescore all prospects
+              </Button>
+              <p className="text-muted-foreground text-xs">
+                {weightsDirty
+                  ? "Save your weights first, then rescore."
+                  : "Saved weights apply to new and edited prospects. Rescore to apply them to everyone already saved."}
+              </p>
+            </div>
           </CardContent>
         </Card>
       </TabsContent>
