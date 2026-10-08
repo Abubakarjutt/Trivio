@@ -240,8 +240,8 @@ export async function markDnc(db: PrismaClient, orgId: string, id: string, now: 
   const p = await getProspect(db, orgId, id);
   await db.$transaction(async (tx) => {
     await addDnc(tx, orgId, p.profileUrl, "asked not to be contacted", now);
-    await tx.outreachProspect.update({
-      where: { id },
+    await tx.outreachProspect.updateMany({
+      where: { id, organisationId: orgId },
       data: { stage: "DNC", stageChangedAt: now, awaitingReply: false },
     });
     await tx.outreachDraft.deleteMany({ where: { organisationId: orgId, prospectId: id } });

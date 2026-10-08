@@ -156,13 +156,14 @@ describe("capStatus", () => {
 
 describe("applyEvent", () => {
   it("applies the transition with an optimistic-concurrency guard and logs {from, to}", async () => {
-    db.outreachProspect.findFirst.mockResolvedValue(makeProspect());
+    const readAt = new Date(NOW.getTime() - 60_000);
+    db.outreachProspect.findFirst.mockResolvedValue(makeProspect({ updatedAt: readAt }));
     expect(await applyEvent(client(), actor, "p1", "request_sent", NOW, config)).toEqual({
       stage: "REQUEST_SENT",
       handoffError: null,
     });
     expect(db.outreachProspect.updateMany).toHaveBeenCalledWith({
-      where: { id: "p1", organisationId: "org-1", stage: "QUEUED", updatedAt: NOW },
+      where: { id: "p1", organisationId: "org-1", stage: "QUEUED", updatedAt: readAt },
       data: { stage: "REQUEST_SENT", stageChangedAt: NOW },
     });
     expect(db.outreachEvent.create.mock.calls[0][0].data).toMatchObject({
@@ -177,6 +178,21 @@ describe("applyEvent", () => {
     await expect(applyEvent(client(), actor, "p1", "request_sent", NOW, config)).rejects.toThrow(
       "This prospect changed in another window. Reload and try again."
     );
+    expect(db.outreachEvent.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["pilot_started", "TEARDOWN"],
+    ["teardown_booked", "ENGAGED"],
+  ] as const)("a stale %s has no side effects", async (event, stage) => {
+    db.outreachProspect.findFirst.mockResolvedValue(makeProspect({ stage }));
+    db.outreachProspect.updateMany.mockResolvedValue({ count: 0 });
+    await expect(
+      applyEvent(client(), actor, "p1", event, NOW, config, { sentText: "Hi Jane" })
+    ).rejects.toThrow("changed in another window");
+    expect(handoff.linkCrmLead).not.toHaveBeenCalled();
+    expect(handoff.tryStartPilot).not.toHaveBeenCalled();
+    expect(db.outreachVoiceExample.create).not.toHaveBeenCalled();
     expect(db.outreachEvent.create).not.toHaveBeenCalled();
   });
 
@@ -282,7 +298,11 @@ describe("markDnc and deleteProspect", () => {
       organisationId: "org-1",
       reason: "asked not to be contacted",
     });
-    expect(db.outreachProspect.update.mock.calls[0][0].data).toMatchObject({
+    expect(db.outreachProspect.updateMany.mock.calls[0][0].where).toEqual({
+      id: "p1",
+      organisationId: "org-1",
+    });
+    expect(db.outreachProspect.updateMany.mock.calls[0][0].data).toMatchObject({
       stage: "DNC",
       stageChangedAt: NOW,
     });
