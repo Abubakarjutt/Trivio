@@ -4,10 +4,15 @@ import Link from "next/link";
 import { Info } from "lucide-react";
 import { trpc } from "@/lib/trpc/client";
 
-/** False until the AI status has loaded and says the provider is usable. Disable AI buttons with it. */
+/**
+ * False while the AI status loads or says the provider isn't usable. Disable AI buttons with it.
+ * Fails open if the status check itself errors: the AI call then reports its own clear error.
+ */
 export function useAiReady(): boolean {
-  const { data } = trpc.outreachSettings.aiStatus.useQuery(undefined, { staleTime: 60_000 });
-  return data?.ready === true;
+  const { data, isError } = trpc.outreachSettings.aiStatus.useQuery(undefined, {
+    staleTime: 60_000,
+  });
+  return isError || data?.ready === true;
 }
 
 /** Says when AI features won't work, and that Gemini sends prospect text to Google (spec §5 Privacy). */
