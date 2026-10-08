@@ -1,4 +1,7 @@
 import type { OutreachProspect } from "@prisma/client";
+import type { z } from "zod";
+import type { Llm } from "@/server/services/outreach/llm";
+import type { Prompt } from "@/server/services/outreach/prompts";
 import type { ProspectState } from "@/server/services/outreach/types";
 
 // A Wednesday, so day/week boundary tests have room on both sides.
@@ -46,4 +49,20 @@ export function makeProspect(o: Partial<OutreachProspect> = {}): OutreachProspec
     ...makeState(),
     ...o,
   };
+}
+
+/** Returns queued responses in order; an Error in the queue is thrown instead. Port of conftest.FakeLLM. */
+export class FakeLlm implements Llm {
+  calls: { schema: z.ZodTypeAny; prompt: Prompt; creative: boolean }[] = [];
+  constructor(private responses: unknown[] = []) {}
+  async generateJson<T>(
+    schema: z.ZodType<T>,
+    prompt: Prompt,
+    opts: { creative?: boolean } = {}
+  ): Promise<T> {
+    this.calls.push({ schema: schema as z.ZodTypeAny, prompt, creative: Boolean(opts.creative) });
+    const next = this.responses.shift();
+    if (next instanceof Error) throw next;
+    return schema.parse(next);
+  }
 }
