@@ -29,7 +29,6 @@ export function ProposalPanel({ data }: { data: ProspectDetail }) {
   const [notes, setNotes] = useState("");
   const run = trpc.outreachDocs.proposal.useMutation({
     onSuccess: () => {
-      setNotes("");
       void utils.outreachProspects.get.invalidate({ id });
     },
   });

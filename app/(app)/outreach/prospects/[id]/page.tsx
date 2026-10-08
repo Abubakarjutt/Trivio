@@ -35,9 +35,10 @@ export default function ProspectPage({ params }: { params: Promise<{ id: string 
 }
 
 function ProspectBody({ id }: { id: string }) {
-  const { data, isLoading, error, refetch, isFetching } = trpc.outreachProspects.get.useQuery({
-    id,
-  });
+  const { data, isLoading, error, refetch, isFetching } = trpc.outreachProspects.get.useQuery(
+    { id },
+    { retry: (count, e) => e.data?.code !== "NOT_FOUND" && count < 3 }
+  );
   const [handoffError, setHandoffError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<Confirm>(null);
 

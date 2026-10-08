@@ -53,7 +53,8 @@ export function ConversationPanel({
       // Keep whatever did not get applied so the person can fix the cause and try again.
       const left = suggested.filter((e) => !r.applied.includes(e));
       setSuggested(left);
-      setPicked(left);
+      setPicked(picked.filter((e) => left.includes(e)));
+      if (!r.error) setAnalysed(false); // what was applied is in the toast and the event log
       setApplyError(r.error);
       if (r.applied.length > 0) {
         toast.success(

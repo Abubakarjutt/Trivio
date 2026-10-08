@@ -25,12 +25,14 @@ export function ScoreCard({ data }: { data: ProspectDetail }) {
   const utils = trpc.useUtils();
   const signals = p.signals as Signal[];
   const update = trpc.outreachProspects.update.useMutation({
+    // Returned so the mutation stays pending until the refetch lands: a fast second click can't send stale signals.
     onSuccess: () => {
-      void utils.outreachProspects.get.invalidate({ id: p.id });
       void utils.outreachProspects.list.invalidate();
+      return utils.outreachProspects.get.invalidate({ id: p.id });
     },
-    onError: () => void utils.outreachProspects.get.invalidate({ id: p.id }),
+    onError: () => utils.outreachProspects.get.invalidate({ id: p.id }),
   });
+  const { isFetching } = trpc.outreachProspects.get.useQuery({ id: p.id });
   return (
     <Card>
       <CardHeader className="flex-row items-center gap-3 space-y-0">
@@ -49,7 +51,7 @@ export function ScoreCard({ data }: { data: ProspectDetail }) {
             {signals.map((s, i) => (
               <button
                 key={`${s.name}-${i}`}
-                disabled={update.isPending}
+                disabled={update.isPending || isFetching}
                 className="bg-muted hover:bg-muted/70 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs disabled:opacity-50"
                 title="Remove this signal and re-score"
                 aria-label={`Remove signal ${SIGNAL_LABEL[s.name]} and re-score`}
