@@ -13,7 +13,8 @@ function safeDecode(s: string): string {
 
 export function normalizeProfileUrl(raw: string): string {
   const pasted = raw.trim();
-  if (!pasted) throw new OutreachError("Paste the prospect's LinkedIn or Sales Navigator profile URL.");
+  if (!pasted)
+    throw new OutreachError("Paste the prospect's LinkedIn or Sales Navigator profile URL.");
   const withScheme = /^https?:\/\//i.test(pasted) ? pasted : `https://${pasted}`;
   let url: URL;
   try {
@@ -26,7 +27,8 @@ export function normalizeProfileUrl(raw: string): string {
     throw new OutreachError(`Not a LinkedIn URL: ${pasted}`);
   }
   const match = PROFILE_PATH.exec(url.pathname);
-  if (!match) throw new OutreachError(`Not a profile URL (expected /in/… or /sales/lead/…): ${pasted}`);
+  if (!match)
+    throw new OutreachError(`Not a profile URL (expected /in/… or /sales/lead/…): ${pasted}`);
   const kind = match[1].toLowerCase();
   let ident = match[2].split(",")[0];
   if (kind === "in") ident = safeDecode(ident).toLowerCase();

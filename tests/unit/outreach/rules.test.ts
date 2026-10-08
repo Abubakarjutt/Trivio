@@ -70,7 +70,7 @@ describe("checkDraft", () => {
 
   it("uses curly quotes in banned phrase messages", () => {
     const problems = checkDraft("CONNECTION_NOTE", "Hope this finds you well");
-    expect(problems).toContain('Banned phrase: “hope this finds you well”');
+    expect(problems).toContain("Banned phrase: “hope this finds you well”");
   });
 
   it("formats character limit message exactly", () => {
