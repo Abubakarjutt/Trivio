@@ -49,6 +49,14 @@ describe("isLinkedInHost", () => {
   );
 });
 
+describe("isLinkedInHost performance", () => {
+  it("handles a long run of dots in linear time", () => {
+    const t0 = Date.now();
+    expect(isLinkedInHost("a" + ".".repeat(200_000) + "b")).toBe(false);
+    expect(Date.now() - t0).toBeLessThan(500);
+  }, 20_000);
+});
+
 const ok = (body = "<html>hi</html>"): RawResponse => ({ status: 200, location: null, body });
 const PUBLIC: Resolved[] = [{ address: "93.184.216.34", family: 4 }];
 
