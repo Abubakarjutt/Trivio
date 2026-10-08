@@ -13,6 +13,7 @@ import {
   getProspect,
   isDnc,
   markDnc,
+  rescoreProspects,
   saveProspect,
 } from "@/server/services/outreach/prospects";
 import { scoreSignals } from "@/server/services/outreach/scoring";
@@ -203,6 +204,12 @@ export const outreachProspectsRouter = createTRPCRouter({
       });
       return { ok: true };
     }),
+
+  /** Applies the saved signal weights to every prospect already saved. */
+  rescoreAll: outreachProcedure.mutation(async ({ ctx }) => {
+    const config = await requireConfig(ctx.db, ctx.organisationId);
+    return rescoreProspects(ctx.db, ctx.organisationId, config.weights);
+  }),
 
   logEvent: outreachProcedure
     .input(Id.extend({ event: z.enum(EVENTS), sentText: z.string().max(5000).nullish() }))

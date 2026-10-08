@@ -293,6 +293,27 @@ describe("outreachDocs", () => {
   });
 });
 
+describe("outreachProspects.rescoreAll", () => {
+  it("rescores with the organisation's saved weights", async () => {
+    db.outreachProspect.findMany.mockResolvedValue([
+      {
+        id: "p1",
+        signals: [{ name: "funding", evidence: "Raised a seed round" }],
+        score: 0,
+        primarySignal: null,
+        scoreReasons: [],
+      },
+    ]);
+    expect(await caller().outreachProspects.rescoreAll()).toEqual({ total: 1, changed: 1 });
+    expect(db.outreachProspect.findMany.mock.calls[0][0].where).toEqual({
+      organisationId: "org-1",
+    });
+    expect(db.outreachProspect.updateMany.mock.calls[0][0].data.score).toBe(
+      DEFAULT_WEIGHTS.funding
+    );
+  });
+});
+
 describe("do-not-contact prospects", () => {
   it("refuses every AI generation call, so the chat can't draft for them either", async () => {
     db.outreachProspect.findFirst.mockResolvedValue(makeProspect({ stage: "DNC" }));
