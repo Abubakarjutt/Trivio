@@ -12,6 +12,8 @@ import {
   DEFAULT_CADENCE,
   DEFAULT_HIRING_KEYWORDS,
   DEFAULT_WEIGHTS,
+  PRICE,
+  PRICE_MESSAGE,
 } from "@/server/services/outreach/types";
 import { Textarea } from "./textarea";
 
@@ -28,6 +30,10 @@ export function SetupCard() {
 
   async function save() {
     setError(null);
+    if (offer.name.trim() && offer.price !== "" && !PRICE.test(offer.price)) {
+      setError(PRICE_MESSAGE);
+      return;
+    }
     try {
       await upsert.mutateAsync({
         sellerProfile: profile,

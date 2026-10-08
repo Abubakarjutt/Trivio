@@ -3,6 +3,7 @@
 import { AlertTriangle, Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { DraftKind } from "@/server/services/outreach/types";
+import { useAiReady } from "./ai-notice";
 import { CopyButton } from "./copy-button";
 import { DRAFT_KIND_LABEL } from "./labels";
 import type { DraftRow } from "./types";
@@ -22,12 +23,13 @@ export function DraftList({
   error?: string | null;
   showTitle?: boolean;
 }) {
+  const aiReady = useAiReady();
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
         {showTitle && <h3 className="text-sm font-semibold">{DRAFT_KIND_LABEL[kind]}</h3>}
         {onGenerate && (
-          <Button size="sm" variant="outline" onClick={onGenerate} disabled={busy}>
+          <Button size="sm" variant="outline" onClick={onGenerate} disabled={!aiReady || busy}>
             {busy ? (
               <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
             ) : (

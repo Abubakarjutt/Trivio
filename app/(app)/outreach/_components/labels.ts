@@ -89,7 +89,7 @@ export const DRAFT_KIND_LABEL: Record<DraftKind, string> = {
 
 export const ENRICHMENT_LABEL: Record<string, string> = {
   checked: "Website checked",
-  unreachable: "Website unreachable",
+  unreachable: "Website not checked or unreachable",
   no_website: "No website",
   refused: "Website not checked (blocked address)",
 };

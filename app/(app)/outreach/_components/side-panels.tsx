@@ -182,6 +182,13 @@ export function CrmCard({
             </Link>
           </p>
         )}
+        {crm.deal && (p.stage === "WON" || p.stage === "LOST") && (
+          <p>
+            <Link href={`/crm/deals/${crm.deal.id}`} className="underline">
+              Update the deal in CRM →
+            </Link>
+          </p>
+        )}
         {!crm.hasPipeline && DEAL_STAGES.includes(p.stage) && !crm.deal && (
           <p className="text-amber-700">
             Create a pipeline in{" "}
@@ -296,10 +303,27 @@ export function PrivacyCard({
             </DialogTitle>
             <DialogDescription>
               {confirm === "delete"
-                ? "Their profile, drafts, conversation and documents are erased. Their URL stays on your do-not-contact list so they can't be added again. A linked CRM lead or deal is kept."
+                ? "Their profile, drafts, conversation and documents are erased. Their URL stays on your do-not-contact list so they can't be added again."
                 : "They leave Today for good and their URL goes on your do-not-contact list."}
             </DialogDescription>
           </DialogHeader>
+          {(data.crm.lead || data.crm.deal) && (
+            <p className="text-sm">
+              Linked CRM records stay. Erase them by hand if you need to:{" "}
+              {data.crm.lead && (
+                <Link href={`/crm/leads/${data.crm.lead.id}`} className="underline">
+                  lead
+                </Link>
+              )}
+              {data.crm.lead && data.crm.deal && ", "}
+              {data.crm.deal && (
+                <Link href={`/crm/deals/${data.crm.deal.id}`} className="underline">
+                  deal
+                </Link>
+              )}
+              .
+            </p>
+          )}
           {error && <p className="text-destructive text-sm">{error}</p>}
           <DialogFooter>
             <Button variant="outline" disabled={busy} onClick={close}>

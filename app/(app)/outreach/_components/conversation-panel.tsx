@@ -7,6 +7,7 @@ import { trpc } from "@/lib/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { ConversationAnalysis } from "@/server/services/outreach/schemas";
+import { useAiReady } from "./ai-notice";
 import { DraftList } from "./draft-list";
 import { EVENT_LABEL } from "./labels";
 import { Textarea } from "./textarea";
@@ -38,6 +39,7 @@ export function ConversationPanel({
     void utils.outreachProspects.list.invalidate();
   };
 
+  const aiReady = useAiReady();
   const analyse = trpc.outreachDocs.analyseConversation.useMutation({
     onSuccess: (r) => {
       setAnalysed(true);
@@ -92,7 +94,7 @@ export function ConversationPanel({
           <Button
             size="sm"
             variant="outline"
-            disabled={analyse.isPending || !thread.trim()}
+            disabled={!aiReady || analyse.isPending || !thread.trim()}
             onClick={() => analyse.mutate({ id, thread })}
           >
             {analyse.isPending ? (

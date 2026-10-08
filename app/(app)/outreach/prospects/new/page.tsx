@@ -11,7 +11,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { Signal } from "@/server/services/outreach/types";
-import { AiNotice } from "../../_components/ai-notice";
+import { AiNotice, useAiReady } from "../../_components/ai-notice";
+import { clampExtracted } from "../../_components/extract-limits";
 import { ENRICHMENT_LABEL } from "../../_components/labels";
 import { OutreachGate } from "../../_components/outreach-gate";
 import { SignalsEditor } from "../../_components/signals-editor";
@@ -68,18 +69,20 @@ function NewProspectForm() {
   const [text, setText] = useState("");
   const [website, setWebsite] = useState("");
   const [form, setForm] = useState<Form | null>(null);
+  const aiReady = useAiReady();
   const extract = trpc.outreachProspects.extract.useMutation({
     onSuccess: ({ profileUrl, extracted, enrichment }) => {
       setUrl(profileUrl);
+      const c = clampExtracted(extracted);
       setForm({
-        name: extracted.name,
-        title: extracted.title,
-        company: extracted.company,
+        name: c.name,
+        title: c.title,
+        company: c.company,
         companyWebsite: enrichment.website ?? extracted.companyWebsite ?? "",
-        companySize: extracted.companySize ?? "",
-        location: extracted.location ?? "",
-        stack: extracted.stack.join(", "),
-        signals: mergeSignals(extracted.signals, enrichment.signals),
+        companySize: c.companySize,
+        location: c.location,
+        stack: c.stack.join(", "),
+        signals: mergeSignals(c.signals, enrichment.signals),
         enrichmentStatus: enrichment.status,
       });
     },
@@ -174,7 +177,7 @@ function NewProspectForm() {
           {extract.error && <p className="text-destructive text-sm">{extract.error.message}</p>}
           <div className="flex gap-2">
             <Button
-              disabled={extract.isPending || !url.trim() || !text.trim()}
+              disabled={!aiReady || extract.isPending || !url.trim() || !text.trim()}
               onClick={() =>
                 extract.mutate({
                   profileUrl: url,

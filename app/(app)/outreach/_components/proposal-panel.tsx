@@ -14,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useAiReady } from "./ai-notice";
 import { CopyButton } from "./copy-button";
 import { Textarea } from "./textarea";
 import type { ProspectDetail } from "./types";
@@ -27,6 +28,7 @@ export function ProposalPanel({ data }: { data: ProspectDetail }) {
   const saved = data.docs.proposal as { offerId: string; offerName: string; text: string } | null;
   const [picked, setPicked] = useState<string | null>(saved?.offerId ?? teardownOffer);
   const [notes, setNotes] = useState("");
+  const aiReady = useAiReady();
   const run = trpc.outreachDocs.proposal.useMutation({
     onSuccess: () => {
       void utils.outreachProspects.get.invalidate({ id });
@@ -89,7 +91,7 @@ export function ProposalPanel({ data }: { data: ProspectDetail }) {
             <Button
               size="sm"
               variant="outline"
-              disabled={run.isPending}
+              disabled={!aiReady || run.isPending}
               onClick={() => run.mutate({ id, offerId, callNotes: notes })}
             >
               {run.isPending ? (

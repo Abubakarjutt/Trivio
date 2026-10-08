@@ -5,6 +5,7 @@ import { trpc } from "@/lib/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { TeardownPrep } from "@/server/services/outreach/schemas";
+import { useAiReady } from "./ai-notice";
 import type { ProspectDetail } from "./types";
 
 function List({ title, items }: { title: string; items: string[] }) {
@@ -25,6 +26,7 @@ export function TeardownPanel({ data }: { data: ProspectDetail }) {
   const id = data.prospect.id;
   const utils = trpc.useUtils();
   const prep = data.docs.teardown as (TeardownPrep & { offerId: string | null }) | null;
+  const aiReady = useAiReady();
   const run = trpc.outreachDocs.teardown.useMutation({
     onSuccess: () => utils.outreachProspects.get.invalidate({ id }),
   });
@@ -35,7 +37,7 @@ export function TeardownPanel({ data }: { data: ProspectDetail }) {
         <Button
           size="sm"
           variant="outline"
-          disabled={run.isPending}
+          disabled={!aiReady || run.isPending}
           onClick={() => run.mutate({ id })}
         >
           {run.isPending ? (
