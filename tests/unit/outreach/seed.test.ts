@@ -49,6 +49,45 @@ describe("parseSellerMarkdown", () => {
     expect(voiceExamples).toEqual(["one", "two"]);
     expect(profile).toBe("## Next\nkept");
   });
+
+  it("handles nested bullets and indented continuation lines", () => {
+    const { voiceExamples } = parseSellerMarkdown(
+      "# Voice examples\n- a\n  - nested\n- multi\n  continued"
+    );
+    expect(voiceExamples).toEqual(["a\nnested", "multi\ncontinued"]);
+  });
+
+  it("strips the voice section at end-of-file from the profile", () => {
+    const { profile, voiceExamples } = parseSellerMarkdown(
+      "# Who I am\nText\n# Voice examples\n- example"
+    );
+    expect(profile).toBe("# Who I am\nText");
+    expect(voiceExamples).toEqual(["example"]);
+  });
+
+  it("ends the voice section when encountering a higher-level heading", () => {
+    const { profile, voiceExamples } = parseSellerMarkdown(
+      "# A\nx\n## Voice examples\n- a\n- b\n# Next\nkept"
+    );
+    expect(voiceExamples).toEqual(["a", "b"]);
+    expect(profile).toContain("# Next\nkept");
+    expect(profile).not.toContain("Voice examples");
+  });
+
+  it("ends the voice section when encountering a lower-level heading", () => {
+    const { profile, voiceExamples } = parseSellerMarkdown(
+      "# A\nx\n## Voice examples\n- a\n- b\n### Sub\nkept"
+    );
+    expect(voiceExamples).toEqual(["a", "b"]);
+    expect(profile).toContain("### Sub\nkept");
+    expect(profile).not.toContain("Voice examples");
+  });
+
+  it("parses CRLF the same as LF", () => {
+    const lfResult = parseSellerMarkdown("# Voice examples\n- a\n- b\n# Next");
+    const crlfResult = parseSellerMarkdown("# Voice examples\r\n- a\r\n- b\r\n# Next");
+    expect(crlfResult).toEqual(lfResult);
+  });
 });
 
 describe("seedOutreach", () => {
@@ -101,5 +140,17 @@ describe("seedOutreach", () => {
     await expect(
       seedOutreach(db as unknown as PrismaClient, "org-1", "# Voice examples\n- a\n", NOW)
     ).rejects.toThrow("seller.md has no profile text");
+  });
+
+  it("dedupes examples by organisationId and body", async () => {
+    db.outreachSettings.findUnique.mockResolvedValue(null);
+    db.outreachVoiceExample.findFirst.mockResolvedValue(null);
+    await seedOutreach(db as unknown as PrismaClient, "org-1", MD, NOW);
+    expect(db.outreachVoiceExample.findFirst).toHaveBeenCalledWith({
+      where: {
+        organisationId: "org-1",
+        body: "Saw your post on retrieval drift. What chunk size are you running?",
+      },
+    });
   });
 });

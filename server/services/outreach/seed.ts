@@ -9,22 +9,82 @@ import {
 } from "./types";
 
 const HEADING = /^#{1,6}\s+(.*)$/;
-const BULLET = /^\s*[-*]\s+(.*)$/;
+const TOP_LEVEL_BULLET = /^[-*]\s+(.*)$/;
+const ANY_BULLET = /^\s*[-*]\s+(.*)$/;
 
 export function parseSellerMarkdown(md: string): { profile: string; voiceExamples: string[] } {
   const kept: string[] = [];
   const voiceExamples: string[] = [];
   let inVoice = false;
-  for (const line of md.replace(/\r\n/g, "\n").split("\n")) {
+  let currentExample = "";
+
+  const lines = md.replace(/\r\n/g, "\n").split("\n");
+
+  for (const line of lines) {
     const heading = HEADING.exec(line);
-    if (heading) inVoice = /^voice examples\b/i.test(heading[1].trim());
+    if (heading) {
+      // Flush current example if we're entering/leaving voice section
+      if (inVoice && currentExample) {
+        voiceExamples.push(currentExample.trim());
+        currentExample = "";
+      }
+      inVoice = /^voice examples\b/i.test(heading[1].trim());
+      if (!inVoice) {
+        kept.push(line);
+      }
+      continue;
+    }
+
     if (!inVoice) {
       kept.push(line);
       continue;
     }
-    const bullet = BULLET.exec(line);
-    if (bullet && bullet[1].trim()) voiceExamples.push(bullet[1].trim());
+
+    // We're in the voice section
+    if (line.trim() === "") {
+      // Blank line ends current example
+      if (currentExample) {
+        voiceExamples.push(currentExample.trim());
+        currentExample = "";
+      }
+      continue;
+    }
+
+    const topBullet = TOP_LEVEL_BULLET.exec(line);
+    if (topBullet) {
+      // Top-level bullet starts a new example
+      if (currentExample) {
+        voiceExamples.push(currentExample.trim());
+      }
+      currentExample = topBullet[1].trim();
+      continue;
+    }
+
+    // Check if this line is indented (continuation or nested bullet)
+    if (line.startsWith(" ") || line.startsWith("\t")) {
+      if (currentExample) {
+        // Append indented line to current example
+        const anyBullet = ANY_BULLET.exec(line);
+        const content = anyBullet ? anyBullet[1].trim() : line.trim();
+        currentExample += "\n" + content;
+      }
+      continue;
+    }
+
+    // Unindented non-bullet line ends the voice section
+    if (currentExample) {
+      voiceExamples.push(currentExample.trim());
+      currentExample = "";
+    }
+    inVoice = false;
+    kept.push(line);
   }
+
+  // Flush any remaining example at EOF
+  if (currentExample) {
+    voiceExamples.push(currentExample.trim());
+  }
+
   return {
     profile: kept
       .join("\n")
