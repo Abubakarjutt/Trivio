@@ -134,8 +134,7 @@ export const outreachProspectsRouter = createTRPCRouter({
       // A website the person typed beats one the model read off the profile. The model's
       // choice is only fetched if the paste names that host, and only at its origin.
       const website =
-        input.companyWebsite?.trim() ||
-        websiteNamedIn(input.profileText, extracted.companyWebsite);
+        input.companyWebsite?.trim() || websiteNamedIn(input.profileText, extracted.companyWebsite);
       const enrichment = await enrichCompany(website, createPageFetcher(), config.hiringKeywords);
       return { profileUrl, extracted, enrichment };
     }),
