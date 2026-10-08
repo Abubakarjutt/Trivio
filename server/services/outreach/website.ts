@@ -65,7 +65,7 @@ export function isPublicAddress(address: string): boolean {
 }
 
 export function isLinkedInHost(host: string): boolean {
-  const h = host.toLowerCase().replace(/\.$/, "");
+  const h = host.toLowerCase().replace(/\.+$/, "");
   return (
     h === "linkedin.com" || h.endsWith(".linkedin.com") || h === "lnkd.in" || h.endsWith(".lnkd.in")
   );

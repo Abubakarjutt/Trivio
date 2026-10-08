@@ -78,6 +78,24 @@ describe("enrichCompany", () => {
   });
 });
 
+describe("enrichCompany hardening", () => {
+  it("strips a long run of '<' in linear time", async () => {
+    const t0 = Date.now();
+    const result = await enrichCompany("acme.ai", site({ "/": "<".repeat(200_000) }), KW);
+    expect(result.status).toBe("checked");
+    expect(Date.now() - t0).toBeLessThan(500);
+  }, 20_000);
+
+  it("ignores a malformed careers href instead of throwing", async () => {
+    const result = await enrichCompany(
+      "acme.ai",
+      site({ "/": '<a href="http://[jobs">x</a>' }),
+      KW
+    );
+    expect(result.status).toBe("checked");
+  });
+});
+
 describe("hiringPattern", () => {
   it("escapes keywords and ignores blanks", () => {
     expect(hiringPattern(["c++", " "]).test("Senior C++ Developer")).toBe(true);

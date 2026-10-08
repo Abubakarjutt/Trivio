@@ -36,9 +36,14 @@ describe("isPublicAddress", () => {
 });
 
 describe("isLinkedInHost", () => {
-  it.each(["linkedin.com", "www.LinkedIn.com", "pk.linkedin.com.", "lnkd.in"])("matches %s", (h) =>
-    expect(isLinkedInHost(h)).toBe(true)
-  );
+  it.each([
+    "linkedin.com",
+    "www.LinkedIn.com",
+    "pk.linkedin.com.",
+    "linkedin.com..",
+    "www.linkedin.com...",
+    "lnkd.in",
+  ])("matches %s", (h) => expect(isLinkedInHost(h)).toBe(true));
   it.each(["notlinkedin.com", "linkedin.com.evil.io", "acme.ai"])("doesn't match %s", (h) =>
     expect(isLinkedInHost(h)).toBe(false)
   );
@@ -86,23 +91,19 @@ describe("createPageFetcher", () => {
   });
 
   it("checks every redirect hop", async () => {
-    const request = vi
-      .fn()
-      .mockResolvedValueOnce({
-        status: 302,
-        location: "http://169.254.169.254/latest/meta-data",
-        body: "",
-      });
+    const request = vi.fn().mockResolvedValueOnce({
+      status: 302,
+      location: "http://169.254.169.254/latest/meta-data",
+      body: "",
+    });
     await expect(
       createPageFetcher({ resolve: vi.fn().mockResolvedValue(PUBLIC), request })("https://acme.ai")
     ).rejects.toBeInstanceOf(RefusedError);
-    const toLinkedIn = vi
-      .fn()
-      .mockResolvedValueOnce({
-        status: 301,
-        location: "https://www.linkedin.com/company/acme",
-        body: "",
-      });
+    const toLinkedIn = vi.fn().mockResolvedValueOnce({
+      status: 301,
+      location: "https://www.linkedin.com/company/acme",
+      body: "",
+    });
     await expect(
       createPageFetcher({ resolve: vi.fn().mockResolvedValue(PUBLIC), request: toLinkedIn })(
         "https://acme.ai"

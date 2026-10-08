@@ -7,7 +7,7 @@ export type EnrichmentStatus = "checked" | "unreachable" | "no_website" | "refus
 const DEMO =
   /\b(book a demo|request a demo|try it free|join the waitlist|waitlist|api reference|documentation|docs)\b/i;
 const CAREERS_LINK = /href="([^"]*(?:careers|jobs|greenhouse\.io|lever\.co|ashbyhq\.com)[^"]*)"/gi;
-const TAGS = /<[^>]+>/g;
+const TAGS = /<[^<>]*>/g;
 const MAX_CAREER_PAGES = 3;
 const NEVER = /(?!)/;
 
@@ -72,7 +72,13 @@ export async function enrichCompany(
   const demo = DEMO.exec(text(home));
   if (demo) signals.push({ name: "demo_stage", evidence: `Website mentions “${demo[0]}”` });
 
-  const links = [...home.matchAll(CAREERS_LINK)].map((m) => new URL(m[1], url).toString());
+  const links = [...home.matchAll(CAREERS_LINK)].flatMap((m) => {
+    try {
+      return [new URL(m[1], url).toString()];
+    } catch {
+      return []; // a malformed href is skipped, as Python's urljoin never raises
+    }
+  });
   const candidates = [
     ...new Set([...links, new URL("/careers", url).toString(), new URL("/jobs", url).toString()]),
   ].filter((u) => !isLinkedInHost(new URL(u).hostname));
