@@ -43,7 +43,7 @@ for (const [net4, prefix] of [
   blocked.addSubnet(net4, prefix, "ipv4");
 // No ::ffff:0:0/96 entry: BlockList treats IPv4 addresses as v4-mapped, so it would block every IPv4 address.
 for (const [net6, prefix] of [
-  ["::", 128],
+  ["::", 96], // covers :: and IPv4-compatible addresses; v4-mapped (::ffff:0:0/96) is not inside it
   ["::1", 128],
   ["fc00::", 7],
   ["fe80::", 10],
@@ -51,6 +51,10 @@ for (const [net6, prefix] of [
   ["2001:db8::", 32],
   ["64:ff9b::", 96],
   ["100::", 64],
+  ["2002::", 16],
+  ["64:ff9b:1::", 48],
+  ["2001::", 23],
+  ["fec0::", 10],
 ] as const)
   blocked.addSubnet(net6, prefix, "ipv6");
 

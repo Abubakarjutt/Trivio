@@ -115,7 +115,8 @@ export async function startPilotHandoff(
 
   await db.crmLead.update({
     where: { id: leadId },
-    data: { status: "QUALIFIED", estimatedValue: offer?.price ?? null },
+    // Don't clear an estimate the user may have set on a lead that was matched by name.
+    data: { status: "QUALIFIED", ...(offer?.price ? { estimatedValue: offer.price } : {}) },
   });
   const { contactId, dealId } = await convertLeadToContact(db, leadId, orgId);
   await storePilotDeal(db, actor, p, offer, dealId, contactId, true);

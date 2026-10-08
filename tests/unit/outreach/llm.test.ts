@@ -73,6 +73,35 @@ describe("createLlm with Ollama", () => {
     });
   });
 
+  it("treats a truncated 200 body as a format failure and retries", async () => {
+    const truncated = () => new Response('{"message":{"content":"{\\"vari', { status: 200 });
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(truncated())
+      .mockResolvedValueOnce(json({ message: { content: '{"variantA":"a","variantB":"b"}' } }));
+    await expect(createLlm(OLLAMA, fetchImpl).generateJson(Schema, prompt)).resolves.toEqual({
+      variantA: "a",
+      variantB: "b",
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives the format message when every body is truncated", async () => {
+    const fetchImpl = vi.fn().mockImplementation(async () => new Response("{", { status: 200 }));
+    await expect(createLlm(OLLAMA, fetchImpl).generateJson(Schema, prompt)).rejects.toThrow(
+      "The model's answer didn't match the expected format. Try again."
+    );
+  });
+
+  it("maps a timeout while reading the body to the friendly message", async () => {
+    const res = new Response("x", { status: 200 });
+    vi.spyOn(res, "text").mockRejectedValue(new DOMException("timed out", "TimeoutError"));
+    const fetchImpl = vi.fn().mockResolvedValue(res);
+    await expect(createLlm(OLLAMA, fetchImpl).generateJson(Schema, prompt)).rejects.toThrow(
+      "The AI took too long to answer."
+    );
+  });
+
   it("explains a missing model", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(json({ error: "model not found" }, 404));
     await expect(createLlm(OLLAMA, fetchImpl).generateJson(Schema, prompt)).rejects.toThrow(
@@ -124,6 +153,16 @@ describe("createLlm with Gemini", () => {
       responseMimeType: "application/json",
     });
     expect(body.generationConfig.responseSchema).not.toHaveProperty("additionalProperties");
+  });
+
+  it("treats a truncated Gemini body as a format failure", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockImplementation(async () => new Response('{"cand', { status: 200 }));
+    await expect(createLlm(GEMINI, fetchImpl).generateJson(Schema, prompt)).rejects.toThrow(
+      "The model's answer didn't match the expected format. Try again."
+    );
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
   it("refuses without a key", async () => {

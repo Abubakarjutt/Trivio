@@ -166,6 +166,16 @@ describe("startPilotHandoff", () => {
     });
   });
 
+  it("keeps a hand-made lead's estimate when there is no proposal price", async () => {
+    ready();
+    db.outreachDoc.findFirst.mockResolvedValue(null);
+    await startPilotHandoff(asClient(db), actor, "p1");
+    expect(db.crmLead.update).toHaveBeenCalledWith({
+      where: { id: "lead-1" },
+      data: { status: "QUALIFIED" },
+    });
+  });
+
   it("can be retried: a stored deal is returned without converting again", async () => {
     db.outreachProspect.findFirst.mockResolvedValue(
       makeProspect({ crmLeadId: "lead-1", crmDealId: "d1" })

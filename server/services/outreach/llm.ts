@@ -57,6 +57,25 @@ function networkError(e: unknown, provider: "ollama" | "gemini"): OutreachAiErro
   );
 }
 
+/**
+ * Read the response body inside the same error mapping as the request (a timeout can fire while
+ * the body is still arriving). An envelope that isn't JSON comes back as null, which the caller
+ * turns into an empty answer so the normal format retry handles it.
+ */
+async function readEnvelope<T>(res: Response, provider: "ollama" | "gemini"): Promise<T | null> {
+  let body: string;
+  try {
+    body = await res.text();
+  } catch (e) {
+    throw networkError(e, provider);
+  }
+  try {
+    return JSON.parse(body) as T;
+  } catch {
+    return null;
+  }
+}
+
 function ollamaRaw(env: NodeJS.ProcessEnv, fetchImpl: typeof fetch): Raw {
   const model = ollamaModel(env);
   return async (schema, prompt, temperature) => {
@@ -84,8 +103,8 @@ function ollamaRaw(env: NodeJS.ProcessEnv, fetchImpl: typeof fetch): Raw {
       throw new OutreachAiError(`Model not found. Pull ${model} in Settings first.`);
     if (!res.ok)
       throw new OutreachAiError(`The AI request failed (HTTP ${res.status}). Try again.`);
-    const data = (await res.json()) as { message?: { content?: string } };
-    return data.message?.content ?? "";
+    const data = await readEnvelope<{ message?: { content?: string } }>(res, "ollama");
+    return data?.message?.content ?? "";
   };
 }
 
@@ -120,10 +139,10 @@ function geminiRaw(env: NodeJS.ProcessEnv, fetchImpl: typeof fetch): Raw {
     }
     if (!res.ok)
       throw new OutreachAiError(`The AI request failed (HTTP ${res.status}). Try again.`);
-    const data = (await res.json()) as {
+    const data = await readEnvelope<{
       candidates?: { content?: { parts?: { text?: string }[] } }[];
-    };
-    return (data.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? "").join("");
+    }>(res, "gemini");
+    return (data?.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? "").join("");
   };
 }
 

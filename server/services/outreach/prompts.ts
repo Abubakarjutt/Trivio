@@ -187,7 +187,7 @@ export function proposalPrompt(
 }
 
 export function stripNumbering(items: string[]): string[] {
-  return items.map((x) => x.replace(/^\s*\d+[.)]\s*/, ""));
+  return items.map((x) => x.replace(/^\s*\d+[.)](?:\s+|$)/, ""));
 }
 
 export function renderProposal(p: PilotProposal, offerName: string, priceText: string): string {

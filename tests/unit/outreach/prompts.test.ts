@@ -108,4 +108,12 @@ describe("stripNumbering", () => {
       "Plain",
     ]);
   });
+
+  it("keeps leading decimals", () => {
+    expect(stripNumbering(["3.5x faster retrieval", "1. Foo", "2)"])).toEqual([
+      "3.5x faster retrieval",
+      "Foo",
+      "",
+    ]);
+  });
 });

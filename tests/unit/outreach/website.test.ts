@@ -12,7 +12,7 @@ import {
 } from "@/server/services/outreach/website";
 
 describe("isPublicAddress", () => {
-  it.each(["8.8.8.8", "1.1.1.1", "2606:4700:4700::1111"])("allows %s", (a) =>
+  it.each(["8.8.8.8", "1.1.1.1", "93.184.216.34", "2606:4700:4700::1111"])("allows %s", (a) =>
     expect(isPublicAddress(a)).toBe(true)
   );
   it.each([
@@ -33,6 +33,14 @@ describe("isPublicAddress", () => {
     "::ffff:10.0.0.1",
     "::ffff:7f00:1",
   ])("refuses %s", (a) => expect(isPublicAddress(a)).toBe(false));
+
+  it.each([
+    ["::7f00:1", "::/96 IPv4-compatible"],
+    ["2002:7f00:1::", "2002::/16 6to4"],
+    ["64:ff9b:1::1", "64:ff9b:1::/48 local NAT64"],
+    ["2001::1", "2001::/23 Teredo and IETF"],
+    ["fec0::1", "fec0::/10 site-local"],
+  ])("refuses %s (%s)", (a) => expect(isPublicAddress(a)).toBe(false));
 });
 
 describe("isLinkedInHost", () => {
