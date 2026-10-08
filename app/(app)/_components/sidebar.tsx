@@ -110,7 +110,7 @@ function NavItemComponent({
   const active = matchPrefix ? pathname.startsWith(href) : pathname === href;
 
   return (
-    <Link href={href} onClick={onNavigate} className={`sb-link${active ? "sb-active" : ""}`}>
+    <Link href={href} onClick={onNavigate} className={`sb-link${active ? " sb-active" : ""}`}>
       <Icon className="sb-icon h-4 w-4 flex-shrink-0" strokeWidth={1.75} />
       {label}
     </Link>
