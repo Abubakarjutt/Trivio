@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { trpc } from "@/lib/trpc/client";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,7 @@ import type { Outputs } from "./types";
 type Offer = Outputs["outreachSettings"]["get"]["offers"][number];
 
 export function OfferEditor({ offer, onDone }: { offer?: Offer; onDone: () => void }) {
+  const id = useId();
   const utils = trpc.useUtils();
   const [form, setForm] = useState({
     name: offer?.name ?? "",
@@ -62,16 +63,18 @@ export function OfferEditor({ offer, onDone }: { offer?: Offer; onDone: () => vo
     <div className="border-border/60 space-y-3 rounded-lg border p-4">
       <div className="grid gap-3 sm:grid-cols-[2fr_1fr]">
         <div className="space-y-1.5">
-          <Label>Name</Label>
+          <Label htmlFor={`${id}-name`}>Name</Label>
           <Input
+            id={`${id}-name`}
             value={form.name}
             maxLength={120}
             onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
           />
         </div>
         <div className="space-y-1.5">
-          <Label>Price</Label>
+          <Label htmlFor={`${id}-price`}>Price</Label>
           <Input
+            id={`${id}-price`}
             inputMode="decimal"
             placeholder="Leave empty for [price]"
             value={form.price}
@@ -80,8 +83,9 @@ export function OfferEditor({ offer, onDone }: { offer?: Offer; onDone: () => vo
         </div>
       </div>
       <div className="space-y-1.5">
-        <Label>Description</Label>
+        <Label htmlFor={`${id}-description`}>Description</Label>
         <Input
+          id={`${id}-description`}
           value={form.description}
           maxLength={2000}
           onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}

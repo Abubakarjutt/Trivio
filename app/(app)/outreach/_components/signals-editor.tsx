@@ -47,6 +47,7 @@ export function SignalsEditor({
           <Input
             value={s.evidence}
             maxLength={500}
+            aria-label={`Evidence for ${SIGNAL_LABEL[s.name]}`}
             placeholder="Evidence: what they said or posted"
             onChange={(e) => set(i, { evidence: e.target.value })}
           />

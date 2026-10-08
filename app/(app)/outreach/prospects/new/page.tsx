@@ -111,7 +111,7 @@ function NewProspectForm() {
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean),
-      signals: form.signals.filter((s) => s.evidence.trim()),
+      signals: form.signals,
       // Filling in by hand doesn't check the website; see the ruling in Task 16.
       enrichmentStatus: form.enrichmentStatus ?? (companyWebsite ? "unreachable" : "no_website"),
     });
@@ -127,6 +127,8 @@ function NewProspectForm() {
       />
     </div>
   );
+  // The server rejects a signal without evidence, so block Save rather than drop the row silently.
+  const blankEvidence = !!form?.signals.some((s) => !s.evidence.trim());
 
   return (
     <div className="grid gap-6 lg:grid-cols-2">
@@ -225,9 +227,20 @@ function NewProspectForm() {
                 {ENRICHMENT_LABEL[form.enrichmentStatus]}
               </p>
             )}
+            {blankEvidence && (
+              <p className="text-muted-foreground text-sm">
+                Add evidence to each signal, or remove it.
+              </p>
+            )}
             {create.error && <p className="text-destructive text-sm">{create.error.message}</p>}
             <Button
-              disabled={create.isPending || create.isSuccess || !form.name.trim() || !url.trim()}
+              disabled={
+                create.isPending ||
+                create.isSuccess ||
+                !form.name.trim() ||
+                !url.trim() ||
+                blankEvidence
+              }
               onClick={save}
             >
               {(create.isPending || create.isSuccess) && (
