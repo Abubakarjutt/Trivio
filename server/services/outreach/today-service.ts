@@ -19,6 +19,7 @@ export async function todayForOrg(
   const buckets = buildToday(rows, now, config.cadence, caps.remaining).map((b) => ({
     title: b.title,
     items: b.items.map((i) => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars -- profileText is left out of the Today payload
       const { profileText: _omit, drafts, ...prospect } = i.prospect;
       return {
         prospect,

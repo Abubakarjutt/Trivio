@@ -84,7 +84,7 @@ export async function startPilotHandoff(
   actor: Actor,
   prospectId: string
 ): Promise<{ dealId: string }> {
-  const { orgId, userId } = actor;
+  const { orgId } = actor;
   const p = await db.outreachProspect.findFirst({
     where: { id: prospectId, organisationId: orgId },
   });

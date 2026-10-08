@@ -36,6 +36,7 @@ export function jsonSchemaFor(
 ): Record<string, unknown> {
   const raw = zodToJsonSchema(schema, { target, $refStrategy: "none" }) as Record<string, unknown>;
   if (target === "openApi3") return strip(raw) as Record<string, unknown>;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omit $schema from the copy
   const { $schema: _drop, ...rest } = raw;
   return rest;
 }
