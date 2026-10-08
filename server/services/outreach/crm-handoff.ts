@@ -94,19 +94,42 @@ export async function startPilotHandoff(
   const leadId = p.crmLeadId ?? (await db.$transaction((tx) => linkCrmLead(tx, orgId, p)));
   const lead = await db.crmLead.findFirst({ where: { id: leadId, organisationId: orgId } });
   if (!lead) throw new OutreachError("The linked CRM lead is missing. Retry to create a new one.");
+  const offer = await latestProposalOffer(db, orgId, p.id);
+
   if (lead.status === "CONVERTED") {
-    throw new OutreachError(
-      "This lead is already converted in CRM. Open it there to find the deal."
-    );
+    // A previous attempt converted the lead but failed before storing the deal: resume it.
+    const deal = lead.convertedContactId
+      ? await db.crmDeal.findFirst({
+          where: { organisationId: orgId, contactId: lead.convertedContactId },
+          orderBy: { createdAt: "desc" },
+        })
+      : null;
+    if (!deal || !lead.convertedContactId) {
+      throw new OutreachError(
+        "This lead is already converted in CRM. Open it there to find the deal."
+      );
+    }
+    await storePilotDeal(db, actor, p, offer, deal.id, lead.convertedContactId);
+    return { dealId: deal.id };
   }
 
-  const offer = await latestProposalOffer(db, orgId, p.id);
   await db.crmLead.update({
     where: { id: leadId },
     data: { status: "QUALIFIED", estimatedValue: offer?.price ?? null },
   });
   const { contactId, dealId } = await convertLeadToContact(db, leadId, orgId);
+  await storePilotDeal(db, actor, p, offer, dealId, contactId);
+  return { dealId };
+}
 
+async function storePilotDeal(
+  db: PrismaClient,
+  { orgId, userId }: Actor,
+  p: Pick<OutreachProspect, "id" | "name" | "company">,
+  offer: { name: string; price: Prisma.Decimal | null } | null,
+  dealId: string,
+  contactId: string
+): Promise<void> {
   await db.$transaction(async (tx) => {
     await tx.crmDeal.update({
       where: { id: dealId },
@@ -128,7 +151,6 @@ export async function startPilotHandoff(
     });
     await tx.outreachProspect.update({ where: { id: p.id }, data: { crmDealId: dealId } });
   });
-  return { dealId };
 }
 
 /** Runs the pilot handoff and turns any failure into the message the CRM card shows. */

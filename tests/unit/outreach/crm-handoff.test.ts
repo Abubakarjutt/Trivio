@@ -174,6 +174,43 @@ describe("startPilotHandoff", () => {
     expect(crm.convertLeadToContact).not.toHaveBeenCalled();
   });
 
+  it("resumes a half-finished handoff: converted lead with a deal and no stored deal id", async () => {
+    ready();
+    db.crmLead.findFirst.mockResolvedValue({
+      id: "lead-1",
+      status: "CONVERTED",
+      convertedContactId: "c1",
+    });
+    db.crmDeal.findFirst.mockResolvedValue({ id: "d1" });
+    expect(await tryStartPilot(asClient(db), actor, "p1")).toBeNull();
+    expect(db.crmDeal.findFirst).toHaveBeenCalledWith({
+      where: { organisationId: "org-1", contactId: "c1" },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(crm.convertLeadToContact).not.toHaveBeenCalled();
+    expect(db.crmDeal.update).toHaveBeenCalledWith({
+      where: { id: "d1" },
+      data: expect.objectContaining({ source: "Outreach", name: "RAG Audit — Lexora" }),
+    });
+    expect(db.outreachProspect.update).toHaveBeenCalledWith({
+      where: { id: "p1" },
+      data: { crmDealId: "d1" },
+    });
+  });
+
+  it("keeps the refusal when a converted lead has no deal for its contact", async () => {
+    ready();
+    db.crmLead.findFirst.mockResolvedValue({
+      id: "lead-1",
+      status: "CONVERTED",
+      convertedContactId: "c1",
+    });
+    db.crmDeal.findFirst.mockResolvedValue(null);
+    expect(await tryStartPilot(asClient(db), actor, "p1")).toBe(
+      "This lead is already converted in CRM. Open it there to find the deal."
+    );
+  });
+
   it("refuses to convert a lead twice", async () => {
     ready();
     db.crmLead.findFirst.mockResolvedValue({ id: "lead-1", status: "CONVERTED" });
