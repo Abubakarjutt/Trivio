@@ -122,5 +122,18 @@
     "tsx": "^4.19.4",
     "typescript": "^5",
     "vitest": "^3.1.4"
+  },
+  "allowScripts": {
+    "electron@33.4.11": true,
+    "@prisma/client@6.19.3": true,
+    "@prisma/engines@6.19.3": true,
+    "esbuild@0.24.2": true,
+    "esbuild@0.27.7": true,
+    "fsevents@2.3.2": true,
+    "fsevents@2.3.3": true,
+    "msgpackr-extract@3.0.3": true,
+    "prisma@6.19.3": true,
+    "sharp@0.34.5": true,
+    "unrs-resolver@1.11.1": true
   }
 }
