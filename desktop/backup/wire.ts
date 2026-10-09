@@ -2,12 +2,14 @@
 // real Google / Drive / Postgres / server pieces and exposes it over IPC.
 // Everything with logic lives in the (unit-tested) modules next to this file.
 
-import { app, ipcMain, Notification, safeStorage, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Notification, safeStorage, shell } from "electron";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import type { DatabaseHandle } from "../embedded/embedded-db";
-import { BackupService, type BackupProgress, type BackupStatus, type ServerLike } from "./backup-service";
-import { DriveClient } from "./drive-client";
+import { BackupService, type AuthLike, type BackupProgress, type BackupStatus, type ServerLike } from "./backup-service";
+import { DriveClient, type DriveLike } from "./drive-client";
 import { BackupError } from "./errors";
+import { FolderAuth, FolderDrive, findGoogleDriveFolders } from "./folder-target";
 import { GoogleAuth } from "./google-auth";
 import {
   appliedMigrations, connFromConfig, createDatabase, dataFingerprint, dropDatabase, dumpDatabase,
@@ -16,8 +18,9 @@ import {
 import { FileSecretStore } from "./secret-store";
 
 // Injected at build time by desktop/build-electron.mjs (GitHub secrets for
-// releases, .env.local for local builds). Empty → the feature reports "not
-// configured" and stays out of the way.
+// releases, .env.local for local builds). Empty → backups go to a synced
+// folder instead (the Google Drive app's, auto-detected), like WhatsApp
+// borrowing the phone's own Google account. See folder-target.ts.
 const GOOGLE_CLIENT = {
   clientId: process.env.TRIVIO_GOOGLE_CLIENT_ID ?? "",
   clientSecret: process.env.TRIVIO_GOOGLE_CLIENT_SECRET ?? "",
@@ -38,13 +41,41 @@ export async function createBackupService(o: {
   const conn = connFromConfig(o.db.config);
   const dir = join(o.userData, "backup");
   const secrets = new FileSecretStore(dir, safeStorage);
-  const auth = new GoogleAuth(GOOGLE_CLIENT, secrets, { openExternal: (url) => shell.openExternal(url) });
-  const drive = new DriveClient({ token: () => auth.accessToken(), onUnauthorized: () => auth.forgetAccessToken() });
+  const googleMode = Boolean(GOOGLE_CLIENT.clientId && GOOGLE_CLIENT.clientSecret);
+  let auth: AuthLike;
+  let drive: DriveLike;
+  let suggestion: (() => string | null) | undefined;
+  if (googleMode) {
+    const google = new GoogleAuth(GOOGLE_CLIENT, secrets, { openExternal: (url) => shell.openExternal(url) });
+    auth = google;
+    drive = new DriveClient({ token: () => google.accessToken(), onUnauthorized: () => google.forgetAccessToken() });
+  } else {
+    const folder = new FolderAuth({
+      file: join(dir, "folder.json"),
+      detect: () => findGoogleDriveFolders({ platform: process.platform, home: homedir() }),
+      pick: async (defaultPath) => {
+        const opts: Electron.OpenDialogOptions = {
+          title: "Choose where to keep Trivio backups",
+          buttonLabel: "Use this folder",
+          defaultPath,
+          properties: ["openDirectory", "createDirectory"],
+        };
+        const win = BrowserWindow.getFocusedWindow();
+        const r = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
+        return r.canceled ? null : (r.filePaths[0] ?? null);
+      },
+    });
+    auth = folder;
+    drive = new FolderDrive(() => folder.root());
+    suggestion = () => folder.suggestion()?.label ?? null;
+  }
   const service = new BackupService({
     dir,
     attachmentsDir: o.attachmentsDir,
     appVersion: app.getVersion(),
-    configured: Boolean(GOOGLE_CLIENT.clientId && GOOGLE_CLIENT.clientSecret),
+    configured: true,
+    mode: googleMode ? "google" : "folder",
+    suggestion,
     secrets,
     auth,
     drive,
@@ -77,6 +108,8 @@ export async function createBackupService(o: {
 
 const UNAVAILABLE: BackupStatus = {
   configured: false,
+  mode: "google",
+  suggestion: null,
   connected: false,
   email: null,
   passwordSet: false,
@@ -130,7 +163,7 @@ export function registerBackupIpc(getService: () => BackupService | null, getAll
     return s;
   };
   handle("backup:status", () => getService()?.status() ?? UNAVAILABLE);
-  handle("backup:connect", () => svc().connect());
+  handle("backup:connect", (opts?: { choose?: unknown }) => svc().connect({ choose: opts?.choose === true }));
   handle("backup:disconnect", () => svc().disconnect());
   handle("backup:setPassword", (pw: string) => svc().setPassword(typeof pw === "string" ? pw : ""));
   handle("backup:backupNow", () => svc().backupNow());
