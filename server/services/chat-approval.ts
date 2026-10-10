@@ -255,7 +255,10 @@ export async function describeProposalFor(
 ): Promise<ProposalPreview> {
   const preview = describeProposal(call);
   if (call.tool === "add_pf_transaction") {
-    const month = await closedMonthFor(db, organisationId, String(call.args.date ?? ""));
+    // Only a heads-up: a failed lookup must not stop the card from being shown.
+    const month = await closedMonthFor(db, organisationId, String(call.args.date ?? "")).catch(
+      () => null
+    );
     if (month) preview.warning = closedMonthWarning(month);
   }
   return preview;
