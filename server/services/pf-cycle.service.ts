@@ -147,18 +147,28 @@ async function openAndPrevious(db: Db, organisationId: string, today: string) {
   };
 }
 
-/** Close the current month on `endDate` (default today); the next starts the day after. */
+/**
+ * Close the current month. Pass the day the new month starts (`startsOn`,
+ * usually pay day) or the closed month's last day (`endDate`); with neither,
+ * the new month starts today — spending later on pay day belongs to the new
+ * month, not the one just closed.
+ */
 export async function closeCycle(
   db: Db,
   organisationId: string,
-  endDate: string | undefined,
+  when: { endDate?: string; startsOn?: string } = {},
   today = localToday()
 ) {
   const { open } = await openAndPrevious(db, organisationId, today);
-  const end = endDate ?? today;
+  const end = when.endDate ?? addDays(when.startsOn ?? today, -1);
   const start = dayOf(open.startDate);
   if (end < start)
-    throw bad(`This month started on ${fmt(start, true)} — it can't end before that.`);
+    throw bad(
+      when.endDate
+        ? `This month started on ${fmt(start, true)} — it can't end before that.`
+        : `This month started on ${fmt(start, true)} — the new month has to start after that.`
+    );
+  if (when.startsOn && when.startsOn > today) throw bad("The new month can't start in the future.");
   if (end > today) throw bad("A month can't be closed on a future date.");
   await db.$transaction([
     db.pfCycle.update({
@@ -168,6 +178,32 @@ export async function closeCycle(
     db.pfCycle.create({ data: { organisationId, startDate: dateOf(addDays(end, 1)) } }),
   ]);
   return { closed: { from: start, to: end }, nextStarts: addDays(end, 1) };
+}
+
+/**
+ * The closed month `day` ("YYYY-MM-DD") falls in, or null when it's in the
+ * open month or before the first one. A transaction dated there is saved but
+ * won't show in the current month — callers warn the user first.
+ */
+export async function closedMonthFor(
+  db: Pick<PrismaClient, "pfCycle">,
+  organisationId: string,
+  day: string
+): Promise<{ from: string; to: string } | null> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+  const row = await db.pfCycle.findFirst({
+    where: {
+      organisationId,
+      startDate: { lte: dateOf(day) },
+      endDate: { gte: dateOf(day) },
+    },
+  });
+  return row?.endDate ? { from: dayOf(row.startDate), to: dayOf(row.endDate) } : null;
+}
+
+/** The warning shown before saving into a closed month. */
+export function closedMonthWarning(month: { from: string; to: string }): string {
+  return `This date is in a closed month (${periodLabel(month.from, month.to)}), so it won't show in the current month.`;
 }
 
 /** Undo the last close: the previous month continues, taking in the current one. */

@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { trpc } from "@/lib/trpc/client";
 import { toast } from "sonner";
 import { CategoryPicker } from "./category-picker";
+import { localToday } from "@/app/(app)/pf/_components/pay-month-picker";
 
 interface AddTransactionDialogProps {
   open: boolean;
@@ -15,20 +16,25 @@ interface AddTransactionDialogProps {
   onComplete: () => void;
 }
 
-function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
 export function AddTransactionDialog({
   open,
   onOpenChange,
   onComplete,
 }: AddTransactionDialogProps) {
-  const [date, setDate] = useState(todayISO());
+  const [date, setDate] = useState(localToday());
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
   const [type, setType] = useState<"DEBIT" | "CREDIT">("DEBIT");
   const [category, setCategory] = useState("Other");
+
+  const { data: periods = [] } = trpc.pfCycles.list.useQuery(undefined, { enabled: open });
+  // A date inside a closed month is saved there and won't show in the current
+  // month — say so before saving, and offer today instead.
+  const closedMonth = periods.find(
+    (p) => p.kind === "closed" && p.to !== null && p.from <= date && date <= p.to
+  );
+  const current = periods[periods.length - 1];
+  const canMoveToToday = current?.kind === "open" && current.from <= localToday();
 
   const create = trpc.statementTransactions.create.useMutation({
     onSuccess: () => {
@@ -41,7 +47,7 @@ export function AddTransactionDialog({
   });
 
   function reset() {
-    setDate(todayISO());
+    setDate(localToday());
     setDescription("");
     setAmount("");
     setType("DEBIT");
@@ -88,6 +94,26 @@ export function AddTransactionDialog({
                 onChange={(e) => setDate(e.target.value)}
                 required
               />
+              {closedMonth && (
+                <div
+                  className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900"
+                  role="note"
+                  data-testid="closed-month-warning"
+                >
+                  This date is in a closed month ({closedMonth.label}), so it won&apos;t show in the
+                  current month.
+                  {canMoveToToday && (
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="h-auto p-0 pl-1 text-xs text-amber-900 underline"
+                      onClick={() => setDate(localToday())}
+                    >
+                      Move to current month
+                    </Button>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="flex flex-col gap-1.5">

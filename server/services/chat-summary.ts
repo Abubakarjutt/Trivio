@@ -1,6 +1,7 @@
 // Human-readable ✓/❌ lines for executed chat tool results. Shown to the user
 // only — never fed back to the model (it would copy them without acting).
 import type { ToolResult } from "./chat.service";
+import { periodLabel } from "./pf-cycle.service";
 
 // Summarise executed tool results into a human-readable block appended to the
 // assistant's reply. Returns "" when there's nothing worth summarising.
@@ -76,8 +77,11 @@ export function buildToolSummary(toolResults: ToolResult[]): string {
         case "get_ar_aging":
         case "get_ap_aging":
           return "";
-        case "add_pf_transaction":
-          return `✓ ${d?.type === "INCOME" ? "Income" : "Expense"} recorded — ${d?.merchantName}: ${d?.amount} (${d?.category}, ${d?.date})`;
+        case "add_pf_transaction": {
+          const line = `✓ ${d?.type === "INCOME" ? "Income" : "Expense"} recorded — ${d?.merchantName}: ${d?.amount} (${d?.category}, ${d?.date})`;
+          const m = d?.closedMonth as { from: string; to: string } | undefined;
+          return m ? `${line} — saved in your closed month ${periodLabel(m.from, m.to)}` : line;
+        }
         case "app_action": {
           const a = d as { action?: string; kind?: string } | undefined;
           if (a?.kind === "query") return "";

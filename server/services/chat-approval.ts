@@ -6,11 +6,14 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { executeToolCall, localDateString, NAMED_TOOLS, resolvePfCategory } from "./chat.service";
 import type { ToolCall, ToolResult } from "./chat.service";
 import { coerceInput, findAppAction, resolveAccountRefs } from "./chat-actions";
+import { closedMonthFor, closedMonthWarning } from "./pf-cycle.service";
 import { buildToolSummary } from "./chat-summary";
 
 export interface ProposalPreview {
   title: string;
   fields: { label: string; value: string }[];
+  /** Shown highlighted on the card: something to know before approving. */
+  warning?: string;
 }
 
 export interface PendingActionView {
@@ -232,12 +235,30 @@ export async function createProposals(
         messageId: params.messageId,
         tool: call.tool,
         args: call.args as Prisma.InputJsonValue,
-        preview: describeProposal(call) as unknown as Prisma.InputJsonValue,
+        preview: (await describeProposalFor(
+          db,
+          params.organisationId,
+          call
+        )) as unknown as Prisma.InputJsonValue,
       },
     });
     views.push(toView(row));
   }
   return views;
+}
+
+/** The card plus anything the user should know that needs the database. */
+export async function describeProposalFor(
+  db: PrismaClient,
+  organisationId: string,
+  call: ToolCall
+): Promise<ProposalPreview> {
+  const preview = describeProposal(call);
+  if (call.tool === "add_pf_transaction") {
+    const month = await closedMonthFor(db, organisationId, String(call.args.date ?? ""));
+    if (month) preview.warning = closedMonthWarning(month);
+  }
+  return preview;
 }
 
 export class PendingActionNotFound extends Error {

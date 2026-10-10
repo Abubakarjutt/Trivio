@@ -482,6 +482,37 @@ describe("pay months (close the month yourself)", () => {
     await expect(me.api.pfCycles.reopen()).rejects.toThrow(/no closed month/);
   });
 
+  it("closing on pay day starts the new month today, so later spending that day lands in it", async () => {
+    const me = await newUser();
+    await me.api.pfCycles.setStart({ startDate: day(-30) });
+    // No date: the new month starts today and the closed one ends yesterday.
+    expect(await me.api.pfCycles.close({})).toEqual({
+      closed: { from: day(-30), to: day(-1) },
+      nextStarts: day(0),
+    });
+    await me.api.statementTransactions.create({
+      date: day(0),
+      description: "Groceries",
+      merchantName: "Grocery Store",
+      amount: 140,
+      type: "DEBIT",
+      category: "Groceries",
+    });
+    const cur = (await me.api.pfCycles.list()).at(-1)!;
+    expect(cur).toMatchObject({ from: day(0), to: null, kind: "open" });
+    expect((await me.api.statementTransactions.list({ dateFrom: cur.from })).items).toHaveLength(1);
+
+    // A month that started today can't be closed again today.
+    await expect(me.api.pfCycles.close({})).rejects.toThrow(/new month has to start after/);
+    await me.api.pfCycles.reopen();
+    // An explicit start date works the same way, but never in the future.
+    await expect(me.api.pfCycles.close({ startsOn: day(1) })).rejects.toThrow(/future/);
+    expect(await me.api.pfCycles.close({ startsOn: day(-3) })).toEqual({
+      closed: { from: day(-30), to: day(-4) },
+      nextStarts: day(-3),
+    });
+  });
+
   it("monthly budgets follow the pay month; weekly ones stay rolling", async () => {
     const me = await newUser();
     await me.api.pfCycles.setStart({ startDate: day(-20) });
@@ -538,9 +569,9 @@ describe("pay months (close the month yourself)", () => {
     await expect(me.api.pfCycles.setStart({ startDate: day(1) })).rejects.toThrow(/future/);
     await expect(me.api.pfCycles.close({ endDate: "tomorrow" })).rejects.toThrow();
 
-    // Closing today (the default) starts the next month tomorrow.
-    expect((await me.api.pfCycles.close({})).nextStarts).toBe(day(1));
-    expect((await me.api.pfCycles.list()).at(-1)).toMatchObject({ from: day(1), kind: "open" });
+    // Closing with no date (pay day) starts the next month today.
+    expect((await me.api.pfCycles.close({})).nextStarts).toBe(day(0));
+    expect((await me.api.pfCycles.list()).at(-1)).toMatchObject({ from: day(0), kind: "open" });
 
     // Someone else's months are untouched.
     const theirs = await other.api.pfCycles.list();

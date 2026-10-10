@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   addDays,
   buildPeriods,
+  closedMonthWarning,
   daysBetween,
   localToday,
   periodLabel,
@@ -62,5 +63,13 @@ describe("buildPeriods", () => {
   it("adds no calendar months when there's no earlier history", () => {
     expect(buildPeriods([{ from: "2026-09-01", to: null }], "2026-09-01")).toHaveLength(1);
     expect(buildPeriods([{ from: "2026-09-01", to: null }], null)).toHaveLength(1);
+  });
+});
+
+describe("closedMonthWarning", () => {
+  it("names the closed month and why the transaction won't show", () => {
+    expect(closedMonthWarning({ from: "2026-09-01", to: "2026-10-09" })).toBe(
+      "This date is in a closed month (Sep 1 – Oct 9, 2026), so it won't show in the current month."
+    );
   });
 });

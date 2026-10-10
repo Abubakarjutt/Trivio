@@ -6,6 +6,7 @@
 import { describe, it, expect, beforeAll, beforeEach, vi } from "vitest";
 import { db, newUser, type QaUser } from "./harness";
 import { resolvePfCategory, localDateString } from "@/server/services/chat.service";
+import { addDays, localToday } from "@/server/services/pf-cycle.service";
 
 vi.mock("@/lib/auth", () => ({
   auth: vi.fn(),
@@ -84,7 +85,7 @@ type DoneEvent = {
     id: string;
     tool: string;
     status: string;
-    preview: { fields: { label: string; value: string }[] };
+    preview: { fields: { label: string; value: string }[]; warning?: string };
   }[];
 };
 
@@ -140,6 +141,30 @@ beforeEach(() => {
 });
 
 describe("approval cards for every change", () => {
+  it("an expense dated in a closed month says so before Approve and after", async () => {
+    const me = await newUser();
+    signedIn = me.userId;
+    const day = (offset: number) => addDays(localToday(), offset);
+    await me.api.pfCycles.setStart({ startDate: day(-20) });
+    await me.api.pfCycles.close({ startsOn: day(-5) }); // closed: day(-20) … day(-6)
+
+    script.push((_m, n) =>
+      call(n, "add_pf_transaction", spend("Old Shop", 40, { date: day(-10) }))
+    );
+    const { done } = await send({ message: "I spent 40 at Old Shop ten days ago" });
+    const card = done!.pendingActions[0]!;
+    expect(card.preview.warning).toMatch(/closed month .* won't show in the current month/);
+
+    const approved = await decide(card.id, "approve");
+    const summary = (approved.body!.action as { summary?: string }).summary;
+    expect(summary).toMatch(/saved in your closed month/);
+
+    // Today's spending is in the open month: no warning.
+    script.push((_m, n) => call(n, "add_pf_transaction", spend("New Shop", 15)));
+    const today = await send({ message: "15 at New Shop", conversationId: done!.conversationId });
+    expect(today.done!.pendingActions[0]!.preview.warning).toBeUndefined();
+  });
+
   it("a recorded expense waits for Approve, then appears in Transactions exactly once", async () => {
     script.push(
       (_m, n) => `✓ Expense recorded\n${call(n, "add_pf_transaction", spend("FreshMart", 500))}`

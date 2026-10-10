@@ -48,7 +48,7 @@ interface Message {
 interface PendingAction {
   id: string;
   tool: string;
-  preview: { title: string; fields: { label: string; value: string }[] };
+  preview: { title: string; fields: { label: string; value: string }[]; warning?: string };
   status: "PENDING" | "EXECUTING" | "APPROVED" | "REJECTED" | "FAILED";
   summary?: string | null;
   error?: string | null;
@@ -1059,6 +1059,15 @@ function ApprovalCard({
             </div>
           ))}
         </dl>
+      )}
+      {action.preview.warning && (
+        <p
+          className="mb-2 rounded-md bg-amber-100 px-2 py-1.5 font-medium text-amber-900"
+          role="note"
+          data-testid="chat-approval-warning"
+        >
+          {action.preview.warning}
+        </p>
       )}
       {action.status === "PENDING" && (
         <div className="flex gap-2">

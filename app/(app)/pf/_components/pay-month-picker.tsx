@@ -30,7 +30,7 @@ export type PayMonth = {
 /** "current" follows the open month (also after a close), "all" = all time, else a period key. */
 export type PayMonthSelection = "current" | "all" | (string & {});
 
-function localToday(): string {
+export function localToday(): string {
   const d = new Date();
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
@@ -44,7 +44,13 @@ const nice = (day: string) =>
     timeZone: "UTC",
   });
 
-function nextDay(day: string) {
+function prevDay(day: string) {
+  const d = new Date(`${day}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+export function nextDay(day: string) {
   const d = new Date(`${day}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + 1);
   return d.toISOString().slice(0, 10);
@@ -205,39 +211,50 @@ export function PayMonthPicker({
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                close.mutate({ endDate: date });
+                close.mutate({ startsOn: date });
               }}
             >
               <DialogHeader>
                 <DialogTitle>Close this month</DialogTitle>
                 <DialogDescription>
                   This month started on {nice(open.from)}. Close it when your salary arrives — the
-                  next month starts the day after its last day.
+                  new month starts on pay day.
                 </DialogDescription>
               </DialogHeader>
               <div className="my-5 space-y-2">
-                <Label htmlFor="close-month-date">Last day of this month</Label>
-                <Input
-                  id="close-month-date"
-                  type="date"
-                  value={date}
-                  min={open.from}
-                  max={localToday()}
-                  onChange={(e) => setDate(e.target.value)}
-                  required
-                />
-                {date && (
-                  <p className="text-muted-foreground text-xs">
-                    The new month starts on {nice(nextDay(date))}. Transactions are placed by their
-                    date, so anything dated after that goes into the new month.
+                {open.from >= localToday() ? (
+                  <p className="text-sm">
+                    This month only started today. You can close it from tomorrow.
                   </p>
+                ) : (
+                  <>
+                    <Label htmlFor="close-month-date">New month starts on</Label>
+                    <Input
+                      id="close-month-date"
+                      type="date"
+                      value={date}
+                      min={nextDay(open.from)}
+                      max={localToday()}
+                      onChange={(e) => setDate(e.target.value)}
+                      required
+                    />
+                    {date && (
+                      <p className="text-muted-foreground text-xs">
+                        This month ends on {nice(prevDay(date))}. Transactions are placed by their
+                        date, so anything dated {nice(date)} or later goes into the new month.
+                      </p>
+                    )}
+                  </>
                 )}
               </div>
               <DialogFooter>
                 <Button type="button" variant="ghost" onClick={() => setDialog(null)}>
                   Cancel
                 </Button>
-                <Button type="submit" disabled={close.isPending || !date}>
+                <Button
+                  type="submit"
+                  disabled={close.isPending || !date || open.from >= localToday()}
+                >
                   Close month
                 </Button>
               </DialogFooter>

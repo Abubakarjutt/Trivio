@@ -22,7 +22,7 @@ import { extractionQueue } from "@/lib/queue";
 import { CATEGORY_NAMES } from "@/lib/categories";
 import { createManualPfTransaction } from "./pf-transaction.service";
 import { getSpentForCategory, periodFrom } from "./easyfinance.service";
-import { budgetPeriodStart, dayOf } from "./pf-cycle.service";
+import { budgetPeriodStart, closedMonthFor, dayOf } from "./pf-cycle.service";
 import { buildActionCatalog, findAppAction, runAppAction } from "./chat-actions";
 import { formatActionEvents, stripStatusLines } from "./chat-approval";
 
@@ -1807,6 +1807,8 @@ async function toolAddPfTransaction(
     type,
     category,
   });
+  // Already saved: a failed lookup must not report failure (the user would retry → duplicate).
+  const closedMonth = await closedMonthFor(db, organisationId, date).catch(() => null);
   return {
     tool: "add_pf_transaction",
     success: true,
@@ -1817,6 +1819,8 @@ async function toolAddPfTransaction(
       amount,
       type: type === "CREDIT" ? "INCOME" : "EXPENSE",
       category,
+      // Tell the user where it went — it won't show in the current month.
+      ...(closedMonth && { closedMonth }),
     },
   };
 }
