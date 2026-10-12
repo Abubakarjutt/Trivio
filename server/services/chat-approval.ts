@@ -7,6 +7,7 @@ import { executeToolCall, localDateString, NAMED_TOOLS, resolvePfCategory } from
 import type { ToolCall, ToolResult } from "./chat.service";
 import { coerceInput, findAppAction, resolveAccountRefs } from "./chat-actions";
 import { closedMonthFor, closedMonthWarning } from "./pf-cycle.service";
+import { findActiveGoal } from "./pf-transaction.service";
 import { buildToolSummary } from "./chat-summary";
 
 export interface ProposalPreview {
@@ -63,7 +64,7 @@ export function callKey(call: ToolCall): string {
  * Fill in defaults NOW so the user approves exactly what will be written —
  * e.g. a missing date must not silently become "the day you clicked Approve".
  */
-export function canonicalizeCall(call: ToolCall): ToolCall {
+export function canonicalizeCall(call: ToolCall, ownCategories: string[] = []): ToolCall {
   if (call.tool === "create_journal_entry" && !call.args.date) {
     return { tool: call.tool, args: { ...call.args, date: localDateString() } };
   }
@@ -74,7 +75,7 @@ export function canonicalizeCall(call: ToolCall): ToolCall {
       args: {
         ...call.args,
         type: kind === "INCOME" || kind === "CREDIT" ? "INCOME" : "EXPENSE",
-        category: resolvePfCategory(call.args.category),
+        category: resolvePfCategory(call.args.category, ownCategories),
         date: (call.args.date as string | undefined) || localDateString(),
       },
     };
@@ -125,6 +126,8 @@ export async function checkProposalRefs(
         accountId: String(l.accountCode ?? ""),
       }));
       await resolveAccountRefs(db, organisationId, refs);
+    } else if (call.tool === "add_pf_transaction" && String(call.args.goal ?? "").trim()) {
+      await findActiveGoal(db, organisationId, String(call.args.goal));
     }
     return null;
   } catch (err) {
@@ -174,6 +177,7 @@ export function describeProposal(call: ToolCall): ProposalPreview {
       { label: "Category", value: String(a.category ?? "") },
       { label: "Date", value: String(a.date ?? "") },
     ];
+    if (String(a.goal ?? "").trim()) fields.push({ label: "Also add to goal", value: String(a.goal) });
     if (a.description && a.description !== a.merchantName) {
       fields.push({ label: "Description", value: String(a.description) });
     }
@@ -260,6 +264,12 @@ export async function describeProposalFor(
       () => null
     );
     if (month) preview.warning = closedMonthWarning(month);
+    // Show the goal's real name, not the model's paraphrase ("emergency").
+    const goalField = preview.fields.find((f) => f.label === "Also add to goal");
+    if (goalField) {
+      const goal = await findActiveGoal(db, organisationId, goalField.value).catch(() => null);
+      if (goal) goalField.value = goal.name;
+    }
   }
   return preview;
 }

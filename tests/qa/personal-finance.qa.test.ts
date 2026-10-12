@@ -224,6 +224,37 @@ describe("budgets", () => {
   });
 });
 
+describe("your own categories (from budgets)", () => {
+  it("a budget's own category is a transaction category, and spending in it counts", async () => {
+    const me = await newUser();
+    const b = await me.api.budgets.create({
+      name: "Savings",
+      category: "Stocks/Savings Fund",
+      limitAmount: 100000,
+    });
+    // Built-in names aren't repeated as "own"; archived budgets don't add any.
+    await me.api.budgets.create({ name: "Food", category: "groceries", limitAmount: 1 });
+    const old = await me.api.budgets.create({ name: "Old", category: "Gone", limitAmount: 1 });
+    await me.api.budgets.archive({ id: old.id });
+
+    const cats = await me.api.statementTransactions.categories();
+    expect(cats.own).toEqual(["Stocks/Savings Fund"]);
+    expect(cats.builtIn).toContain("Investments & Trading");
+
+    await me.api.statementTransactions.create({
+      date: iso(today()),
+      description: "Monthly saving",
+      merchantName: "Savings account",
+      amount: 80000,
+      type: "DEBIT",
+      category: "Stocks/Savings Fund",
+    });
+    const got = (await me.api.budgets.list({})).find((x) => x.id === b.id)!;
+    expect(got.spent).toBe(80000);
+    expect(got.remaining).toBe(20000);
+  });
+});
+
 describe("watchlists", () => {
   it("flags a category once spending passes the threshold", async () => {
     const w = await u.api.watchlists.create({
@@ -282,6 +313,78 @@ describe("goals", () => {
     await u.api.goals.delete({ id: g.id });
     expect((await u.api.goals.list({})).map((x) => x.id)).not.toContain(g.id);
     await expect(u.api.goals.create({ name: "Bad", targetAmount: -5 })).rejects.toThrow();
+  });
+});
+
+describe("transactions that pay into a goal", () => {
+  const save = (who: QaUser, amount: number, goalId?: string) =>
+    who.api.statementTransactions.create({
+      date: iso(today()),
+      description: "Saving",
+      merchantName: "Savings account",
+      amount,
+      type: "DEBIT",
+      category: "Stocks/Savings Fund",
+      ...(goalId && { goalId }),
+    });
+  const goal = async (who: QaUser, id: string) =>
+    (await who.api.goals.list({})).find((x) => x.id === id)!;
+
+  it("adds the amount to the goal; deleting the transaction takes it back off", async () => {
+    const me = await newUser();
+    const g = await me.api.goals.create({ name: "Emergency Fund", targetAmount: 500000 });
+    const t = await save(me, 80000, g.id);
+    expect((await goal(me, g.id)).currentAmount).toBe(80000);
+    const row = (await me.api.statementTransactions.list({})).items.find((x) => x.id === t.id)!;
+    expect(row.goal?.name).toBe("Emergency Fund");
+
+    await save(me, 1000); // no goal: the goal doesn't move
+    expect((await goal(me, g.id)).currentAmount).toBe(80000);
+
+    await me.api.statementTransactions.deleteTransaction({ id: t.id });
+    expect((await goal(me, g.id)).currentAmount).toBe(0);
+  });
+
+  it("completes the goal at its target and reopens it when the money is taken back", async () => {
+    const me = await newUser();
+    const g = await me.api.goals.create({ name: "Laptop", targetAmount: 1000, currentAmount: 600 });
+    const t = await save(me, 400, g.id);
+    expect((await goal(me, g.id)).status).toBe("COMPLETED");
+    // A completed goal takes no more.
+    await expect(save(me, 1, g.id)).rejects.toThrow(/isn't an active goal/);
+
+    await me.api.statementTransactions.deleteTransaction({ id: t.id });
+    const back = await goal(me, g.id);
+    expect(back.currentAmount).toBe(600);
+    expect(back.status).toBe("ACTIVE");
+  });
+
+  it("never goes below zero, and deleting a whole batch takes back every contribution", async () => {
+    const me = await newUser();
+    const g = await me.api.goals.create({ name: "Car", targetAmount: 900000 });
+    const a = await save(me, 5000, g.id);
+    await save(me, 7000, g.id);
+    await me.api.goals.update({ id: g.id, currentAmount: 3000 }); // edited by hand
+    await me.api.statementTransactions.deleteByBatch({ batchId: a.importBatchId });
+    expect((await goal(me, g.id)).currentAmount).toBe(0);
+  });
+
+  it("a failed goal leaves no transaction behind, and other orgs' goals can't be used", async () => {
+    const me = await newUser();
+    const theirs = await other.api.goals.create({ name: "Theirs", targetAmount: 10 });
+    await expect(save(me, 50, theirs.id)).rejects.toThrow(/doesn't exist/);
+    expect((await me.api.statementTransactions.list({})).items).toHaveLength(0);
+    expect((await goal(other, theirs.id)).currentAmount).toBe(0);
+  });
+
+  it("deleting the goal keeps the transaction", async () => {
+    const me = await newUser();
+    const g = await me.api.goals.create({ name: "Trip", targetAmount: 100 });
+    const t = await save(me, 40, g.id);
+    await me.api.goals.delete({ id: g.id });
+    const row = (await me.api.statementTransactions.list({})).items.find((x) => x.id === t.id)!;
+    expect(row.goal).toBeNull();
+    await me.api.statementTransactions.deleteTransaction({ id: t.id }); // nothing to take back
   });
 });
 

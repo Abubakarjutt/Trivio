@@ -644,6 +644,7 @@ model Goal {
   status         GoalStatus   @default(ACTIVE)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
+  transactions   StatementTransaction[]
 
   @@index([organisationId])
 }
@@ -756,11 +757,16 @@ model StatementTransaction {
 
   isExcluded     Boolean                  @default(false)
   isSampleData   Boolean                  @default(false)
+  /// The savings goal this transaction paid into (its amount is in the goal's
+  /// currentAmount; deleting the transaction takes it back off).
+  goalId         String?
+  goal           Goal?                    @relation(fields: [goalId], references: [id], onDelete: SetNull)
   createdAt      DateTime                 @default(now())
   updatedAt      DateTime                 @updatedAt
 
   @@index([organisationId])
   @@index([importBatchId])
+  @@index([goalId])
   @@index([organisationId, date])
   @@index([organisationId, category])
 }

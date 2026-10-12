@@ -5,6 +5,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { trpc } from "@/lib/trpc/client";
 import { toast } from "sonner";
 import { CategoryPicker } from "./category-picker";
@@ -26,6 +33,10 @@ export function AddTransactionDialog({
   const [amount, setAmount] = useState("");
   const [type, setType] = useState<"DEBIT" | "CREDIT">("DEBIT");
   const [category, setCategory] = useState("Other");
+  const [goalId, setGoalId] = useState("none");
+
+  const utils = trpc.useUtils();
+  const { data: goals = [] } = trpc.goals.list.useQuery({ status: "ACTIVE" }, { enabled: open });
 
   const { data: periods = [] } = trpc.pfCycles.list.useQuery(undefined, { enabled: open });
   // A date inside a closed month is saved there and won't show in the current
@@ -38,7 +49,9 @@ export function AddTransactionDialog({
 
   const create = trpc.statementTransactions.create.useMutation({
     onSuccess: () => {
-      toast.success("Transaction added");
+      toast.success(goalId !== "none" ? "Transaction added and counted towards your goal" : "Transaction added");
+      utils.goals.list.invalidate();
+      utils.budgets.list.invalidate();
       onComplete();
       onOpenChange(false);
       reset();
@@ -52,6 +65,7 @@ export function AddTransactionDialog({
     setAmount("");
     setType("DEBIT");
     setCategory("Other");
+    setGoalId("none");
   }
 
   function handleSubmit(e: React.FormEvent) {
@@ -65,6 +79,7 @@ export function AddTransactionDialog({
       amount: parsedAmount,
       type,
       category,
+      ...(goalId !== "none" && { goalId }),
     });
   }
 
@@ -169,6 +184,30 @@ export function AddTransactionDialog({
                 <CategoryPicker value={category} onChange={setCategory} />
               </div>
             </div>
+
+            {goals.length > 0 && (
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="txn-goal">Also add to goal</Label>
+                <Select value={goalId} onValueChange={setGoalId}>
+                  <SelectTrigger id="txn-goal">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No goal</SelectItem>
+                    {goals.map((g) => (
+                      <SelectItem key={g.id} value={g.id}>
+                        {g.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {goalId !== "none" && (
+                  <p className="text-muted-foreground text-xs">
+                    The amount is added to this goal too. Deleting the transaction takes it back off.
+                  </p>
+                )}
+              </div>
+            )}
 
             <div className="flex justify-end gap-2 pt-2">
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

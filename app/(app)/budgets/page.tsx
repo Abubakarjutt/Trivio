@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Loader2, Plus, Trash2, Archive, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 import { formatCurrency } from "@/lib/utils";
+import { usePfCategories } from "@/app/(app)/pf/transactions/_components/category-picker";
 
 const PERIODS = ["WEEKLY", "MONTHLY", "QUARTERLY", "YEARLY"] as const;
 
@@ -35,19 +36,20 @@ export default function BudgetsPage() {
   const [form, setForm] = useState({ name: "", category: "", limitAmount: "", period: "MONTHLY" });
 
   const { data: budgets = [], isLoading } = trpc.budgets.list.useQuery({ includeArchived: false });
+  const categories = usePfCategories();
 
   const create = trpc.budgets.create.useMutation({
-    onSuccess: () => { utils.budgets.list.invalidate(); setOpen(false); setForm({ name: "", category: "", limitAmount: "", period: "MONTHLY" }); toast.success("Budget created"); },
+    onSuccess: () => { utils.budgets.list.invalidate(); utils.statementTransactions.categories.invalidate(); setOpen(false); setForm({ name: "", category: "", limitAmount: "", period: "MONTHLY" }); toast.success("Budget created"); },
     onError: (e) => toast.error(e.message),
   });
 
   const archive = trpc.budgets.archive.useMutation({
-    onSuccess: () => { utils.budgets.list.invalidate(); toast.success("Budget archived"); },
+    onSuccess: () => { utils.budgets.list.invalidate(); utils.statementTransactions.categories.invalidate(); toast.success("Budget archived"); },
     onError: (e) => toast.error(e.message),
   });
 
   const del = trpc.budgets.delete.useMutation({
-    onSuccess: () => { utils.budgets.list.invalidate(); toast.success("Budget deleted"); },
+    onSuccess: () => { utils.budgets.list.invalidate(); utils.statementTransactions.categories.invalidate(); toast.success("Budget deleted"); },
     onError: (e) => toast.error(e.message),
   });
 
@@ -152,8 +154,11 @@ export default function BudgetsPage() {
             </div>
             <div className="space-y-1.5">
               <Label>Category</Label>
-              <Input placeholder="e.g. Marketing & Advertising" value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} />
-              <p className="text-xs text-muted-foreground">Must match part of an expense account name to track spending automatically.</p>
+              <Input placeholder="e.g. Groceries, or your own like Savings" list="budget-categories" value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))} />
+              <datalist id="budget-categories">
+                {categories.map((c) => <option key={c} value={c} />)}
+              </datalist>
+              <p className="text-xs text-muted-foreground">Transactions in this category count against the budget. A new name becomes a category you can pick for transactions.</p>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">

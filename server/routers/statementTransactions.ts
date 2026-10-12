@@ -1,7 +1,12 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, orgProcedure } from "@/server/trpc";
-import { createManualPfTransaction } from "@/server/services/pf-transaction.service";
+import {
+  createManualPfTransaction,
+  deletePfTransactions,
+} from "@/server/services/pf-transaction.service";
+import { ownPfCategories } from "@/server/services/pf-categories.service";
+import { CATEGORY_NAMES } from "@/lib/categories";
 import { buildInsights } from "@/server/services/pf-insights.service";
 import {
   dateOf,
@@ -28,6 +33,12 @@ function monthRange(month: string): { gte: Date; lt: Date } {
 }
 
 export const statementTransactionsRouter = createTRPCRouter({
+  /** Categories a transaction can have: the user's own (from their budgets) first, then built-in. */
+  categories: orgProcedure.query(async ({ ctx }) => ({
+    own: await ownPfCategories(ctx.db, ctx.organisationId),
+    builtIn: CATEGORY_NAMES as string[],
+  })),
+
   list: orgProcedure
     .input(
       z.object({
@@ -65,6 +76,7 @@ export const statementTransactionsRouter = createTRPCRouter({
         orderBy: [{ date: "desc" }, { createdAt: "desc" }],
         take: input.limit + 1,
         skip,
+        include: { goal: { select: { name: true } } },
       });
 
       let nextCursor: string | undefined;
@@ -86,6 +98,8 @@ export const statementTransactionsRouter = createTRPCRouter({
         category: z.string().min(1),
         mccCode: z.string().optional(),
         mccLabel: z.string().optional(),
+        /** Also add the amount to this savings goal. */
+        goalId: z.string().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
@@ -139,7 +153,7 @@ export const statementTransactionsRouter = createTRPCRouter({
         where: { id: input.id, organisationId: ctx.organisationId },
       });
       if (!txn) throw new TRPCError({ code: "NOT_FOUND" });
-      await ctx.db.statementTransaction.delete({ where: { id: input.id } });
+      await deletePfTransactions(ctx.db, ctx.organisationId, { id: input.id });
       return { success: true };
     }),
 
@@ -150,9 +164,7 @@ export const statementTransactionsRouter = createTRPCRouter({
         where: { id: input.batchId, organisationId: ctx.organisationId },
       });
       if (!batch) throw new TRPCError({ code: "NOT_FOUND" });
-      await ctx.db.statementTransaction.deleteMany({
-        where: { importBatchId: input.batchId, organisationId: ctx.organisationId },
-      });
+      await deletePfTransactions(ctx.db, ctx.organisationId, { importBatchId: input.batchId });
       await ctx.db.statementImportBatch.delete({ where: { id: input.batchId } });
       return { success: true };
     }),

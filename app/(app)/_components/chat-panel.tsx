@@ -1,11 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
 import { trpc } from "@/lib/trpc/client";
 import { useToast } from "@/lib/hooks/use-toast";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { VoiceInputButton } from "./voice-input-button";
 import {
   MessageSquare,
@@ -1193,7 +1192,16 @@ export function ChatPanel() {
   const [streamingContent, setStreamingContent] = useState("");
   const [loadConvId, setLoadConvId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // The box grows with what's typed or dictated (up to ~6 lines, then scrolls),
+  // so a long dictated sentence wraps instead of running off to the side.
+  useLayoutEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [input]);
   const abortRef = useRef<AbortController | null>(null);
   // What was in the box when voice text started arriving — live text is
   // shown after it and replaced on each update.
@@ -1628,15 +1636,24 @@ export function ChatPanel() {
                 e.preventDefault();
                 handleSend();
               }}
-              className="flex gap-2"
+              className="flex items-end gap-2"
             >
-              <Input
+              <textarea
                 ref={inputRef}
+                rows={1}
                 placeholder="Ask me anything..."
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  // Enter sends; Shift+Enter is a new line. Not while an IME is composing.
+                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    handleSend();
+                  }
+                }}
                 disabled={isStreaming}
-                className="flex-1 text-sm"
+                aria-label="Message"
+                className="border-input placeholder:text-muted-foreground/50 focus-visible:ring-primary/30 focus-visible:border-primary/60 disabled:bg-muted/50 max-h-40 min-h-9 flex-1 resize-none overflow-y-auto rounded-xl border bg-white px-3 py-2 text-sm leading-5 shadow-[0_1px_2px_0_rgb(0,0,0,0.05),0_0_0_1px_rgb(0,0,0,0.02)] transition-colors focus-visible:ring-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
               />
               <VoiceInputButton
                 active={isOpen}

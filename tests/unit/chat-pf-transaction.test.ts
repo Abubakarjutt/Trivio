@@ -10,7 +10,10 @@ import { buildSystemPrompt, executeToolCall, parseToolCalls } from "@/server/ser
 
 function fakeDb() {
   const created: Record<string, unknown>[] = [];
-  const db = {
+  const db: Record<string, unknown> = {
+    // The row (and any goal contribution) is written in one transaction.
+    $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(db)),
+    budget: { findMany: vi.fn().mockResolvedValue([]) },
     statementImportBatch: {
       findFirst: vi.fn().mockResolvedValue(null),
       create: vi.fn().mockResolvedValue({ id: "batch-1" }),

@@ -20,7 +20,8 @@ import {
 import { createBill, postBillToLedger, recordBillPayment, voidBill } from "./bill.service";
 import { extractionQueue } from "@/lib/queue";
 import { CATEGORY_NAMES } from "@/lib/categories";
-import { createManualPfTransaction } from "./pf-transaction.service";
+import { createManualPfTransaction, findActiveGoal } from "./pf-transaction.service";
+import { ownPfCategories, resolvePfCategory } from "./pf-categories.service";
 import { getSpentForCategory, periodFrom } from "./easyfinance.service";
 import { budgetPeriodStart, closedMonthFor, dayOf } from "./pf-cycle.service";
 import { buildActionCatalog, findAppAction, runAppAction } from "./chat-actions";
@@ -160,7 +161,7 @@ Reports:
 - get_ar_aging: {}
 - get_ap_aging: {}
 Personal Finance Transactions:
-- add_pf_transaction: {"merchantName","amount","type":"EXPENSE|INCOME","category?","date?","description?"} — record a personal expense or income (e.g. "I spent 500 on groceries", "got paid 80000 salary"). No account codes needed. category must be one of: ${CATEGORY_NAMES.join(", ")} (defaults to Other)
+- add_pf_transaction: {"merchantName","amount","type":"EXPENSE|INCOME","category?","date?","description?","goal?"} — record a personal expense or income (e.g. "I spent 500 on groceries", "got paid 80000 salary"). No account codes needed. category must be one of the user's own categories (listed under Personal finance below) or: ${CATEGORY_NAMES.join(", ")} (defaults to Other). goal = the name of an active savings goal when the money goes towards it (e.g. "put 20000 in savings for my Emergency Fund") — the same transaction is then added to that goal too, so never also call goals.contribute for it
 Personal Finance Budgets:
 - set_budget: {"category","limitAmount","name?","period?":"WEEKLY|MONTHLY|QUARTERLY|YEARLY"} — create or update a single category budget (period defaults to MONTHLY)
 - set_budgets: {"budgets":[{"category","limitAmount","name?","period?"},...]} — create or update multiple category budgets at once; use this when the user asks to set several budgets, wants a full budget plan, or asks to readjust existing budgets (e.g. "cut all by 10%", "move 1000 from Transport to Food", "keep total under 30000")
@@ -235,6 +236,10 @@ export function buildSystemPrompt(
     currency: string;
     accounts: { code: string; name: string; type: string }[];
     contacts: { name: string; type: string }[];
+    /** The user's own PF categories (their budgets'). */
+    pfCategories?: string[];
+    /** Active savings goals' names. */
+    goals?: string[];
   },
   nonce: string,
   actionCatalog?: string,
@@ -268,6 +273,7 @@ export function buildSystemPrompt(
   const prompt = `You are an accounting assistant for "${orgContext.orgName}". Currency: ${orgContext.currency}. Today's date: ${today}.
 Accounts: ${accountList}
 Contacts: ${contactList}
+Personal finance — the user's own categories (from their budgets; prefer these when one fits, so the budget counts the transaction): ${orgContext.pfCategories?.length ? orgContext.pfCategories.join(", ") : "none"}. Active savings goals: ${orgContext.goals?.length ? orgContext.goals.join(", ") : "none"}.
 ${APP_UI_GUIDE}
 ${toolDefs}${
     actionCatalog
@@ -1756,23 +1762,8 @@ async function toolSetBudgets(
   return { tool: "set_budgets", success: true, data: { saved: results.length, budgets: results } };
 }
 
-/**
- * Local models paraphrase categories ("groceries", "Salary") — snap to the
- * canonical name case-insensitively (exact, then partial), else "Other" so
- * the row still saves.
- */
-export function resolvePfCategory(raw: unknown): string {
-  const wanted = String(raw ?? "")
-    .trim()
-    .toLowerCase();
-  return (
-    CATEGORY_NAMES.find((c) => c.toLowerCase() === wanted) ??
-    (wanted.length >= 3
-      ? CATEGORY_NAMES.find((c) => c.toLowerCase().includes(wanted))
-      : undefined) ??
-    "Other"
-  );
-}
+// Snaps a paraphrased category to a real one (the user's own first).
+export { resolvePfCategory } from "./pf-categories.service";
 
 async function toolAddPfTransaction(
   db: PrismaClient,
@@ -1792,8 +1783,19 @@ async function toolAddPfTransaction(
   }
   const kind = String(args.type ?? "EXPENSE").toUpperCase();
   const type = kind === "INCOME" || kind === "CREDIT" ? "CREDIT" : "DEBIT";
-  const category = resolvePfCategory(args.category);
+  const category = resolvePfCategory(
+    args.category,
+    await ownPfCategories(db, organisationId).catch(() => [])
+  );
   const date = (args.date as string | undefined) ?? localDateString();
+  let goal: { id: string; name: string } | undefined;
+  if (String(args.goal ?? "").trim()) {
+    try {
+      goal = await findActiveGoal(db, organisationId, String(args.goal));
+    } catch (err) {
+      return { tool: "add_pf_transaction", success: false, error: (err as Error).message };
+    }
+  }
   const description =
     String(args.description ?? merchantName)
       .trim()
@@ -1806,6 +1808,7 @@ async function toolAddPfTransaction(
     amount,
     type,
     category,
+    goalId: goal?.id,
   });
   // Already saved: a failed lookup must not report failure (the user would retry → duplicate).
   const closedMonth = await closedMonthFor(db, organisationId, date).catch(() => null);
@@ -1819,6 +1822,7 @@ async function toolAddPfTransaction(
       amount,
       type: type === "CREDIT" ? "INCOME" : "EXPENSE",
       category,
+      ...(goal && { goal: goal.name }),
       // Tell the user where it went — it won't show in the current month.
       ...(closedMonth && { closedMonth }),
     },
@@ -2680,6 +2684,20 @@ export async function buildChatMessages(
     take: 20,
   });
 
+  // Best-effort: the prompt still works without them.
+  const [pfCategories, goals] = await Promise.all([
+    ownPfCategories(db, params.organisationId).catch(() => [] as string[]),
+    (async () => {
+      const rows = await db.goal.findMany({
+        where: { organisationId: params.organisationId, status: "ACTIVE" },
+        select: { name: true },
+        orderBy: { createdAt: "asc" },
+        take: 30,
+      });
+      return rows.map((g) => g.name);
+    })().catch(() => [] as string[]),
+  ]);
+
   const history = await db.chatMessage.findMany({
     where: {
       conversationId: params.conversationId,
@@ -2702,6 +2720,8 @@ export async function buildChatMessages(
       currency: org.currency,
       accounts: accounts.map((a) => ({ code: a.code, name: a.name, type: a.type })),
       contacts: contacts.map((c) => ({ name: c.name, type: c.type })),
+      pfCategories,
+      goals,
     },
     nonce,
     buildActionCatalog(),

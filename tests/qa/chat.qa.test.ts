@@ -165,6 +165,50 @@ describe("approval cards for every change", () => {
     expect(today.done!.pendingActions[0]!.preview.warning).toBeUndefined();
   });
 
+  it("savings land in the user's own budget category and, with a goal, in the goal too", async () => {
+    const me = await newUser();
+    signedIn = me.userId;
+    const budget = await me.api.budgets.create({
+      name: "Savings",
+      category: "Stocks/Savings Fund",
+      limitAmount: 100000,
+    });
+    const goal = await me.api.goals.create({ name: "Emergency Fund", targetAmount: 500000 });
+    const saving = (goalName: string) =>
+      spend("Savings account", 80000, { category: "savings", goal: goalName });
+
+    script.push((msgs, n) => {
+      // The model is told the user's own categories and goals.
+      expect(msgs[0]!.content).toMatch(/own categories[^\n]*Stocks\/Savings Fund/);
+      expect(msgs[0]!.content).toMatch(/Active savings goals: Emergency Fund/);
+      return call(n, "add_pf_transaction", saving("Holiday"));
+    });
+    script.push((msgs, n) => {
+      // A goal that doesn't exist goes back to the model with the real ones.
+      expect(msgs.at(-1)!.content).toMatch(/No active goal "Holiday"[\s\S]*Emergency Fund/);
+      return call(n, "add_pf_transaction", saving("emergency"));
+    });
+    const { done } = await send({ message: "put 80000 in savings for my emergency fund" });
+    expect(done!.pendingActions).toHaveLength(1);
+    const card = done!.pendingActions[0]!;
+    expect(card.preview.fields).toContainEqual({ label: "Category", value: "Stocks/Savings Fund" });
+    expect(card.preview.fields).toContainEqual({
+      label: "Also add to goal",
+      value: "Emergency Fund",
+    });
+
+    expect((await decide(card.id, "approve")).body!.action.status).toBe("APPROVED");
+    const row = await db.statementTransaction.findFirstOrThrow({
+      where: { organisationId: me.orgId },
+    });
+    expect(row.category).toBe("Stocks/Savings Fund");
+    expect(row.goalId).toBe(goal.id);
+    const b = (await me.api.budgets.list({})).find((x) => x.id === budget.id)!;
+    expect(b.spent).toBe(80000);
+    const g = (await me.api.goals.list({})).find((x) => x.id === goal.id)!;
+    expect(g.currentAmount).toBe(80000);
+  });
+
   it("a recorded expense waits for Approve, then appears in Transactions exactly once", async () => {
     script.push(
       (_m, n) => `✓ Expense recorded\n${call(n, "add_pf_transaction", spend("FreshMart", 500))}`

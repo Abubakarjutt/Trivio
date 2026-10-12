@@ -26,8 +26,7 @@ import { toast } from "sonner";
 import { ImportDialog } from "./_components/import-dialog";
 import { AddTransactionDialog } from "./_components/add-transaction-dialog";
 import { TransactionCard } from "./_components/transaction-card";
-import { CategoryPicker } from "./_components/category-picker";
-import { CATEGORY_DEFINITIONS } from "@/server/services/statement-categorization.service";
+import { CategoryPicker, usePfCategories } from "./_components/category-picker";
 import {
   PayMonthPicker,
   usePayMonths,
@@ -124,11 +123,12 @@ export default function PfTransactionsPage() {
     onSuccess: () => {
       utils.statementTransactions.list.invalidate();
       utils.statementTransactions.summary.invalidate();
+      utils.goals.list.invalidate(); // a goal contribution is taken back off
     },
     onError: (e) => toast.error(e.message),
   });
 
-  const categories = CATEGORY_DEFINITIONS.map((c) => c.name);
+  const categories = usePfCategories();
 
   function handleMonthChange(m: PayMonthSelection) {
     payMonths.setSelection(m);
@@ -341,6 +341,9 @@ export default function PfTransactionsPage() {
                       <div className="text-muted-foreground/60 max-w-xs truncate text-xs">
                         {txn.description}
                       </div>
+                      {txn.goal && (
+                        <div className="text-xs text-emerald-700">Added to goal: {txn.goal.name}</div>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <CategoryPicker

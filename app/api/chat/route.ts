@@ -28,6 +28,7 @@ import {
   validateProposal,
 } from "@/server/services/chat-approval";
 import { chatRateLimiter } from "@/server/middleware/rateLimit";
+import { ownPfCategories } from "@/server/services/pf-categories.service";
 import { resolveProvider } from "@/server/services/ai-status";
 
 const chatBodySchema = z
@@ -303,6 +304,10 @@ async function runAgentLoop(params: {
   // Right after the user approved a card, "recorded ✓" is true — the app
   // saved it — so it must not be corrected or labelled "Nothing was changed".
   const approvedThisTurn = (params.alreadyDone?.length ?? 0) > 0;
+  // The user's own categories (their budgets'), so "savings" lands in the
+  // budget's category instead of a built-in one the budget never counts.
+  // Loaded only once the model proposes something.
+  let ownCategories: string[] | null = null;
 
   for (let round = 1; round <= MAX_AGENT_ROUNDS; round++) {
     if (round > 1) sendEvent("thinking", {});
@@ -318,8 +323,10 @@ async function runAgentLoop(params: {
     // Dedupe against earlier rounds AND within this reply — small models
     // sometimes make the same call twice.
     const seen = new Set<string>();
+    if (calls.length && !ownCategories)
+      ownCategories = await ownPfCategories(db, userOrgId).catch(() => []);
     const fresh = calls
-      .map((c) => canonicalizeCall(normalizeToolCall(c)))
+      .map((c) => canonicalizeCall(normalizeToolCall(c), ownCategories ?? []))
       .filter((c) => {
         const key = callKey(c);
         if (handled.has(key) || seen.has(key)) return false;

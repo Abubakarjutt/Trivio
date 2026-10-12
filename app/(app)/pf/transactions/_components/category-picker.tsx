@@ -5,8 +5,17 @@ import { Check, ChevronDown, Search, X } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { CATEGORY_DEFINITIONS } from "@/server/services/statement-categorization.service";
+import { trpc } from "@/lib/trpc/client";
 
-const CATEGORIES = CATEGORY_DEFINITIONS.map((c) => c.name);
+const BUILT_IN = CATEGORY_DEFINITIONS.map((c) => c.name);
+
+/** Every category a transaction can have: the user's own (from their budgets) first, then built-in. */
+export function usePfCategories(): string[] {
+  const { data } = trpc.statementTransactions.categories.useQuery(undefined, {
+    staleTime: 60_000,
+  });
+  return data ? [...data.own, ...data.builtIn] : BUILT_IN;
+}
 
 const DOT_COLOR: Record<string, string> = {
   "Food & Dining":     "bg-violet-400",
@@ -72,6 +81,7 @@ export function CategoryPicker({ value, onChange, triggerClassName }: Props) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const CATEGORIES = usePfCategories();
 
   const filtered = search.trim()
     ? CATEGORIES.filter((c) => c.toLowerCase().includes(search.toLowerCase()))
