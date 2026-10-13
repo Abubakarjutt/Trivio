@@ -34,13 +34,18 @@ export function SourceLink({ url }: { url: string }) {
   );
 }
 
-/** Web findings for the new-prospect form: the ticked signals and the note are saved with it. */
+/**
+ * Web findings for the new-prospect form: the ticked signals and the note are saved with it.
+ * A finding whose signal is already in the form (`known`) isn't saved; the form's one wins.
+ */
 export function WebResearchPanel({
   state,
   onChange,
+  known,
 }: {
   state: WebResearchState;
   onChange: (s: WebResearchState) => void;
+  known: string[];
 }) {
   if (state.phase === "idle") return null;
   return (
@@ -61,33 +66,42 @@ export function WebResearchPanel({
           {state.findings.length === 0 && (
             <p className="text-muted-foreground text-sm">No new signals on the web.</p>
           )}
-          {state.findings.map((f, i) => (
-            <div key={f.signal.name} className="flex items-start gap-2">
-              <input
-                type="checkbox"
-                id={`web-${f.signal.name}`}
-                className="mt-1"
-                checked={f.picked}
-                onChange={(e) =>
-                  onChange({
-                    ...state,
-                    findings: state.findings.map((o, j) =>
-                      j === i ? { ...o, picked: e.target.checked } : o
-                    ),
-                  })
-                }
-              />
-              <div className="space-y-0.5">
-                <Label htmlFor={`web-${f.signal.name}`} className="text-sm font-normal">
-                  <span className="bg-muted mr-1.5 rounded px-1 py-0.5 text-[10px] uppercase">
-                    web
-                  </span>
-                  {SIGNAL_LABEL[f.signal.name]}: {f.signal.evidence}
-                </Label>
-                {f.signal.source && <SourceLink url={f.signal.source} />}
+          {state.findings.map((f, i) => {
+            const inList = known.includes(f.signal.name);
+            return (
+              <div key={f.signal.name} className="flex items-start gap-2">
+                <input
+                  type="checkbox"
+                  id={`web-${f.signal.name}`}
+                  className="mt-1"
+                  checked={f.picked && !inList}
+                  disabled={inList}
+                  onChange={(e) =>
+                    onChange({
+                      ...state,
+                      findings: state.findings.map((o, j) =>
+                        j === i ? { ...o, picked: e.target.checked } : o
+                      ),
+                    })
+                  }
+                />
+                <div className="space-y-0.5">
+                  <Label htmlFor={`web-${f.signal.name}`} className="text-sm font-normal">
+                    <span className="bg-muted mr-1.5 rounded px-1 py-0.5 text-[10px] uppercase">
+                      web
+                    </span>
+                    {SIGNAL_LABEL[f.signal.name]}: {f.signal.evidence}
+                  </Label>
+                  {inList && (
+                    <p className="text-muted-foreground text-xs">
+                      Already in your signals; that one is kept.
+                    </p>
+                  )}
+                  {f.signal.source && <SourceLink url={f.signal.source} />}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
           <div className="space-y-1.5">
             <Label htmlFor="research-note">Research note</Label>
             <Textarea

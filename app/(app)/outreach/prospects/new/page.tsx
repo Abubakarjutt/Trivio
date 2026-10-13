@@ -82,11 +82,14 @@ function NewProspectForm() {
     profileUrl: string,
     name: string,
     company: string,
-    website: string | null,
-    known: Signal[]
+    website: string | null
   ) {
     const id = ++runId.current;
-    if (!name.trim() || !company.trim()) return setWeb({ phase: "idle" });
+    if (!name.trim() || !company.trim())
+      return setWeb({
+        phase: "skipped",
+        message: "Web research needs the person's name and company from the profile.",
+      });
     setWeb({ phase: "running" });
     research.mutate(
       { profileUrl, name, company, companyWebsite: website },
@@ -94,13 +97,11 @@ function NewProspectForm() {
         onSuccess: (r) => {
           if (id !== runId.current) return;
           if (r.status === "skipped") return setWeb({ phase: "skipped", message: r.message ?? "" });
-          // A signal the extract or website check already found keeps the existing one.
-          const have = new Set(known.map((s) => s.name));
+          // Checked against the form's signals when shown and when saved, not here: the user
+          // may add or remove signals while research runs.
           setWeb({
             phase: "done",
-            findings: r.signals
-              .filter((s) => !have.has(s.name))
-              .map((signal) => ({ signal, picked: true })),
+            findings: r.signals.map((signal) => ({ signal, picked: true })),
             note: r.note,
             sources: r.sources,
           });
@@ -131,7 +132,7 @@ function NewProspectForm() {
         signals,
         enrichmentStatus: enrichment.status,
       });
-      startResearch(profileUrl, c.name, c.company, enrichment.website ?? null, signals);
+      startResearch(profileUrl, c.name, c.company, enrichment.website ?? null);
     },
     onError: (e) => toast.error(e.message),
   });
@@ -282,7 +283,11 @@ function NewProspectForm() {
                 onChange={(signals) => setForm((f) => f && { ...f, signals })}
               />
             </div>
-            <WebResearchPanel state={web} onChange={setWeb} />
+            <WebResearchPanel
+              state={web}
+              onChange={setWeb}
+              known={form.signals.map((s) => s.name)}
+            />
             {form.enrichmentStatus && (
               <p className="text-muted-foreground text-xs">
                 {ENRICHMENT_LABEL[form.enrichmentStatus]}

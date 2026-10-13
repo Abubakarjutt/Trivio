@@ -315,7 +315,8 @@ describe("web research", () => {
     webBox.search = (key) => ({
       search: async () => {
         keysUsed.push(key);
-        if (key === "bad-key") throw new SearchError("bad_key", "Brave rejected this key. Check it and try again.");
+        if (key === "bad-key")
+          throw new SearchError("bad_key", "Brave rejected this key. Check it and try again.");
         return [
           { title: "Acme raises", url: "https://news.example.com/acme-seed", snippet: "" },
           { title: "Jane", url: "https://www.linkedin.com/in/jane-doe", snippet: "" },
@@ -367,7 +368,10 @@ describe("web research", () => {
         note: "Acme AI builds RAG agents; raised a $4M seed.",
       },
     ]);
-    const out = await u.api.outreachProspects.research({ ...ASK, companyWebsite: "https://acme.ai" });
+    const out = await u.api.outreachProspects.research({
+      ...ASK,
+      companyWebsite: "https://acme.ai",
+    });
     expect(out).toEqual({
       status: "done",
       message: null,
@@ -405,6 +409,26 @@ describe("web research", () => {
 
     // Editing other fields keeps the note.
     await u.api.outreachProspects.update({ id: saved.id, title: "CEO" });
+    expect(
+      (await db.outreachProspect.findUniqueOrThrow({ where: { id: saved.id } })).research
+    ).toBe(out.note);
+
+    // Adding the same person again without a note (e.g. saved while research ran) keeps it.
+    const again = await u.api.outreachProspects.create({
+      profileUrl: ASK.profileUrl,
+      name: "Jane Doe",
+      title: "CTO",
+      company: "Acme AI",
+      companyWebsite: "https://acme.ai",
+      companySize: null,
+      location: null,
+      profileText: PASTE,
+      stack: [],
+      signals: [],
+      enrichmentStatus: "checked",
+      research: null,
+    });
+    expect(again).toMatchObject({ id: saved.id, created: false });
     expect(
       (await db.outreachProspect.findUniqueOrThrow({ where: { id: saved.id } })).research
     ).toBe(out.note);

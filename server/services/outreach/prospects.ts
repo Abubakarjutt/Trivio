@@ -102,7 +102,12 @@ export async function saveProspect(
       select: { id: true },
     });
     if (existing) {
-      await tx.outreachProspect.update({ where: { id: existing.id }, data: fields });
+      // Re-adding without a note (e.g. saved while research ran) keeps the note already there.
+      const { research, ...rest } = fields;
+      await tx.outreachProspect.update({
+        where: { id: existing.id },
+        data: research ? fields : rest,
+      });
       await recordEvent(tx, orgId, existing.id, "refreshed", now, { score: score.score });
       return { id: existing.id, created: false };
     }

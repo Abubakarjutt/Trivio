@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { OutreachAiError } from "@/server/services/outreach/llm";
 import {
   RESEARCH_MESSAGES,
+  SEARCH_GAP_MS,
   buildQueries,
   pageText,
   pickPages,
@@ -46,6 +47,13 @@ describe("buildQueries", () => {
 });
 
 describe("pickPages", () => {
+  it("skips links too long to store as a source", () => {
+    const long = `https://a.example.com/${"x".repeat(2100)}`;
+    expect(pickPages([r(long), r("https://b.example.com/ok")])).toEqual([
+      "https://b.example.com/ok",
+    ]);
+  });
+
   it("skips LinkedIn, non-web and file links", () => {
     expect(
       pickPages([
@@ -140,6 +148,7 @@ const deps = (o: Partial<ResearchDeps>): ResearchDeps => ({
   fetchPage: pagesOf({}),
   llm: new FakeLlm([]),
   sellerProfile: "I audit RAG systems.",
+  wait: async () => {},
   ...o,
 });
 const onePage = (llm: FakeLlm) =>
@@ -329,5 +338,55 @@ describe("researchProspect", () => {
       status: "skipped",
       message: "Web research skipped: The AI request failed (HTTP 500). Try again.",
     });
+  });
+
+  it("searches one at a time with a pause between, so a free Brave key isn't rate-limited", async () => {
+    let inFlight = 0;
+    let most = 0;
+    const search: SearchProvider = {
+      search: async () => {
+        most = Math.max(most, ++inFlight);
+        await new Promise((done) => setTimeout(done, 5));
+        inFlight--;
+        return [];
+      },
+    };
+    const wait = vi.fn(async () => {});
+    await researchProspect(LEAD, deps({ search, wait }));
+    expect(most).toBe(1);
+    expect(wait).toHaveBeenCalledTimes(3);
+    expect(wait).toHaveBeenCalledWith(SEARCH_GAP_MS);
+  });
+
+  it("retries a rate-limited search once after a pause", async () => {
+    const llm = new FakeLlm([{ signals: [], note: "Acme AI builds agents." }]);
+    let calls = 0;
+    const out = await researchProspect(
+      LEAD,
+      deps({
+        search: searchOf((q) => {
+          if (!q.includes("funding")) return [];
+          return ++calls === 1 ? new SearchError("quota", "q") : ["https://a.example.com/1"];
+        }),
+        fetchPage: pagesOf({ "https://a.example.com/1": LONG("Acme") }),
+        llm,
+      })
+    );
+    expect(calls).toBe(2);
+    expect(out.status).toBe("done");
+  });
+
+  it("reads only the start of a huge page", async () => {
+    const llm = new FakeLlm([{ signals: [], note: "n" }]);
+    const body = LONG("Acme") + " ".repeat(150_000) + "<p>FAR_DOWN_THE_PAGE</p>";
+    await researchProspect(
+      LEAD,
+      deps({
+        search: searchOf(() => ["https://a.example.com/1"]),
+        fetchPage: pagesOf({ "https://a.example.com/1": body }),
+        llm,
+      })
+    );
+    expect(JSON.stringify(llm.calls)).not.toContain("FAR_DOWN_THE_PAGE");
   });
 });

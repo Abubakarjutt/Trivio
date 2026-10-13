@@ -12,6 +12,12 @@ export const MAX_PAGE_CHARS = 3000;
 export const MIN_PAGE_CHARS = 200;
 export const MAX_NOTE = 600;
 const PER_HOST = 2;
+/** Brave's free plan allows one search a second, so searches run one after another. */
+export const SEARCH_GAP_MS = 1100;
+/** Cleaning text is regex work; a huge or hostile page must not stall the server. */
+const MAX_HTML_CHARS = 100_000;
+/** Longer links can't be stored as a signal's source (SignalSchema caps it at 2000). */
+const MAX_URL = 2000;
 const FILE = /\.(pdf|docx?|xlsx?|pptx?|zip)$/i;
 
 const MAX_QUERY_PART = 120;
@@ -49,6 +55,7 @@ export function pickPages(results: SearchResult[], max = MAX_PAGES): string[] {
     for (const k of [...u.searchParams.keys()])
       if (k.toLowerCase().startsWith("utm_")) u.searchParams.delete(k);
     const href = u.toString();
+    if (href.length > MAX_URL) continue;
     const host = u.hostname.replace(/^www\./, "");
     const count = perHost.get(host) ?? 0;
     if (seen.has(href) || count >= PER_HOST) continue;
@@ -106,7 +113,10 @@ export type ResearchDeps = {
   fetchPage: FetchPage;
   llm: Llm;
   sellerProfile: string;
+  /** Pause between searches; tests pass a no-op. */
+  wait?: (ms: number) => Promise<void>;
 };
+const sleep = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
 
 export const skipped = (message: string): ResearchResult => ({
   status: "skipped",
@@ -139,14 +149,24 @@ export async function researchProspect(
   const queries = buildQueries(input.name, input.company);
   if (queries.length === 0) return skipped(RESEARCH_MESSAGES.nothing);
 
-  // 1. Search. One failing query doesn't stop the others.
-  const searched = await mapLimit(queries, 2, async (q): Promise<Searched> => {
+  // 1. Search, one at a time with a pause between, so a free Brave key isn't rate-limited.
+  // A rate-limited query is retried once after another pause. One failing query doesn't
+  // stop the others.
+  const wait = deps.wait ?? sleep;
+  const searchOnce = async (q: string, retry: boolean): Promise<Searched> => {
     try {
       return { results: await deps.search.search(q, { count: 8 }) };
     } catch (error) {
-      return { error };
+      if (!retry || !(error instanceof SearchError) || error.kind !== "quota") return { error };
+      await wait(SEARCH_GAP_MS);
+      return searchOnce(q, false);
     }
-  });
+  };
+  const searched: Searched[] = [];
+  for (const [i, q] of queries.entries()) {
+    if (i > 0) await wait(SEARCH_GAP_MS);
+    searched.push(await searchOnce(q, true));
+  }
   if (searched.every((s) => "error" in s)) {
     const first = (searched[0] as { error: unknown }).error;
     if (first instanceof SearchError) return skipped(SEARCH_MESSAGE[first.kind]);
@@ -159,7 +179,7 @@ export async function researchProspect(
     try {
       const page = await deps.fetchPage(url);
       if (page.status < 200 || page.status >= 300) return null;
-      const text = pageText(page.body).slice(0, MAX_PAGE_CHARS);
+      const text = pageText(page.body.slice(0, MAX_HTML_CHARS)).slice(0, MAX_PAGE_CHARS);
       return text.length >= MIN_PAGE_CHARS ? { url, text } : null;
     } catch {
       return null;
