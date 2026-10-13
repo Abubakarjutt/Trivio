@@ -12,23 +12,39 @@ export type BriefProspect = {
   primarySignal: string | null;
   stack: string[];
   profileText: string;
+  /** The web-research note saved with the prospect. */
+  research?: string | null;
 };
 export type OfferBrief = { name: string; description: string; fittingSignals: string[] };
 
 const seller = (profile: string) => `<seller_profile>\n${profile}\n</seller_profile>`;
 
+const MAX_BRIEF_RESEARCH = 1500;
+
+const sourceHost = (source: string | undefined) => {
+  if (!source) return "";
+  try {
+    return ` (${new URL(source).hostname.replace(/^www\./, "")})`;
+  } catch {
+    return "";
+  }
+};
+const signalLine = (s: Signal) => `${s.name}: ${s.evidence}${sourceHost(s.source)}`;
+
 export function leadBrief(p: BriefProspect): string {
   const primary = p.signals.find((s) => s.name === p.primarySignal) ?? null;
-  const others = p.signals.filter((s) => s !== primary).map((s) => `- ${s.name}: ${s.evidence}`);
+  const others = p.signals.filter((s) => s !== primary).map((s) => `- ${signalLine(s)}`);
+  const research = p.research?.trim();
   return [
     "<lead>",
     `Name: ${p.name}`,
     `Title: ${p.title}`,
     `Company: ${p.company}`,
-    primary ? `Primary signal: ${primary.name}: ${primary.evidence}` : "Primary signal: none",
+    primary ? `Primary signal: ${signalLine(primary)}` : "Primary signal: none",
     "Other signals:",
     ...(others.length ? others : ["- none"]),
     `Stack: ${p.stack.join(", ") || "unknown"}`,
+    ...(research ? ["Web research:", research.slice(0, MAX_BRIEF_RESEARCH)] : []),
     "Profile excerpt:",
     p.profileText.slice(0, 3000),
     "</lead>",

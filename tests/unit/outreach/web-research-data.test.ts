@@ -19,7 +19,9 @@ describe("SignalSchema.source", () => {
 
   it("refuses a source that isn't a web link", () => {
     for (const source of ["javascript:alert(1)", "file:///etc/passwd", "not a url"]) {
-      expect(SignalSchema.safeParse({ name: "funding", evidence: "x", source }).success).toBe(false);
+      expect(SignalSchema.safeParse({ name: "funding", evidence: "x", source }).success).toBe(
+        false
+      );
     }
   });
 });
