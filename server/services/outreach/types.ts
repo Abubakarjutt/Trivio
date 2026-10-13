@@ -21,9 +21,17 @@ export const SIGNAL_NAMES = [
 ] as const;
 export type SignalName = (typeof SIGNAL_NAMES)[number];
 
+// Web research attaches the page a signal came from. Only web links: the UI renders it as a link.
+const WebLink = z
+  .string()
+  .url()
+  .max(2000)
+  .refine((u) => /^https?:\/\//i.test(u), "Only http(s) links.");
+
 export const SignalSchema = z.object({
   name: z.enum(SIGNAL_NAMES),
   evidence: z.string().trim().min(1).max(500),
+  source: WebLink.optional(),
 });
 export type Signal = z.infer<typeof SignalSchema>;
 export const SignalsSchema = z.array(SignalSchema).max(20);

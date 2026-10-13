@@ -32,6 +32,8 @@ export type ProspectInput = {
   stack: string[];
   signals: Signal[];
   enrichmentStatus: string;
+  /** The web-research note the user kept, if any. */
+  research?: string | null;
 };
 
 const localDate = (d: Date) =>
@@ -92,6 +94,7 @@ export async function saveProspect(
     primarySignal: score.primary?.name ?? null,
     scoreReasons: score.reasons,
     enrichmentStatus: input.enrichmentStatus,
+    research: input.research?.trim() || null,
   };
   return db.$transaction(async (tx) => {
     const existing = await tx.outreachProspect.findUnique({

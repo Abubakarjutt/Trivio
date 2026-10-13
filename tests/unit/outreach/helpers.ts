@@ -42,6 +42,7 @@ export function makeProspect(o: Partial<OutreachProspect> = {}): OutreachProspec
     primarySignal: null,
     scoreReasons: [],
     enrichmentStatus: "checked",
+    research: null,
     source: "test",
     crmLeadId: null,
     crmDealId: null,

@@ -160,6 +160,7 @@ export const outreachProspectsRouter = createTRPCRouter({
         stack: Stack,
         signals: SignalsSchema,
         enrichmentStatus: z.enum(["checked", "unreachable", "no_website", "refused"]),
+        research: z.string().max(4000).nullish(),
       })
     )
     .mutation(async ({ ctx, input }) => {
