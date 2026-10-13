@@ -28,6 +28,20 @@ const MESSAGE: Record<SearchErrorKind, string> = {
 const fail = (kind: SearchErrorKind) => new SearchError(kind, MESSAGE[kind]);
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 
+/** Brave answers a bad or unsubscribed key with 422 (sometimes 400) and a JSON error body. */
+async function isAuthRejection(res: Response): Promise<boolean> {
+  try {
+    const err = ((await res.json()) as { error?: Record<string, unknown> } | null)?.error;
+    const meta = err?.meta as { component?: unknown } | null | undefined;
+    return (
+      /SUBSCRIPTION_TOKEN|TOKEN_INVALID/i.test(str(err?.code)) ||
+      meta?.component === "authentication"
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function createBraveSearch(apiKey: string, fetchImpl: typeof fetch = fetch): SearchProvider {
   return {
     async search(query, opts = {}) {
@@ -45,6 +59,8 @@ export function createBraveSearch(apiKey: string, fetchImpl: typeof fetch = fetc
       }
       if (res.status === 401 || res.status === 403) throw fail("bad_key");
       if (res.status === 429) throw fail("quota");
+      if ((res.status === 400 || res.status === 422) && (await isAuthRejection(res)))
+        throw fail("bad_key");
       if (!res.ok) throw fail("unreachable");
       let body: unknown;
       try {

@@ -29,7 +29,9 @@ const sourceHost = (source: string | undefined) => {
     return "";
   }
 };
-const signalLine = (s: Signal) => `${s.name}: ${s.evidence}${sourceHost(s.source)}`;
+// Web-derived text must not be able to write a closing </lead> tag.
+const noTags = (t: string) => t.replace(/[<>]/g, " ");
+const signalLine = (s: Signal) => `${s.name}: ${noTags(s.evidence)}${sourceHost(s.source)}`;
 
 export function leadBrief(p: BriefProspect): string {
   const primary = p.signals.find((s) => s.name === p.primarySignal) ?? null;
@@ -44,7 +46,7 @@ export function leadBrief(p: BriefProspect): string {
     "Other signals:",
     ...(others.length ? others : ["- none"]),
     `Stack: ${p.stack.join(", ") || "unknown"}`,
-    ...(research ? ["Web research:", research.slice(0, MAX_BRIEF_RESEARCH)] : []),
+    ...(research ? ["Web research:", noTags(research.slice(0, MAX_BRIEF_RESEARCH))] : []),
     "Profile excerpt:",
     p.profileText.slice(0, 3000),
     "</lead>",

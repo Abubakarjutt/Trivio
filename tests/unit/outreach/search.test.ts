@@ -48,6 +48,39 @@ describe("createBraveSearch", () => {
     await expect(s.search("x")).rejects.toMatchObject({ kind });
   });
 
+  const rejected = (status: number, error: unknown) =>
+    createBraveSearch("k", (async () =>
+      json(status, { type: "ErrorResponse", error })) as unknown as typeof fetch);
+
+  it("maps Brave's rejected-key 422 to bad_key", async () => {
+    const s = rejected(422, { code: "SUBSCRIPTION_TOKEN_INVALID", status: 422 });
+    await expect(s.search("x")).rejects.toMatchObject({ kind: "bad_key" });
+  });
+
+  it("maps an authentication-component 400 to bad_key", async () => {
+    const s = rejected(400, { code: "OTHER", meta: { component: "authentication" } });
+    await expect(s.search("x")).rejects.toMatchObject({ kind: "bad_key" });
+  });
+
+  it("maps an authentication-component 422 with another code to bad_key", async () => {
+    const s = rejected(422, { code: "OTHER", meta: { component: "authentication" } });
+    await expect(s.search("x")).rejects.toMatchObject({ kind: "bad_key" });
+  });
+
+  it("keeps other 422s unreachable", async () => {
+    await expect(rejected(422, { code: "VALIDATION" }).search("x")).rejects.toMatchObject({
+      kind: "unreachable",
+    });
+  });
+
+  it("keeps a 422 with a non-JSON body unreachable", async () => {
+    const s = createBraveSearch(
+      "k",
+      (async () => new Response("nope", { status: 422 })) as unknown as typeof fetch
+    );
+    await expect(s.search("x")).rejects.toMatchObject({ kind: "unreachable" });
+  });
+
   it("maps a network error to unreachable", async () => {
     const s = createBraveSearch("k", (async () => {
       throw new TypeError("fetch failed");

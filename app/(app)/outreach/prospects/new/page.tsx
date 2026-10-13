@@ -137,6 +137,7 @@ function NewProspectForm() {
   });
   const create = trpc.outreachProspects.create.useMutation({
     onSuccess: ({ id, created }) => {
+      runId.current++; // saved: a late research result has nothing left to update
       void utils.outreachProspects.list.invalidate();
       void utils.outreachToday.get.invalidate();
       if (!created) toast.info("Already saved. Updated their details and opened their page.");
@@ -148,10 +149,10 @@ function NewProspectForm() {
   function save() {
     if (!form) return;
     const companyWebsite = form.companyWebsite.trim();
-    // Research still running → saved without it; any late result is ignored.
+    // Research still running → saved without it. Research state is left alone, so if the save
+    // fails a late result still lands and the next Save includes it.
     const done = web.phase === "done" ? web : null;
     const picked = done ? done.findings.filter((f) => f.picked).map((f) => f.signal) : [];
-    runId.current++;
     create.mutate({
       profileUrl: url,
       name: form.name,
@@ -249,7 +250,7 @@ function NewProspectForm() {
             <Button
               variant="outline"
               onClick={() => {
-                resetResearch();
+                if (!form) resetResearch();
                 setForm((f) => f ?? { ...EMPTY, companyWebsite: website });
               }}
             >

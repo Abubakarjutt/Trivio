@@ -14,7 +14,9 @@ export const MAX_NOTE = 600;
 const PER_HOST = 2;
 const FILE = /\.(pdf|docx?|xlsx?|pptx?|zip)$/i;
 
-const clean = (s: string) => s.replace(/"/g, "").replace(/\s+/g, " ").trim();
+const MAX_QUERY_PART = 120;
+const clean = (s: string) =>
+  s.replace(/"/g, "").replace(/\s+/g, " ").trim().slice(0, MAX_QUERY_PART).trim();
 
 /** Up to four searches. Without a company there is nothing to search for. */
 export function buildQueries(name: string, company: string): string[] {
@@ -65,6 +67,7 @@ export function pickPages(results: SearchResult[], max = MAX_PAGES): string[] {
 export function pageText(html: string): string {
   return html
     .replace(/<(script|style|noscript|svg|template)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, " ")
+    .replace(/<(script|style|noscript|svg|template)\b[\s\S]*$/i, " ")
     .replace(/<!--[\s\S]*?-->/g, " ")
     .replace(/<[^<>]*>/g, " ")
     .replace(/[<>]/g, " ")
@@ -175,7 +178,9 @@ export async function researchProspect(
   } catch (e) {
     if (e instanceof OutreachAiError)
       return skipped(
-        e.message === FORMAT_ERROR ? RESEARCH_MESSAGES.aiFormat : `Web research skipped: ${e.message}`
+        e.message === FORMAT_ERROR
+          ? RESEARCH_MESSAGES.aiFormat
+          : `Web research skipped: ${e.message}`
       );
     throw e;
   }
