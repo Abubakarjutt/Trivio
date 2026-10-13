@@ -1,8 +1,12 @@
 // QA: Outreach — settings and offers, extracting and saving a prospect, AI drafts and docs,
 // the stage machine through to the CRM pilot handoff, voice examples, do-not-contact,
 // delete, and tenant isolation. The model and the website fetcher are faked; Postgres is real.
-import { describe, it, expect, beforeAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { DEFAULT_CADENCE, DEFAULT_WEIGHTS } from "@/server/services/outreach/types";
+import { listAppActions } from "@/server/services/chat-actions";
+import { RESEARCH_MESSAGES } from "@/server/services/outreach/research";
+import { scoreSignals } from "@/server/services/outreach/scoring";
+import { SearchError } from "@/server/services/outreach/search";
 import { FakeLlm } from "../unit/outreach/helpers";
 import { db, newUser, type QaUser } from "./harness";
 
@@ -11,10 +15,26 @@ vi.mock("@/server/services/outreach/llm", async (orig) => ({
   ...(await orig<typeof import("@/server/services/outreach/llm")>()),
   createLlm: () => llmBox.llm,
 }));
+const webBox = vi.hoisted(() => ({
+  search: null as
+    | null
+    | ((key: string) => { search: (q: string, o?: { count?: number }) => Promise<unknown[]> }),
+  fetchPage: null as
+    | null
+    | ((url: string) => Promise<{ status: number; url: string; body: string }>),
+}));
 vi.mock("@/server/services/outreach/website", async (orig) => ({
   ...(await orig<typeof import("@/server/services/outreach/website")>()),
-  createPageFetcher: () => async () => {
+  createPageFetcher: () => async (url: string) => {
+    if (webBox.fetchPage) return webBox.fetchPage(url);
     throw new Error("QA never fetches a website");
+  },
+}));
+vi.mock("@/server/services/outreach/search", async (orig) => ({
+  ...(await orig<typeof import("@/server/services/outreach/search")>()),
+  createBraveSearch: (key: string) => {
+    if (!webBox.search) throw new Error("QA never calls Brave");
+    return webBox.search(key);
   },
 }));
 
@@ -280,5 +300,143 @@ describe("voice, do-not-contact and delete", () => {
     });
     // The CRM deal it created belongs to the CRM now and stays.
     expect(await db.crmDeal.count({ where: { organisationId: u.orgId } })).toBe(1);
+  });
+});
+
+describe("web research", () => {
+  const ARTICLE =
+    "<html><body><h1>Acme AI raises a $4M seed</h1><p>" +
+    "Acme AI, which builds RAG agents, raised a $4M seed led by Example Ventures. ".repeat(5) +
+    "</p></body></html>";
+  const keysUsed: string[] = [];
+  const ASK = { profileUrl: "linkedin.com/in/jane-doe-2", name: "Jane Doe", company: "Acme AI" };
+
+  beforeAll(() => {
+    webBox.search = (key) => ({
+      search: async () => {
+        keysUsed.push(key);
+        if (key === "bad-key") throw new SearchError("bad_key", "Brave rejected this key. Check it and try again.");
+        return [
+          { title: "Acme raises", url: "https://news.example.com/acme-seed", snippet: "" },
+          { title: "Jane", url: "https://www.linkedin.com/in/jane-doe", snippet: "" },
+        ];
+      },
+    });
+    webBox.fetchPage = async (url) => {
+      if (url.includes("linkedin.com")) throw new Error("LinkedIn must never be fetched");
+      return { status: 200, url, body: url.includes("acme-seed") ? ARTICLE : "" };
+    };
+  });
+  afterAll(() => {
+    webBox.search = null;
+    webBox.fetchPage = null;
+  });
+
+  it("skips without a key, and keeps the key private", async () => {
+    expect(await u.api.outreachProspects.research(ASK)).toMatchObject({
+      status: "skipped",
+      message: RESEARCH_MESSAGES.noKey,
+    });
+    expect((await u.api.outreachSettings.get()).searchKey).toEqual({ set: false, last4: null });
+
+    await u.api.outreachSettings.setSearchKey({ apiKey: "  brave-key-abcd  " });
+    const got = await u.api.outreachSettings.get();
+    expect(got.searchKey).toEqual({ set: true, last4: "abcd" });
+    expect(JSON.stringify(got)).not.toContain("brave-key-abcd");
+
+    // Another organisation can neither see nor set it.
+    expect((await other.api.outreachSettings.get()).searchKey).toEqual({ set: false, last4: null });
+    await expect(other.api.outreachSettings.setSearchKey({ apiKey: "x" })).rejects.toThrow(
+      "Set up Outreach first"
+    );
+  });
+
+  it("tests a key", async () => {
+    expect(await u.api.outreachSettings.testSearchKey({})).toEqual({ ok: true, message: null });
+    expect(keysUsed.at(-1)).toBe("brave-key-abcd");
+    expect(await u.api.outreachSettings.testSearchKey({ apiKey: "bad-key" })).toEqual({
+      ok: false,
+      message: "Brave rejected this key. Check it and try again.",
+    });
+  });
+
+  it("returns web signals with sources, and saves them with the note", async () => {
+    llmBox.llm = new FakeLlm([
+      {
+        signals: [{ name: "funding", evidence: "Raised a $4M seed", pageId: 1 }],
+        note: "Acme AI builds RAG agents; raised a $4M seed.",
+      },
+    ]);
+    const out = await u.api.outreachProspects.research({ ...ASK, companyWebsite: "https://acme.ai" });
+    expect(out).toEqual({
+      status: "done",
+      message: null,
+      signals: [
+        {
+          name: "funding",
+          evidence: "Raised a $4M seed",
+          source: "https://news.example.com/acme-seed",
+        },
+      ],
+      note: "Acme AI builds RAG agents; raised a $4M seed.",
+      sources: ["https://news.example.com/acme-seed"],
+    });
+
+    const saved = await u.api.outreachProspects.create({
+      profileUrl: ASK.profileUrl,
+      name: "Jane Doe",
+      title: "CTO",
+      company: "Acme AI",
+      companyWebsite: "https://acme.ai",
+      companySize: null,
+      location: null,
+      profileText: PASTE,
+      stack: [],
+      signals: out.signals,
+      enrichmentStatus: "checked",
+      research: out.note,
+    });
+    const row = await db.outreachProspect.findUniqueOrThrow({ where: { id: saved.id } });
+    expect(row.research).toBe(out.note);
+    expect(row.signals).toEqual(out.signals);
+    // A web signal scores like any other signal of that name.
+    expect(row.score).toBe(scoreSignals(out.signals, SETTINGS.signalWeights).score);
+    expect(row.score).toBeGreaterThan(0);
+
+    // Editing other fields keeps the note.
+    await u.api.outreachProspects.update({ id: saved.id, title: "CEO" });
+    expect(
+      (await db.outreachProspect.findUniqueOrThrow({ where: { id: saved.id } })).research
+    ).toBe(out.note);
+  });
+
+  it("turns a rejected key into a skip, not an error", async () => {
+    await u.api.outreachSettings.setSearchKey({ apiKey: "bad-key" });
+    expect(await u.api.outreachProspects.research(ASK)).toMatchObject({
+      status: "skipped",
+      message: RESEARCH_MESSAGES.badKey,
+    });
+    await u.api.outreachSettings.setSearchKey({ apiKey: null });
+    expect((await u.api.outreachSettings.get()).searchKey).toEqual({ set: false, last4: null });
+  });
+
+  it("refuses a do-not-contact profile", async () => {
+    await expect(
+      u.api.outreachProspects.research({
+        profileUrl: "https://www.linkedin.com/in/sam-lee",
+        name: "Sam Lee",
+        company: "Lexora",
+      })
+    ).rejects.toThrow("do-not-contact");
+  });
+
+  it("is not offered to the chat", () => {
+    const names = listAppActions().map((a) => a.name);
+    for (const n of [
+      "outreachProspects.research",
+      "outreachSettings.setSearchKey",
+      "outreachSettings.testSearchKey",
+    ])
+      expect(names).not.toContain(n);
   });
 });
