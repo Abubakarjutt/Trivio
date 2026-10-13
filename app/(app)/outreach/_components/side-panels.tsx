@@ -19,6 +19,7 @@ import type { Signal } from "@/server/services/outreach/types";
 import { EVENT_LABEL, SIGNAL_LABEL } from "./labels";
 import { ReasonLine, ScoreChip } from "./score-chip";
 import type { ProspectDetail } from "./types";
+import { SourceLink } from "./web-research-panel";
 
 export function ScoreCard({ data }: { data: ProspectDetail }) {
   const { prospect: p } = data;
@@ -62,6 +63,23 @@ export function ScoreCard({ data }: { data: ProspectDetail }) {
                 {SIGNAL_LABEL[s.name]} <X className="h-3 w-3" />
               </button>
             ))}
+          </div>
+        )}
+        {signals.some((s) => s.source) && (
+          <ul className="space-y-0.5 pt-1">
+            {signals
+              .filter((s) => s.source)
+              .map((s) => (
+                <li key={s.name} className="text-xs">
+                  {SIGNAL_LABEL[s.name]}: <SourceLink url={s.source!} />
+                </li>
+              ))}
+          </ul>
+        )}
+        {p.research && (
+          <div className="space-y-1 pt-2">
+            <p className="text-xs font-medium">Web research</p>
+            <p className="text-muted-foreground text-sm whitespace-pre-wrap">{p.research}</p>
           </div>
         )}
         {update.error && <p className="text-destructive text-sm">{update.error.message}</p>}

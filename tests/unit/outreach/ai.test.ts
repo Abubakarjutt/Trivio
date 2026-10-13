@@ -71,6 +71,12 @@ describe("toBrief", () => {
   });
 });
 
+describe("toBrief research", () => {
+  it("passes the saved research note through", () => {
+    expect(toBrief(makeProspect({ research: "Note" })).research).toBe("Note");
+  });
+});
+
 describe("extractProfile", () => {
   it("returns the parsed profile, not creative, with the profile wrapped as data", async () => {
     const llm = new FakeLlm([profile]);

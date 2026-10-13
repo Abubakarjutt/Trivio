@@ -17,7 +17,7 @@ export interface Llm {
 }
 
 const TIMEOUT_MS = 300_000;
-const FORMAT_ERROR = "The model's answer didn't match the expected format. Try again.";
+export const FORMAT_ERROR = "The model's answer didn't match the expected format. Try again.";
 const GEMINI_DROP = new Set(["$schema", "additionalProperties", "default"]);
 
 function strip(node: unknown): unknown {

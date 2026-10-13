@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { createTRPCRouter } from "@/server/trpc";
 import { extractProfile } from "@/server/services/outreach/ai";
-import { requireConfig } from "@/server/services/outreach/config";
+import { loadSearchKey, requireConfig } from "@/server/services/outreach/config";
 import { CONVERT_MARKER, linkCrmLead, tryStartPilot } from "@/server/services/outreach/crm-handoff";
 import { enrichCompany, websiteNamedIn, websiteOrigin } from "@/server/services/outreach/enrich";
 import { createLlm } from "@/server/services/outreach/llm";
@@ -16,7 +16,9 @@ import {
   rescoreProspects,
   saveProspect,
 } from "@/server/services/outreach/prospects";
+import { RESEARCH_MESSAGES, researchProspect, skipped } from "@/server/services/outreach/research";
 import { scoreSignals } from "@/server/services/outreach/scoring";
+import { createBraveSearch } from "@/server/services/outreach/search";
 import { OutreachError, SignalsSchema } from "@/server/services/outreach/types";
 import { normalizeProfileUrl } from "@/server/services/outreach/urls";
 import { createPageFetcher } from "@/server/services/outreach/website";
@@ -146,6 +148,35 @@ export const outreachProspectsRouter = createTRPCRouter({
       return { profileUrl, extracted, enrichment };
     }),
 
+  // Runs after extract, as its own call, so the review form shows at once and research fills in later.
+  research: outreachProcedure
+    .input(
+      z.object({
+        profileUrl: z.string().max(2000),
+        name: z.string().trim().min(1).max(200),
+        company: short,
+        companyWebsite: nullableShort.optional(),
+      })
+    )
+    .mutation(async ({ ctx, input }) => {
+      const profileUrl = normalizeProfileUrl(input.profileUrl);
+      if (await isDnc(ctx.db, ctx.organisationId, profileUrl)) {
+        throw new OutreachError("This person is on your do-not-contact list.");
+      }
+      const config = await requireConfig(ctx.db, ctx.organisationId);
+      const apiKey = await loadSearchKey(ctx.db, ctx.organisationId);
+      if (!apiKey) return skipped(RESEARCH_MESSAGES.noKey);
+      return researchProspect(
+        { name: input.name, company: input.company, website: input.companyWebsite ?? null },
+        {
+          search: createBraveSearch(apiKey),
+          fetchPage: createPageFetcher(),
+          llm: createLlm(),
+          sellerProfile: config.sellerProfile,
+        }
+      );
+    }),
+
   create: outreachProcedure
     .input(
       z.object({
@@ -160,6 +191,7 @@ export const outreachProspectsRouter = createTRPCRouter({
         stack: Stack,
         signals: SignalsSchema,
         enrichmentStatus: z.enum(["checked", "unreachable", "no_website", "refused"]),
+        research: z.string().max(4000).nullish(),
       })
     )
     .mutation(async ({ ctx, input }) => {

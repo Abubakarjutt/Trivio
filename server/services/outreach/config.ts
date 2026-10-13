@@ -38,3 +38,12 @@ export async function requireConfig(db: PrismaClient, orgId: string): Promise<Ou
     throw new OutreachError("Set up Outreach first: describe what you sell in Outreach settings.");
   return config;
 }
+
+/** The Brave Search key, or null. Never send it to the client. */
+export async function loadSearchKey(db: PrismaClient, orgId: string): Promise<string | null> {
+  const s = await db.outreachSettings.findUnique({
+    where: { organisationId: orgId },
+    select: { searchApiKey: true },
+  });
+  return s?.searchApiKey || null;
+}

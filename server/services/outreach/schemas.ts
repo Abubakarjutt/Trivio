@@ -67,3 +67,14 @@ export const PilotProposalSchema = z.object({
   nextStep: z.string(),
 });
 export type PilotProposal = z.infer<typeof PilotProposalSchema>;
+
+// Web research. warm_path is left out: only the user's own LinkedIn context can show it.
+export const WEB_SIGNALS = ["hiring", "pain_post", "funding", "demo_stage", "stack_match"] as const;
+
+export const WebResearchSchema = z.object({
+  signals: z.array(
+    z.object({ name: z.enum(WEB_SIGNALS), evidence: z.string(), pageId: z.number().int() })
+  ),
+  note: z.string(),
+});
+export type WebResearch = z.infer<typeof WebResearchSchema>;

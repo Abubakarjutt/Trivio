@@ -46,6 +46,7 @@ export function toBrief(p: OutreachProspect): BriefProspect {
     primarySignal: p.primarySignal,
     stack: p.stack,
     profileText: p.profileText,
+    research: p.research,
     signals: signals.success ? signals.data : [],
   };
 }

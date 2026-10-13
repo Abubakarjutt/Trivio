@@ -979,6 +979,7 @@ model OutreachSettings {
   weeklyCap      Int          @default(100)
   cadence        Json
   hiringKeywords String[]
+  searchApiKey   String?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 }
@@ -1016,6 +1017,7 @@ model OutreachProspect {
   primarySignal    String?
   scoreReasons     String[]
   enrichmentStatus String
+  research         String?
   stage            OutreachStage          @default(QUEUED)
   stageChangedAt   DateTime
   unansweredCount  Int                    @default(0)
