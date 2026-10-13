@@ -239,6 +239,7 @@ function SettingsTabs() {
         <TabsTrigger value="offers">Offers</TabsTrigger>
         <TabsTrigger value="weights">Signal weights</TabsTrigger>
         <TabsTrigger value="limits">Limits and timing</TabsTrigger>
+        <TabsTrigger value="research">Web research</TabsTrigger>
       </TabsList>
 
       <TabsContent value="profile">
@@ -456,6 +457,89 @@ function SettingsTabs() {
           </CardContent>
         </Card>
       </TabsContent>
+
+      <TabsContent value="research">
+        <WebResearchSettings searchKey={data.searchKey} />
+      </TabsContent>
     </Tabs>
+  );
+}
+
+function WebResearchSettings({ searchKey }: { searchKey: { set: boolean; last4: string | null } }) {
+  const utils = trpc.useUtils();
+  const [key, setKey] = useState("");
+  const [result, setResult] = useState<{ ok: boolean; message: string | null } | null>(null);
+  const save = trpc.outreachSettings.setSearchKey.useMutation({
+    onSuccess: (_, v) => {
+      toast.success(v.apiKey ? "Brave key saved" : "Brave key removed");
+      setKey("");
+      setResult(null);
+      return utils.outreachSettings.get.invalidate();
+    },
+    onError: (e) => toast.error(e.message),
+  });
+  const test = trpc.outreachSettings.testSearchKey.useMutation({
+    onSuccess: setResult,
+    onError: (e) => setResult({ ok: false, message: e.message }),
+  });
+  const typed = key.trim();
+  return (
+    <Card>
+      <CardContent className="space-y-4 p-5">
+        <p className="text-muted-foreground text-sm">
+          When you press Extract, Trivio can search the web for the company and the person and
+          suggest signals, with links to where it found them. It uses Brave Search: get a free key
+          at api.search.brave.com. Brave sees only the person&apos;s name and company; pages are
+          opened from this computer and read by your AI.
+        </p>
+        {searchKey.set && (
+          <p className="text-sm">
+            Saved key: <span className="font-mono">••••{searchKey.last4}</span>
+          </p>
+        )}
+        <div className="flex gap-2">
+          <Input
+            type="password"
+            autoComplete="off"
+            aria-label="Brave Search API key"
+            placeholder={searchKey.set ? "Paste a new key to replace it" : "Brave Search API key"}
+            maxLength={200}
+            value={key}
+            onChange={(e) => {
+              setKey(e.target.value);
+              setResult(null);
+            }}
+          />
+          <Button
+            variant="outline"
+            disabled={test.isPending || (!typed && !searchKey.set)}
+            onClick={() => test.mutate(typed ? { apiKey: typed } : {})}
+          >
+            {test.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
+            Test
+          </Button>
+          <Button
+            disabled={!typed || save.isPending}
+            onClick={() => save.mutate({ apiKey: typed })}
+          >
+            Save
+          </Button>
+          {searchKey.set && (
+            <Button
+              variant="ghost"
+              disabled={save.isPending}
+              onClick={() => save.mutate({ apiKey: null })}
+            >
+              Remove
+            </Button>
+          )}
+        </div>
+        {result && (
+          <p className={result.ok ? "text-sm text-emerald-700" : "text-destructive text-sm"}>
+            {result.ok ? "The key works." : result.message}
+          </p>
+        )}
+      </CardContent>
+    </Card>
   );
 }

@@ -52,7 +52,11 @@ describe("leadBrief", () => {
       ...prospect,
       primarySignal: "funding",
       signals: [
-        { name: "funding", evidence: "Raised a $4M seed", source: "https://www.techcrunch.com/acme" },
+        {
+          name: "funding",
+          evidence: "Raised a $4M seed",
+          source: "https://www.techcrunch.com/acme",
+        },
         { name: "hiring", evidence: "Hiring LLM engineers", source: "not a url" },
         { name: "pain_post", evidence: "Agents loop forever" },
       ],
@@ -68,7 +72,6 @@ describe("leadBrief", () => {
     expect(leadBrief({ ...prospect, research: null })).not.toContain("Web research:");
     expect(leadBrief({ ...prospect, research: "x".repeat(5000) })).not.toContain("x".repeat(1501));
   });
-
 });
 
 describe("prompts", () => {

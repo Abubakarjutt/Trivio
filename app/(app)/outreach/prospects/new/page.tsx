@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
@@ -17,6 +17,7 @@ import { ENRICHMENT_LABEL } from "../../_components/labels";
 import { OutreachGate } from "../../_components/outreach-gate";
 import { SignalsEditor } from "../../_components/signals-editor";
 import { Textarea } from "../../_components/textarea";
+import { WebResearchPanel, type WebResearchState } from "../../_components/web-research-panel";
 
 type Status = "checked" | "unreachable" | "no_website" | "refused";
 type Form = {
@@ -69,11 +70,55 @@ function NewProspectForm() {
   const [text, setText] = useState("");
   const [website, setWebsite] = useState("");
   const [form, setForm] = useState<Form | null>(null);
+  const [web, setWeb] = useState<WebResearchState>({ phase: "idle" });
+  // Each Extract starts a new run; an older, slower run must not overwrite a newer one.
+  const runId = useRef(0);
+  const research = trpc.outreachProspects.research.useMutation();
+  function resetResearch() {
+    runId.current++;
+    setWeb({ phase: "idle" });
+  }
+  function startResearch(
+    profileUrl: string,
+    name: string,
+    company: string,
+    website: string | null,
+    known: Signal[]
+  ) {
+    const id = ++runId.current;
+    if (!name.trim() || !company.trim()) return setWeb({ phase: "idle" });
+    setWeb({ phase: "running" });
+    research.mutate(
+      { profileUrl, name, company, companyWebsite: website },
+      {
+        onSuccess: (r) => {
+          if (id !== runId.current) return;
+          if (r.status === "skipped") return setWeb({ phase: "skipped", message: r.message ?? "" });
+          // A signal the extract or website check already found keeps the existing one.
+          const have = new Set(known.map((s) => s.name));
+          setWeb({
+            phase: "done",
+            findings: r.signals
+              .filter((s) => !have.has(s.name))
+              .map((signal) => ({ signal, picked: true })),
+            note: r.note,
+            sources: r.sources,
+          });
+        },
+        // One line, never a toast: research never blocks saving.
+        onError: (e) => {
+          if (id === runId.current)
+            setWeb({ phase: "skipped", message: `Web research skipped: ${e.message}` });
+        },
+      }
+    );
+  }
   const aiReady = useAiReady();
   const extract = trpc.outreachProspects.extract.useMutation({
     onSuccess: ({ profileUrl, extracted, enrichment }) => {
       setUrl(profileUrl);
       const c = clampExtracted(extracted);
+      const signals = mergeSignals(c.signals, enrichment.signals);
       setForm({
         name: c.name,
         title: c.title,
@@ -83,9 +128,10 @@ function NewProspectForm() {
         companySize: c.companySize,
         location: c.location,
         stack: c.stack.join(", "),
-        signals: mergeSignals(c.signals, enrichment.signals),
+        signals,
         enrichmentStatus: enrichment.status,
       });
+      startResearch(profileUrl, c.name, c.company, enrichment.website ?? null, signals);
     },
     onError: (e) => toast.error(e.message),
   });
@@ -102,6 +148,10 @@ function NewProspectForm() {
   function save() {
     if (!form) return;
     const companyWebsite = form.companyWebsite.trim();
+    // Research still running → saved without it; any late result is ignored.
+    const done = web.phase === "done" ? web : null;
+    const picked = done ? done.findings.filter((f) => f.picked).map((f) => f.signal) : [];
+    runId.current++;
     create.mutate({
       profileUrl: url,
       name: form.name,
@@ -115,7 +165,8 @@ function NewProspectForm() {
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean),
-      signals: form.signals,
+      signals: mergeSignals(form.signals, picked),
+      research: done?.note.trim() || null,
       // Filling in by hand doesn't check the website; see the ruling in Task 16.
       enrichmentStatus: form.enrichmentStatus ?? (companyWebsite ? "unreachable" : "no_website"),
     });
@@ -179,13 +230,14 @@ function NewProspectForm() {
           <div className="flex gap-2">
             <Button
               disabled={!aiReady || extract.isPending || !url.trim() || !text.trim()}
-              onClick={() =>
+              onClick={() => {
+                resetResearch();
                 extract.mutate({
                   profileUrl: url,
                   profileText: text,
                   companyWebsite: website || null,
-                })
-              }
+                });
+              }}
             >
               {extract.isPending ? (
                 <Loader2 className="mr-1 h-4 w-4 animate-spin" />
@@ -196,7 +248,10 @@ function NewProspectForm() {
             </Button>
             <Button
               variant="outline"
-              onClick={() => setForm((f) => f ?? { ...EMPTY, companyWebsite: website })}
+              onClick={() => {
+                resetResearch();
+                setForm((f) => f ?? { ...EMPTY, companyWebsite: website });
+              }}
             >
               Fill in by hand
             </Button>
@@ -226,6 +281,7 @@ function NewProspectForm() {
                 onChange={(signals) => setForm((f) => f && { ...f, signals })}
               />
             </div>
+            <WebResearchPanel state={web} onChange={setWeb} />
             {form.enrichmentStatus && (
               <p className="text-muted-foreground text-xs">
                 {ENRICHMENT_LABEL[form.enrichmentStatus]}
