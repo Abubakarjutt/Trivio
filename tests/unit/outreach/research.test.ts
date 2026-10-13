@@ -7,6 +7,7 @@ import {
   pageText,
   pickPages,
   researchProspect,
+  searchSkipMessage,
   type ResearchDeps,
 } from "@/server/services/outreach/research";
 import { SearchError, type SearchProvider } from "@/server/services/outreach/search";
@@ -128,6 +129,8 @@ const LEAD = { name: "Jane Doe", company: "Acme AI", website: "https://acme.ai" 
 
 function searchOf(byQuery: (q: string) => string[] | Error): SearchProvider {
   return {
+    service: "Tavily",
+    gapMs: 0,
     search: vi.fn(async (q: string) => {
       const out = byQuery(q);
       if (out instanceof Error) throw out;
@@ -236,7 +239,7 @@ describe("researchProspect", () => {
     );
     expect(out).toEqual({
       status: "skipped",
-      message: RESEARCH_MESSAGES.badKey,
+      message: "Web research skipped: the Tavily key was rejected.",
       signals: [],
       note: "",
       sources: [],
@@ -340,10 +343,12 @@ describe("researchProspect", () => {
     });
   });
 
-  it("searches one at a time with a pause between, so a free Brave key isn't rate-limited", async () => {
+  it("searches one at a time with a pause between, so Brave's one-a-second limit holds", async () => {
     let inFlight = 0;
     let most = 0;
     const search: SearchProvider = {
+      service: "Brave",
+      gapMs: SEARCH_GAP_MS,
       search: async () => {
         most = Math.max(most, ++inFlight);
         await new Promise((done) => setTimeout(done, 5));
@@ -358,6 +363,87 @@ describe("researchProspect", () => {
     expect(wait).toHaveBeenCalledWith(SEARCH_GAP_MS);
   });
 
+  it("doesn't pause between searches for a service with no gap", async () => {
+    const wait = vi.fn(async () => {});
+    await researchProspect(LEAD, deps({ search: searchOf(() => []), wait }));
+    expect(wait).not.toHaveBeenCalled();
+  });
+
+  it("names the service in the skip message", () => {
+    expect(searchSkipMessage([["quota", "Brave"]])).toBe(
+      "Web research skipped: Brave quota reached."
+    );
+    expect(searchSkipMessage([["unreachable", "Tavily"]])).toBe(
+      "Web research skipped: couldn't reach Tavily."
+    );
+    expect(
+      searchSkipMessage([
+        ["quota", "Tavily"],
+        ["bad_key", "Brave"],
+      ])
+    ).toBe("Web research skipped: Tavily quota reached; the Brave key was rejected.");
+  });
+
+  it("doesn't retry a used-up plan", async () => {
+    const search = searchOf(() => new SearchError("quota", "q"));
+    const wait = vi.fn(async () => {});
+    const out = await researchProspect(LEAD, deps({ search, wait }));
+    expect(search.search).toHaveBeenCalledTimes(4);
+    expect(wait).not.toHaveBeenCalled();
+    expect(out.message).toBe("Web research skipped: Tavily quota reached.");
+  });
+
+  const braveOf = (byQuery: (q: string) => string[] | Error): SearchProvider => ({
+    ...searchOf(byQuery),
+    service: "Brave",
+  });
+
+  it("falls back to the second service when every search on the first fails", async () => {
+    const llm = new FakeLlm([{ signals: [], note: "Acme AI builds agents." }]);
+    const fallback = braveOf(() => ["https://a.example.com/1"]);
+    const out = await researchProspect(
+      LEAD,
+      deps({
+        search: searchOf(() => new SearchError("quota", "q")),
+        fallback,
+        fetchPage: pagesOf({ "https://a.example.com/1": LONG("Acme") }),
+        llm,
+      })
+    );
+    expect(out.status).toBe("done");
+    expect(fallback.search).toHaveBeenCalledTimes(4);
+  });
+
+  it("names both services when both fail", async () => {
+    const out = await researchProspect(
+      LEAD,
+      deps({
+        search: searchOf(() => new SearchError("quota", "q")),
+        fallback: braveOf(() => new SearchError("bad_key", "b")),
+      })
+    );
+    expect(out.message).toBe(
+      "Web research skipped: Tavily quota reached; the Brave key was rejected."
+    );
+  });
+
+  it("doesn't use the fallback when some searches worked", async () => {
+    const llm = new FakeLlm([{ signals: [], note: "Acme AI builds agents." }]);
+    const fallback = braveOf(() => []);
+    await researchProspect(
+      LEAD,
+      deps({
+        search: searchOf((q) =>
+          q.includes("news") ? ["https://a.example.com/1"] : new SearchError("quota", "q")
+        ),
+        fallback,
+        fetchPage: pagesOf({ "https://a.example.com/1": LONG("Acme") }),
+        llm,
+      })
+    );
+    expect(fallback.search).not.toHaveBeenCalled();
+  });
+
   it("retries a rate-limited search once after a pause", async () => {
     const llm = new FakeLlm([{ signals: [], note: "Acme AI builds agents." }]);
     let calls = 0;
@@ -366,7 +452,7 @@ describe("researchProspect", () => {
       deps({
         search: searchOf((q) => {
           if (!q.includes("funding")) return [];
-          return ++calls === 1 ? new SearchError("quota", "q") : ["https://a.example.com/1"];
+          return ++calls === 1 ? new SearchError("rate_limited", "q") : ["https://a.example.com/1"];
         }),
         fetchPage: pagesOf({ "https://a.example.com/1": LONG("Acme") }),
         llm,

@@ -22,7 +22,7 @@ const DENYLIST: (string | RegExp)[] = [
   "invoices.getPdfData", // feeds the PDF renderer, not a user action
   "outreachProspects.delete", // erases a prospect and adds a do-not-contact entry — UI only
   "outreachProspects.markDnc", // do-not-contact must come from the human
-  "outreachProspects.research", // spends the user's Brave quota and reads the web — UI only
+  "outreachProspects.research", // spends the user's search quota and reads the web — UI only
   "outreachSettings.setSearchKey", // an API key must come from the human
   "outreachSettings.testSearchKey",
   "outreachVoice.delete",

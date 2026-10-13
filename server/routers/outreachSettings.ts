@@ -2,9 +2,13 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { createTRPCRouter } from "@/server/trpc";
 import { getAiStatus } from "@/server/services/ai-status";
-import { loadConfig, loadSearchKey, requireConfig } from "@/server/services/outreach/config";
-import { RESEARCH_MESSAGES } from "@/server/services/outreach/research";
-import { createBraveSearch, SearchError } from "@/server/services/outreach/search";
+import { loadConfig, loadSearchKeys, requireConfig } from "@/server/services/outreach/config";
+import {
+  createSearch,
+  SEARCH_ENGINES,
+  SEARCH_SERVICE,
+  SearchError,
+} from "@/server/services/outreach/search";
 import {
   CadenceSchema,
   NotFoundError,
@@ -22,6 +26,8 @@ const OfferInput = z.object({
   fittingSignals: z.array(z.enum(SIGNAL_NAMES)).max(SIGNAL_NAMES.length),
 });
 const ApiKey = z.string().trim().min(1).max(200);
+const Engine = z.enum(SEARCH_ENGINES);
+const KEY_COLUMN = { tavily: "tavilyApiKey", brave: "searchApiKey" } as const;
 const masked = (key: string | null) => ({ set: !!key, last4: key ? key.slice(-4) : null });
 const toPrice = (p: string) => (p === "" ? null : new Prisma.Decimal(p));
 
@@ -34,7 +40,10 @@ export const outreachSettingsRouter = createTRPCRouter({
     });
     return {
       settings,
-      searchKey: masked(await loadSearchKey(ctx.db, ctx.organisationId)),
+      searchKeys: await loadSearchKeys(ctx.db, ctx.organisationId).then((k) => ({
+        tavily: masked(k.tavily),
+        brave: masked(k.brave),
+      })),
       offers: offers.map((o) => ({
         id: o.id,
         name: o.name,
@@ -98,24 +107,29 @@ export const outreachSettingsRouter = createTRPCRouter({
     }),
 
   setSearchKey: outreachProcedure
-    .input(z.object({ apiKey: ApiKey.nullable() }))
+    .input(z.object({ engine: Engine, apiKey: ApiKey.nullable() }))
     .mutation(async ({ ctx, input }) => {
       await requireConfig(ctx.db, ctx.organisationId);
       await ctx.db.outreachSettings.update({
         where: { organisationId: ctx.organisationId },
-        data: { searchApiKey: input.apiKey },
+        data: { [KEY_COLUMN[input.engine]]: input.apiKey },
       });
       return { ok: true };
     }),
 
-  // A mutation, not a query: it spends one Brave search and must never be cached or refetched.
+  // A mutation, not a query: it spends one search and must never be cached or refetched.
   testSearchKey: outreachProcedure
-    .input(z.object({ apiKey: ApiKey.optional() }))
+    .input(z.object({ engine: Engine, apiKey: ApiKey.optional() }))
     .mutation(async ({ ctx, input }) => {
-      const apiKey = input.apiKey ?? (await loadSearchKey(ctx.db, ctx.organisationId));
-      if (!apiKey) return { ok: false as const, message: RESEARCH_MESSAGES.noKey };
+      const apiKey =
+        input.apiKey ?? (await loadSearchKeys(ctx.db, ctx.organisationId))[input.engine];
+      if (!apiKey)
+        return {
+          ok: false as const,
+          message: `No ${SEARCH_SERVICE[input.engine]} key saved. Paste one first.`,
+        };
       try {
-        await createBraveSearch(apiKey).search("Trivio", { count: 1 });
+        await createSearch(input.engine, apiKey).search("Trivio", { count: 1 });
         return { ok: true as const, message: null };
       } catch (e) {
         if (e instanceof SearchError) return { ok: false as const, message: e.message };

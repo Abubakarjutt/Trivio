@@ -1,5 +1,6 @@
 // An organisation's Outreach settings, parsed. No row means Outreach isn't set up yet.
 import type { PrismaClient } from "@prisma/client";
+import { SEARCH_ENGINES, type SearchEngine } from "./search";
 import {
   CadenceSchema,
   DEFAULT_CADENCE,
@@ -39,11 +40,21 @@ export async function requireConfig(db: PrismaClient, orgId: string): Promise<Ou
   return config;
 }
 
-/** The Brave Search key, or null. Never send it to the client. */
-export async function loadSearchKey(db: PrismaClient, orgId: string): Promise<string | null> {
+export type SearchKeys = Record<SearchEngine, string | null>;
+
+/** The saved search keys (null when unset). Never send them to the client. */
+export async function loadSearchKeys(db: PrismaClient, orgId: string): Promise<SearchKeys> {
   const s = await db.outreachSettings.findUnique({
     where: { organisationId: orgId },
-    select: { searchApiKey: true },
+    select: { searchApiKey: true, tavilyApiKey: true },
   });
-  return s?.searchApiKey || null;
+  return { tavily: s?.tavilyApiKey || null, brave: s?.searchApiKey || null };
+}
+
+/** The searches research may use, in order: Tavily first, then Brave as the fallback. */
+export function searchOrder(keys: SearchKeys): { engine: SearchEngine; apiKey: string }[] {
+  return SEARCH_ENGINES.flatMap((engine) => {
+    const apiKey = keys[engine];
+    return apiKey ? [{ engine, apiKey }] : [];
+  });
 }

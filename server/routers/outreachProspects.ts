@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { createTRPCRouter } from "@/server/trpc";
 import { extractProfile } from "@/server/services/outreach/ai";
-import { loadSearchKey, requireConfig } from "@/server/services/outreach/config";
+import { loadSearchKeys, requireConfig, searchOrder } from "@/server/services/outreach/config";
 import { CONVERT_MARKER, linkCrmLead, tryStartPilot } from "@/server/services/outreach/crm-handoff";
 import { enrichCompany, websiteNamedIn, websiteOrigin } from "@/server/services/outreach/enrich";
 import { createLlm } from "@/server/services/outreach/llm";
@@ -18,7 +18,7 @@ import {
 } from "@/server/services/outreach/prospects";
 import { RESEARCH_MESSAGES, researchProspect, skipped } from "@/server/services/outreach/research";
 import { scoreSignals } from "@/server/services/outreach/scoring";
-import { createBraveSearch } from "@/server/services/outreach/search";
+import { createSearch } from "@/server/services/outreach/search";
 import { OutreachError, SignalsSchema } from "@/server/services/outreach/types";
 import { normalizeProfileUrl } from "@/server/services/outreach/urls";
 import { createPageFetcher } from "@/server/services/outreach/website";
@@ -164,12 +164,13 @@ export const outreachProspectsRouter = createTRPCRouter({
         throw new OutreachError("This person is on your do-not-contact list.");
       }
       const config = await requireConfig(ctx.db, ctx.organisationId);
-      const apiKey = await loadSearchKey(ctx.db, ctx.organisationId);
-      if (!apiKey) return skipped(RESEARCH_MESSAGES.noKey);
+      const [main, backup] = searchOrder(await loadSearchKeys(ctx.db, ctx.organisationId));
+      if (!main) return skipped(RESEARCH_MESSAGES.noKey);
       return researchProspect(
         { name: input.name, company: input.company, website: input.companyWebsite ?? null },
         {
-          search: createBraveSearch(apiKey),
+          search: createSearch(main.engine, main.apiKey),
+          fallback: backup && createSearch(backup.engine, backup.apiKey),
           fetchPage: createPageFetcher(),
           llm: createLlm(),
           sellerProfile: config.sellerProfile,

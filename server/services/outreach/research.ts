@@ -1,9 +1,14 @@
-// Web research for a prospect: Brave finds links, Trivio opens the best pages itself through the
+// Web research for a prospect: the search service (Tavily or Brave) finds links, Trivio opens the best pages itself through the
 // SSRF-safe fetcher, and the user's AI reads them. Nothing here saves anything.
 import { FORMAT_ERROR, OutreachAiError, type Llm } from "./llm";
 import { researchPrompt, type ResearchPage } from "./prompts";
 import { WebResearchSchema } from "./schemas";
-import { SearchError, type SearchProvider, type SearchResult } from "./search";
+import {
+  SearchError,
+  type SearchErrorKind,
+  type SearchProvider,
+  type SearchResult,
+} from "./search";
 import type { Signal } from "./types";
 import { isLinkedInHost, type FetchPage } from "./website";
 
@@ -12,7 +17,7 @@ export const MAX_PAGE_CHARS = 3000;
 export const MIN_PAGE_CHARS = 200;
 export const MAX_NOTE = 600;
 const PER_HOST = 2;
-/** Brave's free plan allows one search a second, so searches run one after another. */
+/** Pause before retrying a rate-limited search. */
 export const SEARCH_GAP_MS = 1100;
 /** Cleaning text is regex work; a huge or hostile page must not stall the server. */
 const MAX_HTML_CHARS = 100_000;
@@ -87,18 +92,21 @@ export function pageText(html: string): string {
 }
 
 export const RESEARCH_MESSAGES = {
-  noKey: "Add a Brave Search key in Outreach settings to research the web.",
-  badKey: "Web research skipped: the Brave key was rejected.",
-  quota: "Web research skipped: Brave quota reached.",
-  unreachable: "Web research skipped: couldn't reach Brave.",
+  noKey: "Add a free Tavily key (or a Brave Search key) in Outreach settings to research the web.",
   nothing: "Web research found nothing about this company.",
   aiFormat: "Web research skipped: the AI's answer didn't match the expected format.",
 } as const;
-const SEARCH_MESSAGE = {
-  bad_key: RESEARCH_MESSAGES.badKey,
-  quota: RESEARCH_MESSAGES.quota,
-  unreachable: RESEARCH_MESSAGES.unreachable,
-} as const;
+const failureReason = (kind: SearchErrorKind, service: string) =>
+  ({
+    bad_key: `the ${service} key was rejected`,
+    rate_limited: `${service} is busy, try again in a minute`,
+    quota: `${service} quota reached`,
+    refused: `${service} refused the search`,
+    unreachable: `couldn't reach ${service}`,
+  })[kind];
+/** The one-line skip message for failed searches, naming each service that was tried. */
+export const searchSkipMessage = (failures: [SearchErrorKind, string][]) =>
+  `Web research skipped: ${failures.map(([kind, service]) => failureReason(kind, service)).join("; ")}.`;
 
 export type ResearchResult = {
   status: "done" | "skipped";
@@ -110,6 +118,8 @@ export type ResearchResult = {
 export type ResearchInput = { name: string; company: string; website: string | null };
 export type ResearchDeps = {
   search: SearchProvider;
+  /** Tried when every search on `search` fails (a rejected key, a used-up plan). */
+  fallback?: SearchProvider;
   fetchPage: FetchPage;
   llm: Llm;
   sellerProfile: string;
@@ -142,6 +152,29 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R
 
 type Searched = { results: SearchResult[] } | { error: unknown };
 
+async function searchAll(
+  queries: string[],
+  provider: SearchProvider,
+  wait: (ms: number) => Promise<void>
+): Promise<Searched[]> {
+  const searchOnce = async (q: string, retry: boolean): Promise<Searched> => {
+    try {
+      return { results: await provider.search(q, { count: 8 }) };
+    } catch (error) {
+      if (!retry || !(error instanceof SearchError) || error.kind !== "rate_limited")
+        return { error };
+      await wait(SEARCH_GAP_MS);
+      return searchOnce(q, false);
+    }
+  };
+  const searched: Searched[] = [];
+  for (const [i, q] of queries.entries()) {
+    if (i > 0 && provider.gapMs > 0) await wait(provider.gapMs);
+    searched.push(await searchOnce(q, true));
+  }
+  return searched;
+}
+
 export async function researchProspect(
   input: ResearchInput,
   deps: ResearchDeps
@@ -149,29 +182,21 @@ export async function researchProspect(
   const queries = buildQueries(input.name, input.company);
   if (queries.length === 0) return skipped(RESEARCH_MESSAGES.nothing);
 
-  // 1. Search, one at a time with a pause between, so a free Brave key isn't rate-limited.
-  // A rate-limited query is retried once after another pause. One failing query doesn't
-  // stop the others.
+  // 1. Search, one at a time, paced to the service (Brave allows one a second on its lowest
+  // plan). A rate-limited query is retried once after a pause. One failing query doesn't
+  // stop the others. If every query fails, the fallback service gets the same queries.
   const wait = deps.wait ?? sleep;
-  const searchOnce = async (q: string, retry: boolean): Promise<Searched> => {
-    try {
-      return { results: await deps.search.search(q, { count: 8 }) };
-    } catch (error) {
-      if (!retry || !(error instanceof SearchError) || error.kind !== "quota") return { error };
-      await wait(SEARCH_GAP_MS);
-      return searchOnce(q, false);
-    }
-  };
-  const searched: Searched[] = [];
-  for (const [i, q] of queries.entries()) {
-    if (i > 0) await wait(SEARCH_GAP_MS);
-    searched.push(await searchOnce(q, true));
-  }
-  if (searched.every((s) => "error" in s)) {
+  const failures: [SearchErrorKind, string][] = [];
+  let searched: Searched[] = [];
+  for (const provider of [deps.search, deps.fallback]) {
+    if (!provider) continue;
+    searched = await searchAll(queries, provider, wait);
+    if (!searched.every((s) => "error" in s)) break;
     const first = (searched[0] as { error: unknown }).error;
-    if (first instanceof SearchError) return skipped(SEARCH_MESSAGE[first.kind]);
-    throw first;
+    if (!(first instanceof SearchError)) throw first;
+    failures.push([first.kind, provider.service]);
   }
+  if (searched.every((s) => "error" in s)) return skipped(searchSkipMessage(failures));
   const found = searched.flatMap((s) => ("results" in s ? s.results : []));
 
   // 2. Open the best pages through the safe fetcher.
