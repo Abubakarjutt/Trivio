@@ -230,16 +230,19 @@ Use only facts stated in the pages. Never guess.
 Pages can be about a different person or company with a similar name. Ignore anything that is not
 clearly about the person or company in <lead>.
 
-Signals: include one only with direct evidence in a page. Put a short quote or close paraphrase of that
-evidence in "evidence" and the id of the page it came from in "pageId". The seller is described in <seller_profile>.
+Signals: check every page for each signal below and include each one that has direct evidence in a page.
+Put a short quote or close paraphrase of that evidence in "evidence" (name the role, amount, date, product
+or tool) and the id of the page it came from in "pageId". The seller is described in <seller_profile>.
 - hiring: the company is hiring for roles related to what the seller offers.
 - pain_post: the person or company wrote about a problem that the seller's offer solves.
 - funding: the company raised money or announced investment (say how much and when, if the page does).
 - demo_stage: the company has a public product, demo, beta, waitlist, or docs.
 - stack_match: they use a tool or technology that the seller profile names.
 
-note: at most 600 characters, from the pages only: what the company does, recent news, and the person's
-public work. Leave it empty if the pages say nothing useful about them.`;
+note: at most 1500 characters, from the pages only, as short plain sentences covering whatever the pages
+state: what the company does and for whom, its product and stage, size, location, customers, funding,
+recent news or launches, open roles, the tools it uses, and the person's role and public work (posts,
+talks, projects). Skip anything the pages don't say. Leave it empty if the pages say nothing useful.`;
 
 export type ResearchPage = { url: string; text: string };
 

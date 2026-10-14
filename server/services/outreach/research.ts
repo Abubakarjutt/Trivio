@@ -1,5 +1,6 @@
-// Web research for a prospect: the search service (Tavily or Brave) finds links, Trivio opens the best pages itself through the
-// SSRF-safe fetcher, and the user's AI reads them. Nothing here saves anything.
+// Web research for a prospect: the search service (Tavily or Brave) finds links and, for Tavily, the
+// pages' text. Pages without text are opened through the SSRF-safe fetcher. The user's AI reads them.
+// Nothing here saves anything.
 import { FORMAT_ERROR, OutreachAiError, type Llm } from "./llm";
 import { researchPrompt, type ResearchPage } from "./prompts";
 import { WebResearchSchema } from "./schemas";
@@ -13,9 +14,9 @@ import type { Signal } from "./types";
 import { isLinkedInHost, type FetchPage } from "./website";
 
 export const MAX_PAGES = 6;
-export const MAX_PAGE_CHARS = 3000;
+export const MAX_PAGE_CHARS = 5000;
 export const MIN_PAGE_CHARS = 200;
-export const MAX_NOTE = 600;
+export const MAX_NOTE = 1500;
 const PER_HOST = 2;
 /** Pause before retrying a rate-limited search. */
 export const SEARCH_GAP_MS = 1100;
@@ -42,25 +43,31 @@ export function buildQueries(name: string, company: string): string[] {
   ];
 }
 
-/** The pages worth opening, in query order then rank order. */
+/** A result's link, cleaned, or null when it isn't a page worth reading. */
+function pageUrl(raw: string): URL | null {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+  if (isLinkedInHost(u.hostname) || FILE.test(u.pathname)) return null;
+  u.hash = "";
+  for (const k of [...u.searchParams.keys()])
+    if (k.toLowerCase().startsWith("utm_")) u.searchParams.delete(k);
+  return u.toString().length > MAX_URL ? null : u;
+}
+
+/** The pages worth reading, in query order then rank order. */
 export function pickPages(results: SearchResult[], max = MAX_PAGES): string[] {
   const seen = new Set<string>();
   const perHost = new Map<string, number>();
   const out: string[] = [];
   for (const r of results) {
-    let u: URL;
-    try {
-      u = new URL(r.url);
-    } catch {
-      continue;
-    }
-    if (u.protocol !== "http:" && u.protocol !== "https:") continue;
-    if (isLinkedInHost(u.hostname) || FILE.test(u.pathname)) continue;
-    u.hash = "";
-    for (const k of [...u.searchParams.keys()])
-      if (k.toLowerCase().startsWith("utm_")) u.searchParams.delete(k);
+    const u = pageUrl(r.url);
+    if (!u) continue;
     const href = u.toString();
-    if (href.length > MAX_URL) continue;
     const host = u.hostname.replace(/^www\./, "");
     const count = perHost.get(host) ?? 0;
     if (seen.has(href) || count >= PER_HOST) continue;
@@ -89,6 +96,16 @@ export function pageText(html: string): string {
     .replace(/&amp;/gi, "&")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/** The page's <main> or <article> when it has enough text, so menus and footers don't fill the page budget. */
+export function mainText(html: string): string {
+  for (const tag of ["main", "article"]) {
+    const m = html.match(new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*)<\\/${tag}\\s*>`, "i"));
+    const text = m ? pageText(m[1]!) : "";
+    if (text.length >= MIN_PAGE_CHARS) return text;
+  }
+  return pageText(html);
 }
 
 export const RESEARCH_MESSAGES = {
@@ -199,16 +216,36 @@ export async function researchProspect(
   if (searched.every((s) => "error" in s)) return skipped(searchSkipMessage(failures));
   const found = searched.flatMap((s) => ("results" in s ? s.results : []));
 
-  // 2. Open the best pages through the safe fetcher.
+  // 2. Read the best pages: the service's text when it sent enough, else open the page through
+  // the safe fetcher, else the search snippet.
+  const byUrl = new Map<string, SearchResult>();
+  for (const r of found) {
+    const href = pageUrl(r.url)?.toString();
+    if (href && !byUrl.has(href)) byUrl.set(href, r);
+  }
+  const usable = (text: string | undefined) => {
+    const t = (text ?? "")
+      .replace(/[<>]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, MAX_PAGE_CHARS);
+    return t.length >= MIN_PAGE_CHARS ? t : null;
+  };
   const opened = await mapLimit(pickPages(found), 3, async (url): Promise<ResearchPage | null> => {
+    const result = byUrl.get(url);
+    const given = usable(result?.content);
+    if (given) return { url, text: given };
     try {
       const page = await deps.fetchPage(url);
-      if (page.status < 200 || page.status >= 300) return null;
-      const text = pageText(page.body.slice(0, MAX_HTML_CHARS)).slice(0, MAX_PAGE_CHARS);
-      return text.length >= MIN_PAGE_CHARS ? { url, text } : null;
+      if (page.status >= 200 && page.status < 300) {
+        const text = usable(mainText(page.body.slice(0, MAX_HTML_CHARS)));
+        if (text) return { url, text };
+      }
     } catch {
-      return null;
+      // Fall through to the snippet.
     }
+    const snippet = usable(result?.snippet);
+    return snippet ? { url, text: snippet } : null;
   });
   const pages = opened.filter((p): p is ResearchPage => p !== null);
   if (pages.length === 0) return skipped(RESEARCH_MESSAGES.nothing);

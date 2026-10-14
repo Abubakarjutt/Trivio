@@ -1,6 +1,7 @@
 // Web search for prospect research: Tavily (free plan, no card) or Brave (paid).
 // The search service receives only the query text (a name and a company), never the pasted profile.
-export type SearchResult = { title: string; url: string; snippet: string };
+/** `content` is the page's main text when the service sends it (Tavily does), so Trivio needn't open it. */
+export type SearchResult = { title: string; url: string; snippet: string; content?: string };
 
 export type SearchEngine = "tavily" | "brave";
 export const SEARCH_ENGINES = ["tavily", "brave"] as const;
@@ -121,6 +122,8 @@ export function createTavilySearch(
             query,
             max_results: opts.count ?? 8,
             search_depth: "basic",
+            // The cleaned page, at no extra credit: blocked or script-drawn pages still have text.
+            include_raw_content: "markdown",
           }),
           signal: AbortSignal.timeout(TIMEOUT_MS),
         });
@@ -142,7 +145,14 @@ export function createTavilySearch(
       if (!Array.isArray(results)) return [];
       return results.flatMap((r: Record<string, unknown> | null) =>
         r && typeof r.url === "string"
-          ? [{ title: str(r.title), url: r.url, snippet: str(r.content) }]
+          ? [
+              {
+                title: str(r.title),
+                url: r.url,
+                snippet: str(r.content),
+                content: str(r.raw_content),
+              },
+            ]
           : []
       );
     },

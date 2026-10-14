@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/select";
 import { SIGNAL_NAMES, type Signal, type SignalName } from "@/server/services/outreach/types";
 import { SIGNAL_LABEL } from "./labels";
+import { SourceLink } from "./web-research-panel";
 
 export function SignalsEditor({
   value,
@@ -44,13 +45,16 @@ export function SignalsEditor({
               ))}
             </SelectContent>
           </Select>
-          <Input
-            value={s.evidence}
-            maxLength={500}
-            aria-label={`Evidence for ${SIGNAL_LABEL[s.name]}`}
-            placeholder="Evidence: what they said or posted"
-            onChange={(e) => set(i, { evidence: e.target.value })}
-          />
+          <div className="min-w-0 flex-1 space-y-0.5">
+            <Input
+              value={s.evidence}
+              maxLength={500}
+              aria-label={`Evidence for ${SIGNAL_LABEL[s.name]}`}
+              placeholder="Evidence: what they said or posted"
+              onChange={(e) => set(i, { evidence: e.target.value })}
+            />
+            {s.source && <SourceLink url={s.source} />}
+          </div>
           <Button
             size="icon"
             variant="ghost"
