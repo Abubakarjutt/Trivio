@@ -1,9 +1,14 @@
-// Web research for a prospect: Brave finds links, Trivio opens the best pages itself through the
+// Web research for a prospect: the search service (Tavily or Brave) finds links, Trivio opens the best pages itself through the
 // SSRF-safe fetcher, and the user's AI reads them. Nothing here saves anything.
 import { FORMAT_ERROR, OutreachAiError, type Llm } from "./llm";
 import { researchPrompt, type ResearchPage } from "./prompts";
 import { WebResearchSchema } from "./schemas";
-import { SearchError, type SearchProvider, type SearchResult } from "./search";
+import {
+  SearchError,
+  type SearchErrorKind,
+  type SearchProvider,
+  type SearchResult,
+} from "./search";
 import type { Signal } from "./types";
 import { isLinkedInHost, type FetchPage } from "./website";
 
@@ -12,7 +17,7 @@ export const MAX_PAGE_CHARS = 3000;
 export const MIN_PAGE_CHARS = 200;
 export const MAX_NOTE = 600;
 const PER_HOST = 2;
-/** Brave's free plan allows one search a second, so searches run one after another. */
+/** Pause before retrying a rate-limited search. */
 export const SEARCH_GAP_MS = 1100;
 /** Cleaning text is regex work; a huge or hostile page must not stall the server. */
 const MAX_HTML_CHARS = 100_000;
@@ -87,18 +92,17 @@ export function pageText(html: string): string {
 }
 
 export const RESEARCH_MESSAGES = {
-  noKey: "Add a Brave Search key in Outreach settings to research the web.",
-  badKey: "Web research skipped: the Brave key was rejected.",
-  quota: "Web research skipped: Brave quota reached.",
-  unreachable: "Web research skipped: couldn't reach Brave.",
+  noKey: "Add a free Tavily key (or a Brave Search key) in Outreach settings to research the web.",
   nothing: "Web research found nothing about this company.",
   aiFormat: "Web research skipped: the AI's answer didn't match the expected format.",
 } as const;
-const SEARCH_MESSAGE = {
-  bad_key: RESEARCH_MESSAGES.badKey,
-  quota: RESEARCH_MESSAGES.quota,
-  unreachable: RESEARCH_MESSAGES.unreachable,
-} as const;
+/** The one-line skip message for a failed search, naming the service. */
+export const searchSkipMessage = (kind: SearchErrorKind, service: string) =>
+  ({
+    bad_key: `Web research skipped: the ${service} key was rejected.`,
+    quota: `Web research skipped: ${service} quota reached.`,
+    unreachable: `Web research skipped: couldn't reach ${service}.`,
+  })[kind];
 
 export type ResearchResult = {
   status: "done" | "skipped";
@@ -149,8 +153,8 @@ export async function researchProspect(
   const queries = buildQueries(input.name, input.company);
   if (queries.length === 0) return skipped(RESEARCH_MESSAGES.nothing);
 
-  // 1. Search, one at a time with a pause between, so a free Brave key isn't rate-limited.
-  // A rate-limited query is retried once after another pause. One failing query doesn't
+  // 1. Search, one at a time, paced to the service (Brave allows one a second on its lowest
+  // plan). A rate-limited query is retried once after a pause. One failing query doesn't
   // stop the others.
   const wait = deps.wait ?? sleep;
   const searchOnce = async (q: string, retry: boolean): Promise<Searched> => {
@@ -164,12 +168,13 @@ export async function researchProspect(
   };
   const searched: Searched[] = [];
   for (const [i, q] of queries.entries()) {
-    if (i > 0) await wait(SEARCH_GAP_MS);
+    if (i > 0 && deps.search.gapMs > 0) await wait(deps.search.gapMs);
     searched.push(await searchOnce(q, true));
   }
   if (searched.every((s) => "error" in s)) {
     const first = (searched[0] as { error: unknown }).error;
-    if (first instanceof SearchError) return skipped(SEARCH_MESSAGE[first.kind]);
+    if (first instanceof SearchError)
+      return skipped(searchSkipMessage(first.kind, deps.search.service));
     throw first;
   }
   const found = searched.flatMap((s) => ("results" in s ? s.results : []));

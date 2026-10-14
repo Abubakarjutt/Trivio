@@ -1,8 +1,15 @@
-// Web search for prospect research. Brave only for now; the interface leaves room for others.
-// Brave receives only the query text (a name and a company), never the pasted profile.
+// Web search for prospect research: Tavily (free plan, no card) or Brave (paid).
+// The search service receives only the query text (a name and a company), never the pasted profile.
 export type SearchResult = { title: string; url: string; snippet: string };
 
+export type SearchEngine = "tavily" | "brave";
+export const SEARCH_ENGINES = ["tavily", "brave"] as const;
+
 export interface SearchProvider {
+  /** The service's name, for messages ("Tavily", "Brave"). */
+  readonly service: string;
+  /** Pause between searches; Brave's lowest plan allows one a second. */
+  readonly gapMs: number;
   search(query: string, opts?: { count?: number }): Promise<SearchResult[]>;
 }
 
@@ -18,14 +25,18 @@ export class SearchError extends Error {
   }
 }
 
-const ENDPOINT = "https://api.search.brave.com/res/v1/web/search";
+const BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search";
+const TAVILY_ENDPOINT = "https://api.tavily.com/search";
 const TIMEOUT_MS = 10_000;
-const MESSAGE: Record<SearchErrorKind, string> = {
-  bad_key: "Brave rejected this key. Check it and try again.",
-  quota: "Brave quota reached. Try again later, or check your Brave plan.",
-  unreachable: "Couldn't reach Brave. Check your internet connection and try again.",
-};
-const fail = (kind: SearchErrorKind) => new SearchError(kind, MESSAGE[kind]);
+const BRAVE_GAP_MS = 1100;
+const message = (kind: SearchErrorKind, service: string) =>
+  ({
+    bad_key: `${service} rejected this key. Check it and try again.`,
+    quota: `${service} quota reached. Try again later, or check your ${service} plan.`,
+    unreachable: `Couldn't reach ${service}. Check your internet connection and try again.`,
+  })[kind];
+const failer = (service: string) => (kind: SearchErrorKind) =>
+  new SearchError(kind, message(kind, service));
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 
 /** Brave answers a bad or unsubscribed key with 422 (sometimes 400) and a JSON error body. */
@@ -43,9 +54,12 @@ async function isAuthRejection(res: Response): Promise<boolean> {
 }
 
 export function createBraveSearch(apiKey: string, fetchImpl: typeof fetch = fetch): SearchProvider {
+  const fail = failer("Brave");
   return {
+    service: "Brave",
+    gapMs: BRAVE_GAP_MS,
     async search(query, opts = {}) {
-      const url = new URL(ENDPOINT);
+      const url = new URL(BRAVE_ENDPOINT);
       url.searchParams.set("q", query);
       url.searchParams.set("count", String(opts.count ?? 8));
       let res: Response;
@@ -77,4 +91,58 @@ export function createBraveSearch(apiKey: string, fetchImpl: typeof fetch = fetc
       );
     },
   };
+}
+
+/** Tavily: POST with a Bearer key. 432/433 are its plan and spending limits. */
+export function createTavilySearch(
+  apiKey: string,
+  fetchImpl: typeof fetch = fetch
+): SearchProvider {
+  const fail = failer("Tavily");
+  return {
+    service: "Tavily",
+    gapMs: 0,
+    async search(query, opts = {}) {
+      let res: Response;
+      try {
+        res = await fetchImpl(TAVILY_ENDPOINT, {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            query,
+            max_results: opts.count ?? 8,
+            search_depth: "basic",
+          }),
+          signal: AbortSignal.timeout(TIMEOUT_MS),
+        });
+      } catch {
+        throw fail("unreachable");
+      }
+      if (res.status === 401 || res.status === 403) throw fail("bad_key");
+      if (res.status === 429 || res.status === 432 || res.status === 433) throw fail("quota");
+      if (!res.ok) throw fail("unreachable");
+      let body: unknown;
+      try {
+        body = await res.json();
+      } catch {
+        throw fail("unreachable");
+      }
+      const results = (body as { results?: unknown } | null)?.results;
+      if (!Array.isArray(results)) return [];
+      return results.flatMap((r: Record<string, unknown> | null) =>
+        r && typeof r.url === "string"
+          ? [{ title: str(r.title), url: r.url, snippet: str(r.content) }]
+          : []
+      );
+    },
+  };
+}
+
+/** The provider for an engine and key. Router code goes through this so QA can replace it. */
+export function createSearch(engine: SearchEngine, apiKey: string): SearchProvider {
+  return engine === "tavily" ? createTavilySearch(apiKey) : createBraveSearch(apiKey);
 }

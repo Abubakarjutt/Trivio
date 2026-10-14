@@ -18,7 +18,14 @@ vi.mock("@/server/services/outreach/llm", async (orig) => ({
 const webBox = vi.hoisted(() => ({
   search: null as
     | null
-    | ((key: string) => { search: (q: string, o?: { count?: number }) => Promise<unknown[]> }),
+    | ((
+        engine: string,
+        key: string
+      ) => {
+        service: string;
+        gapMs: number;
+        search: (q: string, o?: { count?: number }) => Promise<unknown[]>;
+      }),
   fetchPage: null as
     | null
     | ((url: string) => Promise<{ status: number; url: string; body: string }>),
@@ -32,9 +39,9 @@ vi.mock("@/server/services/outreach/website", async (orig) => ({
 }));
 vi.mock("@/server/services/outreach/search", async (orig) => ({
   ...(await orig<typeof import("@/server/services/outreach/search")>()),
-  createBraveSearch: (key: string) => {
-    if (!webBox.search) throw new Error("QA never calls Brave");
-    return webBox.search(key);
+  createSearch: (engine: string, key: string) => {
+    if (!webBox.search) throw new Error("QA never calls a search service");
+    return webBox.search(engine, key);
   },
 }));
 
@@ -312,17 +319,25 @@ describe("web research", () => {
   const ASK = { profileUrl: "linkedin.com/in/jane-doe-2", name: "Jane Doe", company: "Acme AI" };
 
   beforeAll(() => {
-    webBox.search = (key) => ({
-      search: async () => {
-        keysUsed.push(key);
-        if (key === "bad-key")
-          throw new SearchError("bad_key", "Brave rejected this key. Check it and try again.");
-        return [
-          { title: "Acme raises", url: "https://news.example.com/acme-seed", snippet: "" },
-          { title: "Jane", url: "https://www.linkedin.com/in/jane-doe", snippet: "" },
-        ];
-      },
-    });
+    webBox.search = (engine, key) => {
+      const service = engine === "tavily" ? "Tavily" : "Brave";
+      return {
+        service,
+        gapMs: 0,
+        search: async () => {
+          keysUsed.push(`${engine}:${key}`);
+          if (key === "bad-key")
+            throw new SearchError(
+              "bad_key",
+              `${service} rejected this key. Check it and try again.`
+            );
+          return [
+            { title: "Acme raises", url: "https://news.example.com/acme-seed", snippet: "" },
+            { title: "Jane", url: "https://www.linkedin.com/in/jane-doe", snippet: "" },
+          ];
+        },
+      };
+    };
     webBox.fetchPage = async (url) => {
       if (url.includes("linkedin.com")) throw new Error("LinkedIn must never be fetched");
       return { status: 200, url, body: url.includes("acme-seed") ? ARTICLE : "" };
@@ -338,26 +353,42 @@ describe("web research", () => {
       status: "skipped",
       message: RESEARCH_MESSAGES.noKey,
     });
-    expect((await u.api.outreachSettings.get()).searchKey).toEqual({ set: false, last4: null });
+    expect((await u.api.outreachSettings.get()).searchKeys).toEqual({
+      tavily: { set: false, last4: null },
+      brave: { set: false, last4: null },
+    });
 
-    await u.api.outreachSettings.setSearchKey({ apiKey: "  brave-key-abcd  " });
+    await u.api.outreachSettings.setSearchKey({ engine: "brave", apiKey: "  brave-key-abcd  " });
     const got = await u.api.outreachSettings.get();
-    expect(got.searchKey).toEqual({ set: true, last4: "abcd" });
+    expect(got.searchKeys).toEqual({
+      tavily: { set: false, last4: null },
+      brave: { set: true, last4: "abcd" },
+    });
     expect(JSON.stringify(got)).not.toContain("brave-key-abcd");
 
     // Another organisation can neither see nor set it.
-    expect((await other.api.outreachSettings.get()).searchKey).toEqual({ set: false, last4: null });
-    await expect(other.api.outreachSettings.setSearchKey({ apiKey: "x" })).rejects.toThrow(
-      "Set up Outreach first"
-    );
+    expect((await other.api.outreachSettings.get()).searchKeys).toEqual({
+      tavily: { set: false, last4: null },
+      brave: { set: false, last4: null },
+    });
+    await expect(
+      other.api.outreachSettings.setSearchKey({ engine: "tavily", apiKey: "x" })
+    ).rejects.toThrow("Set up Outreach first");
   });
 
   it("tests a key", async () => {
-    expect(await u.api.outreachSettings.testSearchKey({})).toEqual({ ok: true, message: null });
-    expect(keysUsed.at(-1)).toBe("brave-key-abcd");
-    expect(await u.api.outreachSettings.testSearchKey({ apiKey: "bad-key" })).toEqual({
+    expect(await u.api.outreachSettings.testSearchKey({ engine: "brave" })).toEqual({
+      ok: true,
+      message: null,
+    });
+    expect(keysUsed.at(-1)).toBe("brave:brave-key-abcd");
+    expect(
+      await u.api.outreachSettings.testSearchKey({ engine: "tavily", apiKey: "bad-key" })
+    ).toEqual({ ok: false, message: "Tavily rejected this key. Check it and try again." });
+    // No saved Tavily key and none typed: nothing to test.
+    expect(await u.api.outreachSettings.testSearchKey({ engine: "tavily" })).toEqual({
       ok: false,
-      message: "Brave rejected this key. Check it and try again.",
+      message: RESEARCH_MESSAGES.noKey,
     });
   });
 
@@ -434,14 +465,29 @@ describe("web research", () => {
     ).toBe(out.note);
   });
 
+  it("uses Tavily when both keys are saved", async () => {
+    await u.api.outreachSettings.setSearchKey({ engine: "tavily", apiKey: "tvly-key-wxyz" });
+    llmBox.llm = new FakeLlm([{ signals: [], note: "Acme AI builds agents." }]);
+    await u.api.outreachProspects.research(ASK);
+    expect(keysUsed.at(-1)).toBe("tavily:tvly-key-wxyz");
+    await u.api.outreachSettings.setSearchKey({ engine: "tavily", apiKey: null });
+    expect((await u.api.outreachSettings.get()).searchKeys.tavily).toEqual({
+      set: false,
+      last4: null,
+    });
+  });
+
   it("turns a rejected key into a skip, not an error", async () => {
-    await u.api.outreachSettings.setSearchKey({ apiKey: "bad-key" });
+    await u.api.outreachSettings.setSearchKey({ engine: "brave", apiKey: "bad-key" });
     expect(await u.api.outreachProspects.research(ASK)).toMatchObject({
       status: "skipped",
-      message: RESEARCH_MESSAGES.badKey,
+      message: "Web research skipped: the Brave key was rejected.",
     });
-    await u.api.outreachSettings.setSearchKey({ apiKey: null });
-    expect((await u.api.outreachSettings.get()).searchKey).toEqual({ set: false, last4: null });
+    await u.api.outreachSettings.setSearchKey({ engine: "brave", apiKey: null });
+    expect((await u.api.outreachSettings.get()).searchKeys).toEqual({
+      tavily: { set: false, last4: null },
+      brave: { set: false, last4: null },
+    });
   });
 
   it("refuses a do-not-contact profile", async () => {

@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { createBraveSearch, SearchError } from "@/server/services/outreach/search";
+import {
+  createBraveSearch,
+  createSearch,
+  createTavilySearch,
+  SearchError,
+} from "@/server/services/outreach/search";
+import { pickSearch } from "@/server/services/outreach/config";
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -88,5 +94,97 @@ describe("createBraveSearch", () => {
     const err = await s.search("x").catch((e) => e);
     expect(err).toBeInstanceOf(SearchError);
     expect(err.kind).toBe("unreachable");
+  });
+});
+
+describe("createTavilySearch", () => {
+  it("POSTs the query with a Bearer key and maps content to the snippet", async () => {
+    const fetchImpl = vi.fn(async () =>
+      json(200, {
+        query: '"Acme" news',
+        results: [
+          {
+            title: "Acme raises",
+            url: "https://news.example.com/a",
+            content: "Seed round",
+            score: 0.9,
+          },
+          { title: "No url", content: "x" },
+          null,
+        ],
+      })
+    );
+    const out = await createTavilySearch("tvly-123", fetchImpl as unknown as typeof fetch).search(
+      '"Acme" news',
+      { count: 8 }
+    );
+    expect(out).toEqual([
+      { title: "Acme raises", url: "https://news.example.com/a", snippet: "Seed round" },
+    ]);
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://api.tavily.com/search");
+    expect(init.method).toBe("POST");
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer tvly-123");
+    expect(headers["Content-Type"]).toBe("application/json");
+    expect(JSON.parse(init.body as string)).toEqual({
+      query: '"Acme" news',
+      max_results: 8,
+      search_depth: "basic",
+    });
+  });
+
+  it("returns nothing when Tavily has no results list", async () => {
+    const s = createTavilySearch("k", (async () => json(200, {})) as unknown as typeof fetch);
+    expect(await s.search("x")).toEqual([]);
+  });
+
+  it.each([
+    [401, "bad_key"],
+    [403, "bad_key"],
+    [429, "quota"],
+    [432, "quota"],
+    [433, "quota"],
+    [400, "unreachable"],
+    [500, "unreachable"],
+  ])("maps HTTP %i to %s", async (status, kind) => {
+    const s = createTavilySearch("k", (async () => json(status, {})) as unknown as typeof fetch);
+    await expect(s.search("x")).rejects.toMatchObject({ kind });
+  });
+
+  it("names Tavily in its messages", async () => {
+    const s = createTavilySearch("k", (async () => json(401, {})) as unknown as typeof fetch);
+    await expect(s.search("x")).rejects.toThrow(
+      "Tavily rejected this key. Check it and try again."
+    );
+  });
+
+  it("maps a network error or a non-JSON body to unreachable", async () => {
+    const down = createTavilySearch("k", (async () => {
+      throw new TypeError("fetch failed");
+    }) as unknown as typeof fetch);
+    const err = await down.search("x").catch((e) => e);
+    expect(err).toBeInstanceOf(SearchError);
+    expect(err.kind).toBe("unreachable");
+    const garbled = createTavilySearch(
+      "k",
+      (async () => new Response("<html>", { status: 200 })) as unknown as typeof fetch
+    );
+    await expect(garbled.search("x")).rejects.toMatchObject({ kind: "unreachable" });
+  });
+});
+
+describe("createSearch", () => {
+  it("picks the provider for the engine; only Brave is paced", () => {
+    expect(createSearch("tavily", "k")).toMatchObject({ service: "Tavily", gapMs: 0 });
+    expect(createSearch("brave", "k")).toMatchObject({ service: "Brave", gapMs: 1100 });
+  });
+});
+
+describe("pickSearch", () => {
+  it("prefers Tavily, falls back to Brave, and needs at least one key", () => {
+    expect(pickSearch({ tavily: "t", brave: "b" })).toEqual({ engine: "tavily", apiKey: "t" });
+    expect(pickSearch({ tavily: null, brave: "b" })).toEqual({ engine: "brave", apiKey: "b" });
+    expect(pickSearch({ tavily: null, brave: null })).toBeNull();
   });
 });

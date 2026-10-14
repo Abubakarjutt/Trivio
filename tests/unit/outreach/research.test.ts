@@ -7,6 +7,7 @@ import {
   pageText,
   pickPages,
   researchProspect,
+  searchSkipMessage,
   type ResearchDeps,
 } from "@/server/services/outreach/research";
 import { SearchError, type SearchProvider } from "@/server/services/outreach/search";
@@ -128,6 +129,8 @@ const LEAD = { name: "Jane Doe", company: "Acme AI", website: "https://acme.ai" 
 
 function searchOf(byQuery: (q: string) => string[] | Error): SearchProvider {
   return {
+    service: "Tavily",
+    gapMs: 0,
     search: vi.fn(async (q: string) => {
       const out = byQuery(q);
       if (out instanceof Error) throw out;
@@ -236,7 +239,7 @@ describe("researchProspect", () => {
     );
     expect(out).toEqual({
       status: "skipped",
-      message: RESEARCH_MESSAGES.badKey,
+      message: "Web research skipped: the Tavily key was rejected.",
       signals: [],
       note: "",
       sources: [],
@@ -340,10 +343,12 @@ describe("researchProspect", () => {
     });
   });
 
-  it("searches one at a time with a pause between, so a free Brave key isn't rate-limited", async () => {
+  it("searches one at a time with a pause between, so Brave's one-a-second limit holds", async () => {
     let inFlight = 0;
     let most = 0;
     const search: SearchProvider = {
+      service: "Brave",
+      gapMs: SEARCH_GAP_MS,
       search: async () => {
         most = Math.max(most, ++inFlight);
         await new Promise((done) => setTimeout(done, 5));
@@ -356,6 +361,19 @@ describe("researchProspect", () => {
     expect(most).toBe(1);
     expect(wait).toHaveBeenCalledTimes(3);
     expect(wait).toHaveBeenCalledWith(SEARCH_GAP_MS);
+  });
+
+  it("doesn't pause between searches for a service with no gap", async () => {
+    const wait = vi.fn(async () => {});
+    await researchProspect(LEAD, deps({ search: searchOf(() => []), wait }));
+    expect(wait).not.toHaveBeenCalled();
+  });
+
+  it("names the service in the skip message", () => {
+    expect(searchSkipMessage("quota", "Brave")).toBe("Web research skipped: Brave quota reached.");
+    expect(searchSkipMessage("unreachable", "Tavily")).toBe(
+      "Web research skipped: couldn't reach Tavily."
+    );
   });
 
   it("retries a rate-limited search once after a pause", async () => {

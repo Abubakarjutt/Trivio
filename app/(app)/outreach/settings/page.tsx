@@ -459,19 +459,53 @@ function SettingsTabs() {
       </TabsContent>
 
       <TabsContent value="research">
-        <WebResearchSettings searchKey={data.searchKey} />
+        <WebResearchSettings searchKeys={data.searchKeys} />
       </TabsContent>
     </Tabs>
   );
 }
 
-function WebResearchSettings({ searchKey }: { searchKey: { set: boolean; last4: string | null } }) {
+type MaskedKey = { set: boolean; last4: string | null };
+
+const SEARCH_SERVICES = {
+  tavily: {
+    name: "Tavily",
+    blurb: "Free: 1,000 searches a month, no card needed. Get a key at app.tavily.com.",
+  },
+  brave: {
+    name: "Brave Search",
+    blurb:
+      "Paid: needs a card at api-dashboard.search.brave.com. Used only when no Tavily key is saved.",
+  },
+} as const;
+
+function WebResearchSettings({
+  searchKeys,
+}: {
+  searchKeys: Record<"tavily" | "brave", MaskedKey>;
+}) {
+  return (
+    <div className="space-y-4">
+      <p className="text-muted-foreground text-sm">
+        When you press Extract, Trivio can search the web for the company and the person and suggest
+        signals, with links to where it found them. Trivio uses Tavily when its key is saved,
+        otherwise Brave. The search service sees only the person&apos;s name and company; pages are
+        opened from this computer and read by your AI.
+      </p>
+      <SearchKeyCard engine="tavily" saved={searchKeys.tavily} />
+      <SearchKeyCard engine="brave" saved={searchKeys.brave} />
+    </div>
+  );
+}
+
+function SearchKeyCard({ engine, saved }: { engine: "tavily" | "brave"; saved: MaskedKey }) {
+  const { name, blurb } = SEARCH_SERVICES[engine];
   const utils = trpc.useUtils();
   const [key, setKey] = useState("");
   const [result, setResult] = useState<{ ok: boolean; message: string | null } | null>(null);
   const save = trpc.outreachSettings.setSearchKey.useMutation({
     onSuccess: (_, v) => {
-      toast.success(v.apiKey ? "Brave key saved" : "Brave key removed");
+      toast.success(v.apiKey ? `${name} key saved` : `${name} key removed`);
       setKey("");
       setResult(null);
       return utils.outreachSettings.get.invalidate();
@@ -485,24 +519,22 @@ function WebResearchSettings({ searchKey }: { searchKey: { set: boolean; last4: 
   const typed = key.trim();
   return (
     <Card>
-      <CardContent className="space-y-4 p-5">
-        <p className="text-muted-foreground text-sm">
-          When you press Extract, Trivio can search the web for the company and the person and
-          suggest signals, with links to where it found them. It uses Brave Search: get a free key
-          at api.search.brave.com. Brave sees only the person&apos;s name and company; pages are
-          opened from this computer and read by your AI.
-        </p>
-        {searchKey.set && (
+      <CardContent className="space-y-3 p-5">
+        <div>
+          <p className="font-medium">{name}</p>
+          <p className="text-muted-foreground text-sm">{blurb}</p>
+        </div>
+        {saved.set && (
           <p className="text-sm">
-            Saved key: <span className="font-mono">••••{searchKey.last4}</span>
+            Saved key: <span className="font-mono">••••{saved.last4}</span>
           </p>
         )}
         <div className="flex gap-2">
           <Input
             type="password"
             autoComplete="off"
-            aria-label="Brave Search API key"
-            placeholder={searchKey.set ? "Paste a new key to replace it" : "Brave Search API key"}
+            aria-label={`${name} API key`}
+            placeholder={saved.set ? "Paste a new key to replace it" : `${name} API key`}
             maxLength={200}
             value={key}
             onChange={(e) => {
@@ -512,23 +544,23 @@ function WebResearchSettings({ searchKey }: { searchKey: { set: boolean; last4: 
           />
           <Button
             variant="outline"
-            disabled={test.isPending || (!typed && !searchKey.set)}
-            onClick={() => test.mutate(typed ? { apiKey: typed } : {})}
+            disabled={test.isPending || (!typed && !saved.set)}
+            onClick={() => test.mutate(typed ? { engine, apiKey: typed } : { engine })}
           >
             {test.isPending && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
             Test
           </Button>
           <Button
             disabled={!typed || save.isPending}
-            onClick={() => save.mutate({ apiKey: typed })}
+            onClick={() => save.mutate({ engine, apiKey: typed })}
           >
             Save
           </Button>
-          {searchKey.set && (
+          {saved.set && (
             <Button
               variant="ghost"
               disabled={save.isPending}
-              onClick={() => save.mutate({ apiKey: null })}
+              onClick={() => save.mutate({ engine, apiKey: null })}
             >
               Remove
             </Button>
