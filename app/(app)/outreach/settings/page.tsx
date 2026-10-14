@@ -489,7 +489,7 @@ function WebResearchSettings({
       <p className="text-muted-foreground text-sm">
         When you press Extract, Trivio can search the web for the company and the person and suggest
         signals, with links to where it found them. Trivio tries Tavily first and switches to Brave
-        if Tavily can't search. The search service sees only the person&apos;s name and company;
+        if Tavily can&apos;t search. The search service sees only the person&apos;s name and company;
         pages are opened from this computer and read by your AI.
       </p>
       <SearchKeyCard engine="tavily" saved={searchKeys.tavily} />
