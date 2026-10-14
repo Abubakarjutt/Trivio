@@ -18,6 +18,7 @@ import { OutreachGate } from "../../_components/outreach-gate";
 import { SignalsEditor } from "../../_components/signals-editor";
 import { Textarea } from "../../_components/textarea";
 import { WebResearchPanel, type WebResearchState } from "../../_components/web-research-panel";
+import { mergeSignals } from "../../_components/web-signals";
 
 type Status = "checked" | "unreachable" | "no_website" | "refused";
 type Form = {
@@ -44,11 +45,6 @@ const EMPTY: Form = {
 };
 
 /** Keep the first signal of each name (extraction first, then the website check). */
-function mergeSignals(...lists: Signal[][]): Signal[] {
-  const seen = new Set<string>();
-  return lists.flat().filter((s) => (seen.has(s.name) ? false : (seen.add(s.name), true)));
-}
-
 export default function NewProspectPage() {
   return (
     <div className="flex flex-col gap-6 p-6">
@@ -97,14 +93,10 @@ function NewProspectForm() {
         onSuccess: (r) => {
           if (id !== runId.current) return;
           if (r.status === "skipped") return setWeb({ phase: "skipped", message: r.message ?? "" });
-          // Checked against the form's signals when shown and when saved, not here: the user
-          // may add or remove signals while research runs.
-          setWeb({
-            phase: "done",
-            findings: r.signals.map((signal) => ({ signal, picked: true })),
-            note: r.note,
-            sources: r.sources,
-          });
+          // Into the form's Signals list, where the user reviews them before Save. A signal the
+          // form already has (from the paste or typed while research ran) is kept.
+          setForm((f) => f && { ...f, signals: mergeSignals(f.signals, r.signals) });
+          setWeb({ phase: "done", findings: r.signals, note: r.note, sources: r.sources });
         },
         // One line, never a toast: research never blocks saving.
         onError: (e) => {
@@ -153,7 +145,6 @@ function NewProspectForm() {
     // Research still running → saved without it. Research state is left alone, so if the save
     // fails a late result still lands and the next Save includes it.
     const done = web.phase === "done" ? web : null;
-    const picked = done ? done.findings.filter((f) => f.picked).map((f) => f.signal) : [];
     create.mutate({
       profileUrl: url,
       name: form.name,
@@ -167,7 +158,7 @@ function NewProspectForm() {
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean),
-      signals: mergeSignals(form.signals, picked),
+      signals: form.signals,
       research: done?.note.trim() || null,
       // Filling in by hand doesn't check the website; see the ruling in Task 16.
       enrichmentStatus: form.enrichmentStatus ?? (companyWebsite ? "unreachable" : "no_website"),
@@ -283,11 +274,7 @@ function NewProspectForm() {
                 onChange={(signals) => setForm((f) => f && { ...f, signals })}
               />
             </div>
-            <WebResearchPanel
-              state={web}
-              onChange={setWeb}
-              known={form.signals.map((s) => s.name)}
-            />
+            <WebResearchPanel state={web} onChange={setWeb} current={form.signals} />
             {form.enrichmentStatus && (
               <p className="text-muted-foreground text-xs">
                 {ENRICHMENT_LABEL[form.enrichmentStatus]}

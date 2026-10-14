@@ -107,6 +107,7 @@ describe("createTavilySearch", () => {
             title: "Acme raises",
             url: "https://news.example.com/a",
             content: "Seed round",
+            raw_content: "# Acme raises\n\nAcme AI raised a $4M seed.",
             score: 0.9,
           },
           { title: "No url", content: "x" },
@@ -119,7 +120,12 @@ describe("createTavilySearch", () => {
       { count: 8 }
     );
     expect(out).toEqual([
-      { title: "Acme raises", url: "https://news.example.com/a", snippet: "Seed round" },
+      {
+        title: "Acme raises",
+        url: "https://news.example.com/a",
+        snippet: "Seed round",
+        content: "# Acme raises\n\nAcme AI raised a $4M seed.",
+      },
     ]);
     const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("https://api.tavily.com/search");
@@ -131,6 +137,7 @@ describe("createTavilySearch", () => {
       query: '"Acme" news',
       max_results: 8,
       search_depth: "basic",
+      include_raw_content: "markdown",
     });
   });
 
