@@ -4,6 +4,7 @@ export type SearchResult = { title: string; url: string; snippet: string };
 
 export type SearchEngine = "tavily" | "brave";
 export const SEARCH_ENGINES = ["tavily", "brave"] as const;
+export const SEARCH_SERVICE: Record<SearchEngine, string> = { tavily: "Tavily", brave: "Brave" };
 
 export interface SearchProvider {
   /** The service's name, for messages ("Tavily", "Brave"). */
@@ -13,7 +14,8 @@ export interface SearchProvider {
   search(query: string, opts?: { count?: number }): Promise<SearchResult[]>;
 }
 
-export type SearchErrorKind = "bad_key" | "quota" | "unreachable";
+/** rate_limited is worth one retry; quota means the plan's searches are used up. */
+export type SearchErrorKind = "bad_key" | "rate_limited" | "quota" | "refused" | "unreachable";
 
 export class SearchError extends Error {
   constructor(
@@ -32,6 +34,8 @@ const BRAVE_GAP_MS = 1100;
 const message = (kind: SearchErrorKind, service: string) =>
   ({
     bad_key: `${service} rejected this key. Check it and try again.`,
+    rate_limited: `${service} is getting too many searches. Try again in a minute.`,
+    refused: `${service} refused the search. Try again later.`,
     quota: `${service} quota reached. Try again later, or check your ${service} plan.`,
     unreachable: `Couldn't reach ${service}. Check your internet connection and try again.`,
   })[kind];
@@ -54,9 +58,9 @@ async function isAuthRejection(res: Response): Promise<boolean> {
 }
 
 export function createBraveSearch(apiKey: string, fetchImpl: typeof fetch = fetch): SearchProvider {
-  const fail = failer("Brave");
+  const fail = failer(SEARCH_SERVICE.brave);
   return {
-    service: "Brave",
+    service: SEARCH_SERVICE.brave,
     gapMs: BRAVE_GAP_MS,
     async search(query, opts = {}) {
       const url = new URL(BRAVE_ENDPOINT);
@@ -72,9 +76,10 @@ export function createBraveSearch(apiKey: string, fetchImpl: typeof fetch = fetc
         throw fail("unreachable");
       }
       if (res.status === 401 || res.status === 403) throw fail("bad_key");
-      if (res.status === 429) throw fail("quota");
+      if (res.status === 429) throw fail("rate_limited");
       if ((res.status === 400 || res.status === 422) && (await isAuthRejection(res)))
         throw fail("bad_key");
+      if (res.status >= 400 && res.status < 500) throw fail("refused");
       if (!res.ok) throw fail("unreachable");
       let body: unknown;
       try {
@@ -93,14 +98,14 @@ export function createBraveSearch(apiKey: string, fetchImpl: typeof fetch = fetc
   };
 }
 
-/** Tavily: POST with a Bearer key. 432/433 are its plan and spending limits. */
+/** Tavily: POST with a Bearer key. 432/433 mean the plan's or spending limit's searches are used up. */
 export function createTavilySearch(
   apiKey: string,
   fetchImpl: typeof fetch = fetch
 ): SearchProvider {
-  const fail = failer("Tavily");
+  const fail = failer(SEARCH_SERVICE.tavily);
   return {
-    service: "Tavily",
+    service: SEARCH_SERVICE.tavily,
     gapMs: 0,
     async search(query, opts = {}) {
       let res: Response;
@@ -123,7 +128,9 @@ export function createTavilySearch(
         throw fail("unreachable");
       }
       if (res.status === 401 || res.status === 403) throw fail("bad_key");
-      if (res.status === 429 || res.status === 432 || res.status === 433) throw fail("quota");
+      if (res.status === 429) throw fail("rate_limited");
+      if (res.status === 432 || res.status === 433) throw fail("quota");
+      if (res.status >= 400 && res.status < 500) throw fail("refused");
       if (!res.ok) throw fail("unreachable");
       let body: unknown;
       try {

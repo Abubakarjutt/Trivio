@@ -475,7 +475,7 @@ const SEARCH_SERVICES = {
   brave: {
     name: "Brave Search",
     blurb:
-      "Paid: needs a card at api-dashboard.search.brave.com. Used only when no Tavily key is saved.",
+      "Paid: needs a card at api-dashboard.search.brave.com. Used when there is no Tavily key, or when Tavily rejects the key or its free searches run out.",
   },
 } as const;
 
@@ -488,9 +488,9 @@ function WebResearchSettings({
     <div className="space-y-4">
       <p className="text-muted-foreground text-sm">
         When you press Extract, Trivio can search the web for the company and the person and suggest
-        signals, with links to where it found them. Trivio uses Tavily when its key is saved,
-        otherwise Brave. The search service sees only the person&apos;s name and company; pages are
-        opened from this computer and read by your AI.
+        signals, with links to where it found them. Trivio tries Tavily first and switches to Brave
+        if Tavily can't search. The search service sees only the person&apos;s name and company;
+        pages are opened from this computer and read by your AI.
       </p>
       <SearchKeyCard engine="tavily" saved={searchKeys.tavily} />
       <SearchKeyCard engine="brave" saved={searchKeys.brave} />

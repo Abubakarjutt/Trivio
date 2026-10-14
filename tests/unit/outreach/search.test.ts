@@ -5,7 +5,7 @@ import {
   createTavilySearch,
   SearchError,
 } from "@/server/services/outreach/search";
-import { pickSearch } from "@/server/services/outreach/config";
+import { searchOrder } from "@/server/services/outreach/config";
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -46,7 +46,7 @@ describe("createBraveSearch", () => {
   it.each([
     [401, "bad_key"],
     [403, "bad_key"],
-    [429, "quota"],
+    [429, "rate_limited"],
     [500, "unreachable"],
     [503, "unreachable"],
   ])("maps HTTP %i to %s", async (status, kind) => {
@@ -73,18 +73,18 @@ describe("createBraveSearch", () => {
     await expect(s.search("x")).rejects.toMatchObject({ kind: "bad_key" });
   });
 
-  it("keeps other 422s unreachable", async () => {
+  it("treats other 422s as a refusal, not a connection problem", async () => {
     await expect(rejected(422, { code: "VALIDATION" }).search("x")).rejects.toMatchObject({
-      kind: "unreachable",
+      kind: "refused",
     });
   });
 
-  it("keeps a 422 with a non-JSON body unreachable", async () => {
+  it("treats a 422 with a non-JSON body as a refusal", async () => {
     const s = createBraveSearch(
       "k",
       (async () => new Response("nope", { status: 422 })) as unknown as typeof fetch
     );
-    await expect(s.search("x")).rejects.toMatchObject({ kind: "unreachable" });
+    await expect(s.search("x")).rejects.toMatchObject({ kind: "refused" });
   });
 
   it("maps a network error to unreachable", async () => {
@@ -142,14 +142,19 @@ describe("createTavilySearch", () => {
   it.each([
     [401, "bad_key"],
     [403, "bad_key"],
-    [429, "quota"],
+    [429, "rate_limited"],
     [432, "quota"],
     [433, "quota"],
-    [400, "unreachable"],
+    [400, "refused"],
     [500, "unreachable"],
   ])("maps HTTP %i to %s", async (status, kind) => {
     const s = createTavilySearch("k", (async () => json(status, {})) as unknown as typeof fetch);
     await expect(s.search("x")).rejects.toMatchObject({ kind });
+  });
+
+  it("doesn't blame the internet connection for a refused search", async () => {
+    const s = createTavilySearch("k", (async () => json(400, {})) as unknown as typeof fetch);
+    await expect(s.search("x")).rejects.toThrow("Tavily refused the search. Try again later.");
   });
 
   it("names Tavily in its messages", async () => {
@@ -181,10 +186,14 @@ describe("createSearch", () => {
   });
 });
 
-describe("pickSearch", () => {
-  it("prefers Tavily, falls back to Brave, and needs at least one key", () => {
-    expect(pickSearch({ tavily: "t", brave: "b" })).toEqual({ engine: "tavily", apiKey: "t" });
-    expect(pickSearch({ tavily: null, brave: "b" })).toEqual({ engine: "brave", apiKey: "b" });
-    expect(pickSearch({ tavily: null, brave: null })).toBeNull();
+describe("searchOrder", () => {
+  it("tries Tavily first, then Brave, skipping missing keys", () => {
+    expect(searchOrder({ tavily: "t", brave: "b" })).toEqual([
+      { engine: "tavily", apiKey: "t" },
+      { engine: "brave", apiKey: "b" },
+    ]);
+    expect(searchOrder({ tavily: null, brave: "b" })).toEqual([{ engine: "brave", apiKey: "b" }]);
+    expect(searchOrder({ tavily: "t", brave: null })).toEqual([{ engine: "tavily", apiKey: "t" }]);
+    expect(searchOrder({ tavily: null, brave: null })).toEqual([]);
   });
 });

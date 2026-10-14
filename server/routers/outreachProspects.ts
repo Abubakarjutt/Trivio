@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { createTRPCRouter } from "@/server/trpc";
 import { extractProfile } from "@/server/services/outreach/ai";
-import { loadSearchKeys, pickSearch, requireConfig } from "@/server/services/outreach/config";
+import { loadSearchKeys, requireConfig, searchOrder } from "@/server/services/outreach/config";
 import { CONVERT_MARKER, linkCrmLead, tryStartPilot } from "@/server/services/outreach/crm-handoff";
 import { enrichCompany, websiteNamedIn, websiteOrigin } from "@/server/services/outreach/enrich";
 import { createLlm } from "@/server/services/outreach/llm";
@@ -164,12 +164,13 @@ export const outreachProspectsRouter = createTRPCRouter({
         throw new OutreachError("This person is on your do-not-contact list.");
       }
       const config = await requireConfig(ctx.db, ctx.organisationId);
-      const picked = pickSearch(await loadSearchKeys(ctx.db, ctx.organisationId));
-      if (!picked) return skipped(RESEARCH_MESSAGES.noKey);
+      const [main, backup] = searchOrder(await loadSearchKeys(ctx.db, ctx.organisationId));
+      if (!main) return skipped(RESEARCH_MESSAGES.noKey);
       return researchProspect(
         { name: input.name, company: input.company, website: input.companyWebsite ?? null },
         {
-          search: createSearch(picked.engine, picked.apiKey),
+          search: createSearch(main.engine, main.apiKey),
+          fallback: backup && createSearch(backup.engine, backup.apiKey),
           fetchPage: createPageFetcher(),
           llm: createLlm(),
           sellerProfile: config.sellerProfile,

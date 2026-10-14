@@ -96,13 +96,17 @@ export const RESEARCH_MESSAGES = {
   nothing: "Web research found nothing about this company.",
   aiFormat: "Web research skipped: the AI's answer didn't match the expected format.",
 } as const;
-/** The one-line skip message for a failed search, naming the service. */
-export const searchSkipMessage = (kind: SearchErrorKind, service: string) =>
+const failureReason = (kind: SearchErrorKind, service: string) =>
   ({
-    bad_key: `Web research skipped: the ${service} key was rejected.`,
-    quota: `Web research skipped: ${service} quota reached.`,
-    unreachable: `Web research skipped: couldn't reach ${service}.`,
+    bad_key: `the ${service} key was rejected`,
+    rate_limited: `${service} is busy, try again in a minute`,
+    quota: `${service} quota reached`,
+    refused: `${service} refused the search`,
+    unreachable: `couldn't reach ${service}`,
   })[kind];
+/** The one-line skip message for failed searches, naming each service that was tried. */
+export const searchSkipMessage = (failures: [SearchErrorKind, string][]) =>
+  `Web research skipped: ${failures.map(([kind, service]) => failureReason(kind, service)).join("; ")}.`;
 
 export type ResearchResult = {
   status: "done" | "skipped";
@@ -114,6 +118,8 @@ export type ResearchResult = {
 export type ResearchInput = { name: string; company: string; website: string | null };
 export type ResearchDeps = {
   search: SearchProvider;
+  /** Tried when every search on `search` fails (a rejected key, a used-up plan). */
+  fallback?: SearchProvider;
   fetchPage: FetchPage;
   llm: Llm;
   sellerProfile: string;
@@ -146,6 +152,29 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (t: T) => Promise<R
 
 type Searched = { results: SearchResult[] } | { error: unknown };
 
+async function searchAll(
+  queries: string[],
+  provider: SearchProvider,
+  wait: (ms: number) => Promise<void>
+): Promise<Searched[]> {
+  const searchOnce = async (q: string, retry: boolean): Promise<Searched> => {
+    try {
+      return { results: await provider.search(q, { count: 8 }) };
+    } catch (error) {
+      if (!retry || !(error instanceof SearchError) || error.kind !== "rate_limited")
+        return { error };
+      await wait(SEARCH_GAP_MS);
+      return searchOnce(q, false);
+    }
+  };
+  const searched: Searched[] = [];
+  for (const [i, q] of queries.entries()) {
+    if (i > 0 && provider.gapMs > 0) await wait(provider.gapMs);
+    searched.push(await searchOnce(q, true));
+  }
+  return searched;
+}
+
 export async function researchProspect(
   input: ResearchInput,
   deps: ResearchDeps
@@ -155,28 +184,19 @@ export async function researchProspect(
 
   // 1. Search, one at a time, paced to the service (Brave allows one a second on its lowest
   // plan). A rate-limited query is retried once after a pause. One failing query doesn't
-  // stop the others.
+  // stop the others. If every query fails, the fallback service gets the same queries.
   const wait = deps.wait ?? sleep;
-  const searchOnce = async (q: string, retry: boolean): Promise<Searched> => {
-    try {
-      return { results: await deps.search.search(q, { count: 8 }) };
-    } catch (error) {
-      if (!retry || !(error instanceof SearchError) || error.kind !== "quota") return { error };
-      await wait(SEARCH_GAP_MS);
-      return searchOnce(q, false);
-    }
-  };
-  const searched: Searched[] = [];
-  for (const [i, q] of queries.entries()) {
-    if (i > 0 && deps.search.gapMs > 0) await wait(deps.search.gapMs);
-    searched.push(await searchOnce(q, true));
-  }
-  if (searched.every((s) => "error" in s)) {
+  const failures: [SearchErrorKind, string][] = [];
+  let searched: Searched[] = [];
+  for (const provider of [deps.search, deps.fallback]) {
+    if (!provider) continue;
+    searched = await searchAll(queries, provider, wait);
+    if (!searched.every((s) => "error" in s)) break;
     const first = (searched[0] as { error: unknown }).error;
-    if (first instanceof SearchError)
-      return skipped(searchSkipMessage(first.kind, deps.search.service));
-    throw first;
+    if (!(first instanceof SearchError)) throw first;
+    failures.push([first.kind, provider.service]);
   }
+  if (searched.every((s) => "error" in s)) return skipped(searchSkipMessage(failures));
   const found = searched.flatMap((s) => ("results" in s ? s.results : []));
 
   // 2. Open the best pages through the safe fetcher.

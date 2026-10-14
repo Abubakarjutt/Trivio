@@ -3,8 +3,12 @@ import { z } from "zod";
 import { createTRPCRouter } from "@/server/trpc";
 import { getAiStatus } from "@/server/services/ai-status";
 import { loadConfig, loadSearchKeys, requireConfig } from "@/server/services/outreach/config";
-import { RESEARCH_MESSAGES } from "@/server/services/outreach/research";
-import { createSearch, SEARCH_ENGINES, SearchError } from "@/server/services/outreach/search";
+import {
+  createSearch,
+  SEARCH_ENGINES,
+  SEARCH_SERVICE,
+  SearchError,
+} from "@/server/services/outreach/search";
 import {
   CadenceSchema,
   NotFoundError,
@@ -119,7 +123,11 @@ export const outreachSettingsRouter = createTRPCRouter({
     .mutation(async ({ ctx, input }) => {
       const apiKey =
         input.apiKey ?? (await loadSearchKeys(ctx.db, ctx.organisationId))[input.engine];
-      if (!apiKey) return { ok: false as const, message: RESEARCH_MESSAGES.noKey };
+      if (!apiKey)
+        return {
+          ok: false as const,
+          message: `No ${SEARCH_SERVICE[input.engine]} key saved. Paste one first.`,
+        };
       try {
         await createSearch(input.engine, apiKey).search("Trivio", { count: 1 });
         return { ok: true as const, message: null };

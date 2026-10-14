@@ -385,11 +385,6 @@ describe("web research", () => {
     expect(
       await u.api.outreachSettings.testSearchKey({ engine: "tavily", apiKey: "bad-key" })
     ).toEqual({ ok: false, message: "Tavily rejected this key. Check it and try again." });
-    // No saved Tavily key and none typed: nothing to test.
-    expect(await u.api.outreachSettings.testSearchKey({ engine: "tavily" })).toEqual({
-      ok: false,
-      message: RESEARCH_MESSAGES.noKey,
-    });
   });
 
   it("returns web signals with sources, and saves them with the note", async () => {
@@ -467,6 +462,7 @@ describe("web research", () => {
 
   it("uses Tavily when both keys are saved", async () => {
     await u.api.outreachSettings.setSearchKey({ engine: "tavily", apiKey: "tvly-key-wxyz" });
+    expect(JSON.stringify(await u.api.outreachSettings.get())).not.toContain("tvly-key-wxyz");
     llmBox.llm = new FakeLlm([{ signals: [], note: "Acme AI builds agents." }]);
     await u.api.outreachProspects.research(ASK);
     expect(keysUsed.at(-1)).toBe("tavily:tvly-key-wxyz");
@@ -474,6 +470,24 @@ describe("web research", () => {
     expect((await u.api.outreachSettings.get()).searchKeys.tavily).toEqual({
       set: false,
       last4: null,
+    });
+  });
+
+  it("switches to Brave when the Tavily key fails", async () => {
+    await u.api.outreachSettings.setSearchKey({ engine: "tavily", apiKey: "bad-key" });
+    llmBox.llm = new FakeLlm([{ signals: [], note: "Acme AI builds agents." }]);
+    const before = keysUsed.length;
+    const out = await u.api.outreachProspects.research(ASK);
+    expect(out.status).toBe("done");
+    expect(keysUsed.slice(before)).toContain("tavily:bad-key");
+    expect(keysUsed.at(-1)).toBe("brave:brave-key-abcd");
+    await u.api.outreachSettings.setSearchKey({ engine: "tavily", apiKey: null });
+  });
+
+  it("names the service when a test finds no key", async () => {
+    expect(await u.api.outreachSettings.testSearchKey({ engine: "tavily" })).toEqual({
+      ok: false,
+      message: "No Tavily key saved. Paste one first.",
     });
   });
 
