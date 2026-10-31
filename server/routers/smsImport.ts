@@ -1,0 +1,206 @@
+import { z } from "zod";
+import { TRPCError } from "@trpc/server";
+import type { Prisma } from "@prisma/client";
+import { createTRPCRouter, orgProcedure } from "@/server/trpc";
+import { ChatDbError, checkChatDbAccess, readMessages } from "@/server/services/sms/messages-db";
+import { rankSenderSuggestions } from "@/server/services/sms/suggest";
+import {
+  loadExistingForDedup,
+  localDateString,
+  processSms,
+  type ParsedSmsTransaction,
+} from "@/server/services/sms/sms-import.service";
+import { redactPiiText } from "@/server/services/pii-redaction.service";
+
+const SUGGEST_LOOKBACK_DAYS = 30;
+const SUGGEST_SCAN_LIMIT = 2000;
+
+const parsedTxn = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  description: z.string().min(1).max(500),
+  merchantName: z.string().min(1).max(200),
+  amount: z.number().finite().nonnegative(),
+  type: z.enum(["DEBIT", "CREDIT"]),
+  category: z.string().min(1).max(100),
+  mccCode: z.string().max(10),
+  mccLabel: z.string().max(200),
+  possibleDuplicate: z.boolean(),
+});
+const statusEnum = z.enum(["PENDING_REVIEW", "APPROVED", "DISMISSED", "FAILED", "NO_TRANSACTION"]);
+const ids = z.array(z.string().min(1)).min(1).max(500);
+
+export const smsImportRouter = createTRPCRouter({
+  getSource: orgProcedure.query(async ({ ctx }) => {
+    const source = await ctx.db.smsSource.findUnique({ where: { organisationId: ctx.organisationId } });
+    const approvedCount = source
+      ? await ctx.db.smsImportItem.count({ where: { organisationId: ctx.organisationId, status: "APPROVED" } })
+      : 0;
+    return {
+      platformSupported: process.platform === "darwin",
+      approvedCount,
+      source: source && {
+        id: source.id,
+        enabled: source.enabled,
+        senderIds: source.senderIds,
+        status: source.status,
+        lastError: source.lastError,
+        lastSyncedAt: source.lastSyncedAt,
+      },
+    };
+  }),
+
+  saveSource: orgProcedure
+    .input(z.object({ senderIds: z.array(z.string().trim().min(1).max(64)).max(20), enabled: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      const senderIds = [...new Set(input.senderIds)];
+      await ctx.db.smsSource.upsert({
+        where: { organisationId: ctx.organisationId },
+        create: { organisationId: ctx.organisationId, senderIds, enabled: input.enabled },
+        update: { senderIds, enabled: input.enabled },
+      });
+      return { ok: true as const };
+    }),
+
+  checkAccess: orgProcedure.mutation(async ({ ctx }) => {
+    const result = await checkChatDbAccess();
+    if (result === "ok") {
+      await ctx.db.smsSource.updateMany({
+        where: { organisationId: ctx.organisationId },
+        data: { status: "ACTIVE", lastError: null },
+      });
+    }
+    return result;
+  }),
+
+  suggestSenders: orgProcedure.query(async () => {
+    if (process.platform !== "darwin") return [];
+    try {
+      const since = new Date(Date.now() - SUGGEST_LOOKBACK_DAYS * 86_400_000);
+      const messages = await readMessages({ since }, SUGGEST_SCAN_LIMIT);
+      return rankSenderSuggestions(messages, redactPiiText);
+    } catch (err) {
+      if (err instanceof ChatDbError) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: err.message });
+      }
+      throw err;
+    }
+  }),
+
+  listItems: orgProcedure
+    .input(z.object({ statuses: z.array(statusEnum).min(1) }))
+    .query(async ({ ctx, input }) => {
+      const items = await ctx.db.smsImportItem.findMany({
+        where: { organisationId: ctx.organisationId, status: { in: input.statuses } },
+        orderBy: { receivedAt: "desc" },
+        take: 200,
+        select: { id: true, sender: true, receivedAt: true, text: true, parsedJson: true, status: true, errorMessage: true },
+      });
+      return items.map(({ parsedJson, ...rest }) => ({ ...rest, parsed: parsedJson as unknown as ParsedSmsTransaction[] }));
+    }),
+
+  pendingCount: orgProcedure.query(({ ctx }) =>
+    ctx.db.smsImportItem.count({ where: { organisationId: ctx.organisationId, status: "PENDING_REVIEW" } }),
+  ),
+
+  updateItem: orgProcedure
+    .input(z.object({ id: z.string().min(1), parsed: z.array(parsedTxn).min(1).max(20) }))
+    .mutation(async ({ ctx, input }) => {
+      const res = await ctx.db.smsImportItem.updateMany({
+        where: { id: input.id, organisationId: ctx.organisationId, status: "PENDING_REVIEW" },
+        data: { parsedJson: input.parsed as unknown as Prisma.InputJsonValue },
+      });
+      if (res.count === 0) throw new TRPCError({ code: "NOT_FOUND" });
+      return { ok: true as const };
+    }),
+
+  // Claiming the items (status → APPROVED) before inserting makes a second,
+  // concurrent approval of the same items match zero rows and roll back.
+  approve: orgProcedure
+    .input(z.object({ ids }))
+    .mutation(({ ctx, input }) =>
+      ctx.db.$transaction(async (tx) => {
+        const organisationId = ctx.organisationId;
+        const items = await tx.smsImportItem.findMany({
+          where: { id: { in: input.ids }, organisationId, status: "PENDING_REVIEW" },
+          select: { id: true, parsedJson: true },
+        });
+        if (items.length === 0) return { approved: 0, transactions: 0 };
+        const rows = items.flatMap((it) => it.parsedJson as unknown as ParsedSmsTransaction[]);
+
+        const batch = await tx.statementImportBatch.create({
+          data: {
+            organisationId,
+            filename: `SMS import ${localDateString(new Date())}`,
+            fileType: "SMS",
+            status: "DONE",
+            transactionCount: rows.length,
+          },
+        });
+        const claimed = await tx.smsImportItem.updateMany({
+          where: { id: { in: items.map((i) => i.id) }, organisationId, status: "PENDING_REVIEW" },
+          data: { status: "APPROVED", importBatchId: batch.id },
+        });
+        if (claimed.count !== items.length) {
+          throw new TRPCError({ code: "CONFLICT", message: "Some of these were already approved. Refresh and try again." });
+        }
+
+        const org = await tx.organisation.findUnique({ where: { id: organisationId }, select: { hasSampleData: true } });
+        if (org?.hasSampleData) {
+          await tx.statementTransaction.deleteMany({ where: { organisationId, isSampleData: true } });
+          await tx.organisation.update({ where: { id: organisationId }, data: { hasSampleData: false } });
+        }
+
+        await tx.statementTransaction.createMany({
+          data: rows.map((r) => ({
+            organisationId,
+            importBatchId: batch.id,
+            date: new Date(r.date),
+            description: r.description,
+            merchantName: r.merchantName,
+            amount: r.amount,
+            type: r.type,
+            category: r.category,
+            mccCode: r.mccCode,
+            mccLabel: r.mccLabel,
+          })),
+        });
+        return { approved: items.length, transactions: rows.length };
+      }),
+    ),
+
+  dismiss: orgProcedure
+    .input(z.object({ ids }))
+    .mutation(async ({ ctx, input }) => {
+      const res = await ctx.db.smsImportItem.updateMany({
+        where: {
+          id: { in: input.ids },
+          organisationId: ctx.organisationId,
+          status: { in: ["PENDING_REVIEW", "FAILED", "NO_TRANSACTION"] },
+        },
+        data: { status: "DISMISSED" },
+      });
+      return { dismissed: res.count };
+    }),
+
+  retry: orgProcedure
+    .input(z.object({ id: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const item = await ctx.db.smsImportItem.findFirst({
+        where: { id: input.id, organisationId: ctx.organisationId, status: { in: ["FAILED", "NO_TRANSACTION"] } },
+        select: { id: true, text: true, receivedAt: true },
+      });
+      if (!item) throw new TRPCError({ code: "NOT_FOUND" });
+      if (!item.text) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "This message has no readable text." });
+      const existing = await loadExistingForDedup(ctx.db, ctx.organisationId, new Date());
+      const result = await processSms(item.text, item.receivedAt, existing);
+      await ctx.db.smsImportItem.update({
+        where: { id: item.id },
+        data: {
+          status: result.status,
+          parsedJson: result.parsed as unknown as Prisma.InputJsonValue,
+          errorMessage: result.status === "FAILED" ? result.error : null,
+        },
+      });
+      return { status: result.status };
+    }),
+});
