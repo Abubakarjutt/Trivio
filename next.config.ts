@@ -25,11 +25,6 @@ const nextConfig: NextConfig = {
   // macOS desktop app (Electron) can boot the app without a full node_modules
   // tree. The Docker pipeline and `next start`/`next dev` are unaffected.
   output: "standalone",
-  // The SMS reader points at ~/Library/Messages/chat.db; never let output
-  // file tracing copy the user's Messages database into the build.
-  outputFileTracingExcludes: {
-    "*": ["**/Library/Messages/**"],
-  },
   // The desktop shell loads the server on 127.0.0.1; disable the server-side
   // compression stream buffering that can hang the Electron webview on first
   // load, and let the host bind explicitly on all interfaces.
