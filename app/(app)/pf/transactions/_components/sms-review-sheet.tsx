@@ -1,0 +1,163 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { trpc } from "@/lib/trpc/client";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Sheet, SheetContent, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { toast } from "sonner";
+import type { ParsedSmsTransaction } from "@/server/services/sms/sms-import.service";
+import { CategoryPicker } from "./category-picker";
+
+const POLL_MS = 60_000;
+
+export function SmsReviewBanner() {
+  const [open, setOpen] = useState(false);
+  const { data: count = 0 } = trpc.smsImport.pendingCount.useQuery(undefined, { refetchInterval: POLL_MS });
+  if (count === 0 && !open) return null;
+  return (
+    <>
+      {count > 0 && (
+        <button type="button" onClick={() => setOpen(true)}
+          className="flex w-full items-center justify-between rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-left text-sm text-blue-800 hover:bg-blue-100">
+          <span>📱 {count} transaction{count === 1 ? "" : "s"} from SMS to review</span>
+          <span className="font-semibold">Review</span>
+        </button>
+      )}
+      <SmsReviewSheet open={open} onOpenChange={setOpen} />
+    </>
+  );
+}
+
+function SmsReviewSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+  const utils = trpc.useUtils();
+  const pending = trpc.smsImport.listItems.useQuery({ statuses: ["PENDING_REVIEW"] }, { enabled: open });
+  const skipped = trpc.smsImport.listItems.useQuery({ statuses: ["NO_TRANSACTION", "FAILED"] }, { enabled: open });
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [showSkipped, setShowSkipped] = useState(false);
+  const seen = useRef(new Set<string>());
+
+  // New items start selected unless they look like duplicates. Refetches after
+  // an edit keep whatever the user ticked or unticked.
+  useEffect(() => {
+    const items = pending.data;
+    if (!items) return;
+    setSelected((prev) => {
+      const next = new Set([...prev].filter((id) => items.some((i) => i.id === id)));
+      for (const item of items) {
+        if (seen.current.has(item.id)) continue;
+        seen.current.add(item.id);
+        if (!item.parsed.some((p) => p.possibleDuplicate)) next.add(item.id);
+      }
+      return next;
+    });
+  }, [pending.data]);
+
+  const refresh = async () => {
+    await Promise.all([
+      utils.smsImport.listItems.invalidate(),
+      utils.smsImport.pendingCount.invalidate(),
+      utils.statementTransactions.list.invalidate(),
+    ]);
+  };
+  const update = trpc.smsImport.updateItem.useMutation({
+    onError: (e) => toast.error(e.message),
+    onSettled: () => utils.smsImport.listItems.invalidate(),
+  });
+  const approve = trpc.smsImport.approve.useMutation({
+    onSuccess: (r) => { toast.success(`Added ${r.transactions} transaction${r.transactions === 1 ? "" : "s"}`); void refresh(); },
+    onError: (e) => { toast.error(e.message); void refresh(); },
+  });
+  const dismiss = trpc.smsImport.dismiss.useMutation({ onSuccess: () => void refresh() });
+  const retry = trpc.smsImport.retry.useMutation({ onSuccess: () => void refresh(), onError: (e) => toast.error(e.message) });
+
+  const busy = update.isPending || approve.isPending || dismiss.isPending;
+  const ids = [...selected];
+  const toggle = (id: string) =>
+    setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const editRow = (itemId: string, rows: ParsedSmsTransaction[], index: number, patch: Partial<ParsedSmsTransaction>) =>
+    update.mutate({ id: itemId, parsed: rows.map((r, i) => (i === index ? { ...r, ...patch } : r)) });
+
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent className="flex w-full flex-col sm:max-w-xl">
+        <SheetHeader>
+          <SheetTitle>Transactions from SMS</SheetTitle>
+        </SheetHeader>
+
+        <div className="flex-1 space-y-3 overflow-y-auto py-4">
+          {pending.data?.length === 0 && <p className="text-sm text-muted-foreground">Nothing to review.</p>}
+          {pending.data?.map((item) => (
+            <div key={item.id} className="rounded-xl border border-border/60 p-3 space-y-2">
+              <div className="flex items-start gap-2">
+                <input type="checkbox" className="mt-1" checked={selected.has(item.id)} onChange={() => toggle(item.id)} aria-label="Select" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] text-muted-foreground">{item.sender} · {new Date(item.receivedAt).toLocaleString()}</p>
+                  <p className="font-mono text-xs text-muted-foreground break-words">{item.text}</p>
+                </div>
+              </div>
+              {item.parsed.map((row, i) => (
+                <div key={i} className="grid grid-cols-[7.5rem_1fr_6rem] items-center gap-2 pl-6">
+                  <Input type="date" defaultValue={row.date} className="h-7 text-xs"
+                    onBlur={(e) => { if (e.target.value && e.target.value !== row.date) editRow(item.id, item.parsed, i, { date: e.target.value }); }} />
+                  <Input defaultValue={row.merchantName} className="h-7 text-xs" maxLength={200}
+                    onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== row.merchantName) editRow(item.id, item.parsed, i, { merchantName: v }); }} />
+                  <div className="flex items-center gap-1">
+                    <button type="button" title="Switch debit/credit"
+                      className={`text-xs font-semibold ${row.type === "DEBIT" ? "text-red-500" : "text-emerald-500"}`}
+                      onClick={() => editRow(item.id, item.parsed, i, { type: row.type === "DEBIT" ? "CREDIT" : "DEBIT" })}>
+                      {row.type === "DEBIT" ? "−" : "+"}
+                    </button>
+                    <Input type="number" step="0.01" min="0" defaultValue={row.amount} className="h-7 text-xs tabular-nums"
+                      onBlur={(e) => {
+                        const v = Number(e.target.value);
+                        if (Number.isFinite(v) && v >= 0 && v !== row.amount) editRow(item.id, item.parsed, i, { amount: v });
+                      }} />
+                  </div>
+                  <div className="col-span-3 flex items-center gap-2">
+                    <CategoryPicker value={row.category} onChange={(c) => editRow(item.id, item.parsed, i, { category: c })}
+                      triggerClassName="h-6 px-2 text-xs rounded-full bg-muted" />
+                    {row.possibleDuplicate && (
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800">Possible duplicate</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
+
+          {(skipped.data?.length ?? 0) > 0 && (
+            <div className="pt-2">
+              <button type="button" className="text-xs font-medium text-muted-foreground" onClick={() => setShowSkipped((v) => !v)}>
+                {showSkipped ? "▾" : "▸"} Skipped ({skipped.data!.length})
+              </button>
+              {showSkipped && skipped.data!.map((item) => (
+                <div key={item.id} className="mt-2 flex items-start justify-between gap-2 rounded-lg bg-muted/40 p-2">
+                  <div className="min-w-0">
+                    <p className="text-[11px] text-muted-foreground">
+                      {item.status === "FAILED" ? `Couldn't read: ${item.errorMessage ?? "unknown error"}` : "No transaction found"}
+                    </p>
+                    <p className="font-mono text-xs text-muted-foreground break-words">{item.text}</p>
+                  </div>
+                  <div className="flex shrink-0 gap-1">
+                    <Button size="sm" variant="outline" className="h-6 text-xs" disabled={retry.isPending || !item.text} onClick={() => retry.mutate({ id: item.id })}>Retry</Button>
+                    <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => dismiss.mutate({ ids: [item.id] })}>Hide</Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <SheetFooter className="gap-2 border-t pt-3">
+          <Button variant="outline" disabled={busy || ids.length === 0} onClick={() => dismiss.mutate({ ids })}>
+            Dismiss selected
+          </Button>
+          <Button disabled={busy || ids.length === 0} onClick={() => approve.mutate({ ids })}>
+            {approve.isPending ? "Adding…" : `Approve selected (${ids.length})`}
+          </Button>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
+  );
+}

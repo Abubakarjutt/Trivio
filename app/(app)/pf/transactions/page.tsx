@@ -23,6 +23,7 @@ import {
   Plus,
 } from "lucide-react";
 import { toast } from "sonner";
+import { SmsReviewBanner } from "./_components/sms-review-sheet";
 import { ImportDialog } from "./_components/import-dialog";
 import { AddTransactionDialog } from "./_components/add-transaction-dialog";
 import { TransactionCard } from "./_components/transaction-card";
@@ -164,6 +165,8 @@ export default function PfTransactionsPage() {
           </div>
         }
       />
+
+      <SmsReviewBanner />
 
       {/* Month picker */}
       <div className="flex items-center justify-between">
