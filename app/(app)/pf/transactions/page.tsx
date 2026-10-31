@@ -414,7 +414,6 @@ export default function PfTransactionsPage() {
           setImportOpen(open);
           if (!open) setPendingBatch(null);
         }}
-        emailImportToken={org?.emailImportToken}
         pendingBatch={pendingBatch}
         onComplete={() => {
           setPendingBatch(null);

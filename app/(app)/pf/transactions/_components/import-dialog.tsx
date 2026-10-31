@@ -42,11 +42,10 @@ interface ImportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onComplete: () => void;
-  emailImportToken?: string | null;
   pendingBatch?: { batchId: string; items: { date: string | Date; description: string; amount: number }[] } | null;
 }
 
-export function ImportDialog({ open, onOpenChange, onComplete, emailImportToken, pendingBatch }: ImportDialogProps) {
+export function ImportDialog({ open, onOpenChange, onComplete, pendingBatch }: ImportDialogProps) {
   const [state, setState]               = useState<ImportState>("idle");
   const [file, setFile]                 = useState<File | null>(null);
   const [dragging, setDragging]         = useState(false);
@@ -287,11 +286,6 @@ export function ImportDialog({ open, onOpenChange, onComplete, emailImportToken,
               </p>
             </div>
 
-            {/* Email auto-import banner */}
-            {emailImportToken && (
-              <EmailImportBanner emailImportToken={emailImportToken} />
-            )}
-
             <div className="flex gap-2 justify-end">
               <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
               <Button disabled={!file} onClick={handleImport}>Import</Button>
@@ -422,108 +416,5 @@ export function ImportDialog({ open, onOpenChange, onComplete, emailImportToken,
         </div>
       </DialogContent>
     </Dialog>
-  );
-}
-
-// ── Email Import Banner ───────────────────────────────────────────────────────
-
-function EmailImportBanner({ emailImportToken }: { emailImportToken: string }) {
-  const [showSetup, setShowSetup] = useState(false);
-  const importAddress = `${emailImportToken}@import.trivio-ai.com`;
-
-  return (
-    <div className="rounded-xl border border-blue-200 bg-gradient-to-br from-blue-50 to-green-50 p-3 space-y-2">
-      {/* Header + address */}
-      <div className="flex items-center gap-2">
-        <span className="text-sm">⚡</span>
-        <div>
-          <p className="text-xs font-bold text-blue-800">Auto-import via Email</p>
-          <p className="text-[11px] text-blue-600">Set up once — transactions arrive automatically</p>
-        </div>
-      </div>
-
-      <p className="text-[11px] text-gray-500">Forward bank alert emails to:</p>
-
-      <div className="flex items-center justify-between rounded-md border border-blue-200 bg-white px-2.5 py-1.5">
-        <span className="font-mono text-[11px] text-blue-700 truncate">{importAddress}</span>
-        <button
-          type="button"
-          onClick={async () => {
-            try {
-              await navigator.clipboard.writeText(importAddress);
-              toast.success("Copied!");
-            } catch {
-              const el = document.createElement("textarea");
-              el.value = importAddress;
-              el.style.position = "fixed";
-              el.style.opacity = "0";
-              document.body.appendChild(el);
-              el.select();
-              document.execCommand("copy");
-              document.body.removeChild(el);
-              toast.success("Copied!");
-            }
-          }}
-          className="ml-2 text-[11px] font-semibold text-blue-600 hover:text-blue-800 flex-shrink-0"
-        >
-          Copy
-        </button>
-      </div>
-
-      {/* Toggle setup instructions */}
-      <button
-        type="button"
-        onClick={() => setShowSetup((v) => !v)}
-        className="text-[11px] text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
-      >
-        <span>{showSetup ? "▾" : "▸"}</span>
-        How to set up
-      </button>
-
-      {showSetup && (
-        <div className="space-y-3 pt-1">
-          {/* Option A */}
-          <div className="rounded-lg border border-blue-100 bg-white p-2.5 space-y-1.5">
-            <p className="text-[11px] font-bold text-blue-800">
-              Option A — Add directly in your bank app <span className="font-normal text-blue-600">(recommended)</span>
-            </p>
-            <p className="text-[11px] text-gray-500">
-              Most banks let you add a second notification email. No forwarding rules needed.
-            </p>
-            <ol className="text-[11px] text-gray-600 space-y-0.5 list-decimal list-inside">
-              <li>Log into your bank&apos;s app or portal</li>
-              <li>Go to <span className="font-medium">Notifications / Alerts settings</span></li>
-              <li>Add your import address as a notification email</li>
-              <li>Enable transaction / spending alerts</li>
-            </ol>
-          </div>
-
-          {/* Option B */}
-          <div className="rounded-lg border border-blue-100 bg-white p-2.5 space-y-1.5">
-            <p className="text-[11px] font-bold text-blue-800">
-              Option B — Gmail or Outlook forwarding filter
-            </p>
-            <p className="text-[11px] text-gray-500">
-              If your bank only sends to one email, create a filter that auto-forwards bank emails.
-            </p>
-            <div className="space-y-1.5">
-              <p className="text-[11px] font-semibold text-gray-700">Gmail:</p>
-              <ol className="text-[11px] text-gray-600 space-y-0.5 list-decimal list-inside">
-                <li>Settings → <span className="font-medium">Filters and Blocked Addresses → Create filter</span></li>
-                <li>In the <span className="font-medium">From</span> field, enter your bank&apos;s email address</li>
-                <li>Click <span className="font-medium">Create filter</span>, then check <span className="font-medium">Forward it to</span></li>
-                <li>Add your import address and save</li>
-              </ol>
-              <p className="text-[11px] font-semibold text-gray-700 pt-1">Outlook:</p>
-              <ol className="text-[11px] text-gray-600 space-y-0.5 list-decimal list-inside">
-                <li>Settings → Mail → <span className="font-medium">Rules → Add new rule</span></li>
-                <li>Condition: <span className="font-medium">From</span> → your bank&apos;s email</li>
-                <li>Action: <span className="font-medium">Forward to</span> → your import address</li>
-              </ol>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
   );
 }

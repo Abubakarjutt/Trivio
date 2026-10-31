@@ -123,7 +123,6 @@ model Organisation {
   onboardingStep       OnboardingStep   @default(BUSINESS_INFO)
   onboardingComplete   Boolean          @default(false)
   hasSampleData        Boolean          @default(false)
-  emailImportToken     String           @unique @default(cuid())
   plan                 Plan                  @default(FREE)
   lsCustomerId         String?
   lsSubscriptionId     String?               @unique
@@ -171,7 +170,6 @@ model Organisation {
   outreachVoiceExamples OutreachVoiceExample[]
   outreachDnc           OutreachDnc[]
 
-  @@index([emailImportToken])
   @@index([lsCustomerId])
 }
 

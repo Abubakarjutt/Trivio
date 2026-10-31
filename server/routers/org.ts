@@ -231,17 +231,6 @@ export const orgRouter = createTRPCRouter({
       return { success: true };
     }),
 
-  resetEmailImportToken: orgProcedure.mutation(async ({ ctx }) => {
-    const { createId } = await import("@paralleldrive/cuid2");
-    const newToken = createId();
-    const updated = await ctx.db.organisation.update({
-      where: { id: ctx.organisationId },
-      data: { emailImportToken: newToken },
-      select: { emailImportToken: true },
-    });
-    return { emailImportToken: updated.emailImportToken };
-  }),
-
   loadSampleData: orgProcedure.mutation(async ({ ctx }) => {
     // Idempotency guard — do nothing if sample data already loaded
     const org = await ctx.db.organisation.findUnique({

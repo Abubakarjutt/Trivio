@@ -3,7 +3,6 @@ import { db } from "@/lib/db";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { CreditCard, User, Building2, ChevronRight, Download, Globe, Send } from "lucide-react";
-import { EmailImportCard } from "./_components/email-import-card";
 import { PrivacyTab } from "./_components/privacy-tab";
 import { JurisdictionPicker } from "./_components/jurisdiction-picker";
 import { CurrencyPicker } from "./_components/currency-picker";
@@ -21,8 +20,6 @@ export default async function SettingsPage() {
   });
 
   if (!user?.organisationId) redirect("/onboarding");
-
-  const emailImportToken = user.organisation?.emailImportToken ?? "";
 
   // Trivio is open-source — every account is on the free, fully-featured plan.
   const tierLabel = "Free";
@@ -161,11 +158,6 @@ export default async function SettingsPage() {
             </div>
             <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
           </Link>
-
-          {/* Email Import */}
-          {emailImportToken && (
-            <EmailImportCard initialToken={emailImportToken} />
-          )}
 
           {/* Privacy & Data (GDPR) */}
           <div className="rounded-xl border border-border bg-card p-6 space-y-4">

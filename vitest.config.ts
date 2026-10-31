@@ -12,15 +12,12 @@ export default defineConfig({
     include: [
       "tests/unit/**/*.test.ts",
       "tests/unit/**/*.test.tsx",
-      "app/api/email/**/*.test.ts",
       "app/api/chat/**/*.test.ts",
       "app/api/cron/**/*.test.ts",
       "app/api/export/**/*.test.ts",
       "app/api/webhooks/**/*.test.ts",
       "app/api/attachments/**/*.test.ts",
       "app/api/invoices/**/*.test.ts",
-      // cloudflare/email-worker tests require a Cloudflare Workers runtime (postal-mime uses `self`)
-      // and cannot run under Vitest's Node.js environment. Run them with wrangler test instead.
     ],
     exclude: ["**/node_modules/**"],
   },
