@@ -43,7 +43,9 @@ function SmsReviewSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (
   const chains = useRef(new Map<string, Promise<unknown>>());
   const inflight = useRef(new Map<string, number>());
   const failed = useRef(new Set<string>());
-  const [saving, setSaving] = useState(0);
+  // Bumped when a save fails; part of the card key, so its uncontrolled inputs
+  // remount showing the server's value instead of the edit that didn't stick.
+  const [revisions, setRevisions] = useState<Record<string, number>>({});
 
   // Reseed drafts from the server only for items with no unsaved/in-flight edits.
   useEffect(() => {
@@ -92,7 +94,7 @@ function SmsReviewSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (
   });
   const retry = trpc.smsImport.retry.useMutation({ onSuccess: () => void refresh(), onError: (e) => toast.error(e.message) });
 
-  const busy = saving > 0 || approve.isPending || dismiss.isPending;
+  const busy = approve.isPending || dismiss.isPending;
   const ids = [...selected];
   const toggle = (id: string) =>
     setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -101,14 +103,15 @@ function SmsReviewSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (
     const rows = (drafts.current.get(id) ?? item.parsed).map((r, i) => (i === index ? { ...r, ...patch } : r));
     drafts.current.set(id, rows);
     inflight.current.set(id, (inflight.current.get(id) ?? 0) + 1);
-    setSaving((n) => n + 1);
     const run = (chains.current.get(id) ?? Promise.resolve())
       .then(() => update.mutateAsync({ id, parsed: rows }))
-      .catch(() => { failed.current.add(id); })
+      .catch(() => {
+        failed.current.add(id);
+        setRevisions((r) => ({ ...r, [id]: (r[id] ?? 0) + 1 }));
+      })
       .finally(() => {
         const left = (inflight.current.get(id) ?? 1) - 1;
         inflight.current.set(id, left);
-        setSaving((n) => n - 1);
         if (left === 0) {
           if (failed.current.has(id)) drafts.current.delete(id);
           void utils.smsImport.listItems.invalidate();
@@ -138,7 +141,7 @@ function SmsReviewSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (
         <div className="flex-1 space-y-3 overflow-y-auto py-4">
           {pending.data?.length === 0 && <p className="text-sm text-muted-foreground">Nothing to review.</p>}
           {pending.data?.map((item) => (
-            <div key={item.id} className="rounded-xl border border-border/60 p-3 space-y-2">
+            <div key={`${item.id}:${revisions[item.id] ?? 0}`} className="rounded-xl border border-border/60 p-3 space-y-2">
               <div className="flex items-start gap-2">
                 <input type="checkbox" className="mt-1" checked={selected.has(item.id)} onChange={() => toggle(item.id)} aria-label="Select" />
                 <div className="min-w-0 flex-1">
@@ -160,8 +163,10 @@ function SmsReviewSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (
                     </button>
                     <Input type="number" step="0.01" min="0" defaultValue={row.amount} className="h-7 text-xs tabular-nums"
                       onBlur={(e) => {
-                        const v = Number(e.target.value);
-                        if (Number.isFinite(v) && v >= 0 && v !== row.amount) editRow(item, i, { amount: v });
+                        const raw = e.target.value.trim();
+                        if (raw === "") return;
+                        const v = Number(raw);
+                        if (Number.isFinite(v) && v > 0 && v < 1e15 && v !== row.amount) editRow(item, i, { amount: v });
                       }} />
                   </div>
                   <div className="col-span-3 flex items-center gap-2">
