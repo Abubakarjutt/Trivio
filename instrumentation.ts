@@ -20,4 +20,13 @@ export async function register() {
   } catch (err) {
     console.error("[instrumentation] failed to seed tax regimes:", err);
   }
+
+  if (process.platform === "darwin") {
+    try {
+      const { checkChatDbAccess } = await import("@/server/services/sms/messages-db");
+      console.info("[sms] chat.db access:", await checkChatDbAccess());
+    } catch (err) {
+      console.error("[sms] access check failed:", err);
+    }
+  }
 }
