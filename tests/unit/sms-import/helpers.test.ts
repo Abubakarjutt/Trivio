@@ -9,12 +9,14 @@ function blob(text: string): string {
   const body = Buffer.from(text, "utf8");
   const n = body.length;
   const len =
-    n < 0x80 ? Buffer.from([n])
-    : n <= 0xffff ? Buffer.from([0x81, n & 0xff, n >> 8])
-    : Buffer.from([0x82, n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff, (n >>> 24) & 0xff]);
+    n < 0x80
+      ? Buffer.from([n])
+      : n <= 0xffff
+        ? Buffer.from([0x81, n & 0xff, n >> 8])
+        : Buffer.from([0x82, n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff, (n >>> 24) & 0xff]);
   const head = Buffer.from(
     "\x04\x0bstreamtyped\x81\xe8\x03\x84\x01@\x84\x84\x84\x12NSAttributedString\x00\x84\x84\x08NSObject\x00\x85\x92\x84\x84\x84\x08NSString\x01\x94\x84\x01+",
-    "latin1",
+    "latin1"
   );
   return Buffer.concat([head, len, body, Buffer.from([0x86, 0x84])]).toString("hex");
 }
@@ -57,7 +59,9 @@ describe("sender matching", () => {
 
 describe("decodeAttributedBody", () => {
   it("reads a short string (1-byte length)", () => {
-    expect(decodeAttributedBody(blob("PKR 2,450 spent at FOODPANDA"))).toBe("PKR 2,450 spent at FOODPANDA");
+    expect(decodeAttributedBody(blob("PKR 2,450 spent at FOODPANDA"))).toBe(
+      "PKR 2,450 spent at FOODPANDA"
+    );
   });
   it("reads a 2-byte length (0x81)", () => {
     const text = "x".repeat(300);
