@@ -9,7 +9,9 @@ describe("isAllowedExternalUrl", () => {
   });
   it("refuses every other scheme or settings pane", () => {
     expect(isAllowedExternalUrl("file:///etc/passwd")).toBe(false);
-    expect(isAllowedExternalUrl("x-apple.systempreferences:com.apple.preference.security?Privacy_Camera")).toBe(false);
+    expect(
+      isAllowedExternalUrl("x-apple.systempreferences:com.apple.preference.security?Privacy_Camera")
+    ).toBe(false);
     expect(isAllowedExternalUrl(`${PRIVACY_FULL_DISK_ACCESS_URL}&x`)).toBe(false);
   });
 });
