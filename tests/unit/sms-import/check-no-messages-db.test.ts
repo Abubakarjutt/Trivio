@@ -15,7 +15,10 @@ const put = (rel: string, body = "") => {
 beforeEach(() => {
   nextDir = join(mkdtempSync(join(tmpdir(), "nextcheck-")), ".next");
   put("standalone/server.js");
-  put("server/app/page.js.nft.json", JSON.stringify({ version: 1, files: ["../../node_modules/x/index.js"] }));
+  put(
+    "server/app/page.js.nft.json",
+    JSON.stringify({ version: 1, files: ["../../node_modules/x/index.js"] })
+  );
 });
 afterEach(() => rmSync(join(nextDir, ".."), { recursive: true, force: true }));
 
@@ -32,7 +35,10 @@ describe("findMessagesDbInBuild", () => {
   });
 
   it("flags a trace file that lists the Messages database", () => {
-    put("server/chunks/x.nft.json", JSON.stringify({ version: 1, files: ["../../../../Library/Messages/chat.db"] }));
+    put(
+      "server/chunks/x.nft.json",
+      JSON.stringify({ version: 1, files: ["../../../../Library/Messages/chat.db"] })
+    );
     expect(findMessagesDbInBuild(nextDir)).toEqual([
       `${join(nextDir, "server/chunks/x.nft.json")}: ../../../../Library/Messages/chat.db`,
     ]);
