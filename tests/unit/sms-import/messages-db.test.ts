@@ -16,10 +16,14 @@ import { dateToAppleNs } from "@/server/services/sms/apple-time";
 
 type Cb = (err: Error | null, stdout: string, stderr: string) => void;
 function sqliteReturns(stdout: string) {
-  cp.execFile.mockImplementation((_b: string, _a: string[], _o: unknown, cb: Cb) => cb(null, stdout, ""));
+  cp.execFile.mockImplementation((_b: string, _a: string[], _o: unknown, cb: Cb) =>
+    cb(null, stdout, "")
+  );
 }
 function sqliteFails(stderr: string) {
-  cp.execFile.mockImplementation((_b: string, _a: string[], _o: unknown, cb: Cb) => cb(new Error("exit 1"), "", stderr));
+  cp.execFile.mockImplementation((_b: string, _a: string[], _o: unknown, cb: Cb) =>
+    cb(new Error("exit 1"), "", stderr)
+  );
 }
 const sqlOf = () => cp.execFile.mock.calls[0]![1][3] as string;
 
@@ -54,14 +58,28 @@ describe("readMessages", () => {
       Buffer.from("hello"),
     ]).toString("hex");
     const date = Number(dateToAppleNs(new Date("2026-10-30T09:00:00Z")));
-    sqliteReturns(JSON.stringify([
-      { rowId: 7, guid: "g-7", text: "PKR 500 at KFC", body: null, date, sender: "HBL" },
-      { rowId: 8, guid: "g-8", text: null, body: hex, date, sender: "HBL" },
-    ]));
+    sqliteReturns(
+      JSON.stringify([
+        { rowId: 7, guid: "g-7", text: "PKR 500 at KFC", body: null, date, sender: "HBL" },
+        { rowId: 8, guid: "g-8", text: null, body: hex, date, sender: "HBL" },
+      ])
+    );
     const rows = await readMessages({ afterRowId: 0n });
     expect(rows).toEqual([
-      { rowId: 7n, guid: "g-7", sender: "HBL", text: "PKR 500 at KFC", receivedAt: new Date("2026-10-30T09:00:00Z") },
-      { rowId: 8n, guid: "g-8", sender: "HBL", text: "hello", receivedAt: new Date("2026-10-30T09:00:00Z") },
+      {
+        rowId: 7n,
+        guid: "g-7",
+        sender: "HBL",
+        text: "PKR 500 at KFC",
+        receivedAt: new Date("2026-10-30T09:00:00Z"),
+      },
+      {
+        rowId: 8n,
+        guid: "g-8",
+        sender: "HBL",
+        text: "hello",
+        receivedAt: new Date("2026-10-30T09:00:00Z"),
+      },
     ]);
   });
 
@@ -97,7 +115,18 @@ describe("readMessages", () => {
 
   it("maps anything else to error with the first stderr line", async () => {
     sqliteFails("Error: database is locked\nmore");
-    await expect(readMessages({ afterRowId: 0n })).rejects.toMatchObject({ kind: "error", message: "Error: database is locked" });
+    await expect(readMessages({ afterRowId: 0n })).rejects.toMatchObject({
+      kind: "error",
+      message: "Error: database is locked",
+    });
+  });
+
+  it("rejects with error when sqlite3 returns malformed JSON", async () => {
+    sqliteReturns("not json");
+    await expect(readMessages({ afterRowId: 0n })).rejects.toMatchObject({
+      kind: "error",
+      message: "Unreadable sqlite3 output",
+    });
   });
 });
 

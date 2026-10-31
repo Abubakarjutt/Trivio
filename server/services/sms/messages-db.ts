@@ -25,7 +25,10 @@ export interface ChatMessage {
 export type ChatDbErrorKind = "no_access" | "missing" | "error";
 
 export class ChatDbError extends Error {
-  constructor(public readonly kind: ChatDbErrorKind, message: string) {
+  constructor(
+    public readonly kind: ChatDbErrorKind,
+    message: string
+  ) {
     super(message);
     this.name = "ChatDbError";
   }
@@ -49,7 +52,11 @@ function sqlInt(n: bigint): string {
 }
 
 async function classify(stderr: string): Promise<ChatDbError> {
-  const firstLine = stderr.split("\n").map((l) => l.trim()).find(Boolean) ?? "sqlite3 failed";
+  const firstLine =
+    stderr
+      .split("\n")
+      .map((l) => l.trim())
+      .find(Boolean) ?? "sqlite3 failed";
   if (/authorization denied|not authorized|operation not permitted/i.test(stderr)) {
     return new ChatDbError("no_access", firstLine);
   }
@@ -79,8 +86,12 @@ function runSql(sql: string): Promise<unknown[]> {
           return;
         }
         const out = String(stdout).trim();
-        resolve(out ? (JSON.parse(out) as unknown[]) : []);
-      },
+        try {
+          resolve(out ? (JSON.parse(out) as unknown[]) : []);
+        } catch {
+          reject(new ChatDbError("error", "Unreadable sqlite3 output"));
+        }
+      }
     );
   });
 }
@@ -96,7 +107,10 @@ function toMessage(r: RawRow): ChatMessage {
   };
 }
 
-export async function readMessages(cursor: MessageCursor, limit = PAGE_SIZE): Promise<ChatMessage[]> {
+export async function readMessages(
+  cursor: MessageCursor,
+  limit = PAGE_SIZE
+): Promise<ChatMessage[]> {
   if (!Number.isSafeInteger(limit) || limit < 1) throw new RangeError(`bad limit: ${limit}`);
   const bound =
     "afterRowId" in cursor
