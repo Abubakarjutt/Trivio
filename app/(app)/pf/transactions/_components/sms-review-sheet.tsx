@@ -36,6 +36,21 @@ function SmsReviewSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showSkipped, setShowSkipped] = useState(false);
   const seen = useRef(new Set<string>());
+  // Per-item working copy of the parsed rows. Edits apply to the draft and the
+  // whole draft is saved, serialised per item, so quick successive edits never
+  // overwrite each other with a stale snapshot.
+  const drafts = useRef(new Map<string, ParsedSmsTransaction[]>());
+  const chains = useRef(new Map<string, Promise<unknown>>());
+  const inflight = useRef(new Map<string, number>());
+  const failed = useRef(new Set<string>());
+  const [saving, setSaving] = useState(0);
+
+  // Reseed drafts from the server only for items with no unsaved/in-flight edits.
+  useEffect(() => {
+    for (const item of pending.data ?? []) {
+      if (!inflight.current.get(item.id)) drafts.current.set(item.id, item.parsed);
+    }
+  }, [pending.data]);
 
   // New items start selected unless they look like duplicates. Refetches after
   // an edit keep whatever the user ticked or unticked.
@@ -62,21 +77,56 @@ function SmsReviewSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (
   };
   const update = trpc.smsImport.updateItem.useMutation({
     onError: (e) => toast.error(e.message),
-    onSettled: () => utils.smsImport.listItems.invalidate(),
   });
   const approve = trpc.smsImport.approve.useMutation({
-    onSuccess: (r) => { toast.success(`Added ${r.transactions} transaction${r.transactions === 1 ? "" : "s"}`); void refresh(); },
+    onSuccess: (r) => {
+      if (r.transactions === 0) toast.info("Nothing new to add");
+      else toast.success(`Added ${r.transactions} transaction${r.transactions === 1 ? "" : "s"}`);
+      void refresh();
+    },
     onError: (e) => { toast.error(e.message); void refresh(); },
   });
-  const dismiss = trpc.smsImport.dismiss.useMutation({ onSuccess: () => void refresh() });
+  const dismiss = trpc.smsImport.dismiss.useMutation({
+    onSuccess: () => void refresh(),
+    onError: (e) => { toast.error(e.message); void refresh(); },
+  });
   const retry = trpc.smsImport.retry.useMutation({ onSuccess: () => void refresh(), onError: (e) => toast.error(e.message) });
 
-  const busy = update.isPending || approve.isPending || dismiss.isPending;
+  const busy = saving > 0 || approve.isPending || dismiss.isPending;
   const ids = [...selected];
   const toggle = (id: string) =>
     setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
-  const editRow = (itemId: string, rows: ParsedSmsTransaction[], index: number, patch: Partial<ParsedSmsTransaction>) =>
-    update.mutate({ id: itemId, parsed: rows.map((r, i) => (i === index ? { ...r, ...patch } : r)) });
+  const editRow = (item: { id: string; parsed: ParsedSmsTransaction[] }, index: number, patch: Partial<ParsedSmsTransaction>) => {
+    const id = item.id;
+    const rows = (drafts.current.get(id) ?? item.parsed).map((r, i) => (i === index ? { ...r, ...patch } : r));
+    drafts.current.set(id, rows);
+    inflight.current.set(id, (inflight.current.get(id) ?? 0) + 1);
+    setSaving((n) => n + 1);
+    const run = (chains.current.get(id) ?? Promise.resolve())
+      .then(() => update.mutateAsync({ id, parsed: rows }))
+      .catch(() => { failed.current.add(id); })
+      .finally(() => {
+        const left = (inflight.current.get(id) ?? 1) - 1;
+        inflight.current.set(id, left);
+        setSaving((n) => n - 1);
+        if (left === 0) {
+          if (failed.current.has(id)) drafts.current.delete(id);
+          void utils.smsImport.listItems.invalidate();
+        }
+      });
+    chains.current.set(id, run);
+  };
+
+  // Waits for every queued save of the given items; false if any of them failed.
+  const flushSaves = async (itemIds: string[]) => {
+    await Promise.all(itemIds.map((id) => chains.current.get(id)));
+    const bad = itemIds.some((id) => failed.current.has(id));
+    for (const id of itemIds) failed.current.delete(id);
+    if (bad) void refresh();
+    return !bad;
+  };
+  const approveSelected = async () => { if (await flushSaves(ids)) approve.mutate({ ids }); };
+  const dismissSelected = async () => { if (await flushSaves(ids)) dismiss.mutate({ ids }); };
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -99,23 +149,23 @@ function SmsReviewSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (
               {item.parsed.map((row, i) => (
                 <div key={i} className="grid grid-cols-[7.5rem_1fr_6rem] items-center gap-2 pl-6">
                   <Input type="date" defaultValue={row.date} className="h-7 text-xs"
-                    onBlur={(e) => { if (e.target.value && e.target.value !== row.date) editRow(item.id, item.parsed, i, { date: e.target.value }); }} />
+                    onBlur={(e) => { if (e.target.value && e.target.value !== row.date) editRow(item, i, { date: e.target.value }); }} />
                   <Input defaultValue={row.merchantName} className="h-7 text-xs" maxLength={200}
-                    onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== row.merchantName) editRow(item.id, item.parsed, i, { merchantName: v }); }} />
+                    onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== row.merchantName) editRow(item, i, { merchantName: v }); }} />
                   <div className="flex items-center gap-1">
                     <button type="button" title="Switch debit/credit"
                       className={`text-xs font-semibold ${row.type === "DEBIT" ? "text-red-500" : "text-emerald-500"}`}
-                      onClick={() => editRow(item.id, item.parsed, i, { type: row.type === "DEBIT" ? "CREDIT" : "DEBIT" })}>
+                      onClick={() => editRow(item, i, { type: ((drafts.current.get(item.id) ?? item.parsed)[i]?.type ?? row.type) === "DEBIT" ? "CREDIT" : "DEBIT" })}>
                       {row.type === "DEBIT" ? "−" : "+"}
                     </button>
                     <Input type="number" step="0.01" min="0" defaultValue={row.amount} className="h-7 text-xs tabular-nums"
                       onBlur={(e) => {
                         const v = Number(e.target.value);
-                        if (Number.isFinite(v) && v >= 0 && v !== row.amount) editRow(item.id, item.parsed, i, { amount: v });
+                        if (Number.isFinite(v) && v >= 0 && v !== row.amount) editRow(item, i, { amount: v });
                       }} />
                   </div>
                   <div className="col-span-3 flex items-center gap-2">
-                    <CategoryPicker value={row.category} onChange={(c) => editRow(item.id, item.parsed, i, { category: c })}
+                    <CategoryPicker value={row.category} onChange={(c) => editRow(item, i, { category: c })}
                       triggerClassName="h-6 px-2 text-xs rounded-full bg-muted" />
                     {row.possibleDuplicate && (
                       <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800">Possible duplicate</span>
@@ -150,10 +200,10 @@ function SmsReviewSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (
         </div>
 
         <SheetFooter className="gap-2 border-t pt-3">
-          <Button variant="outline" disabled={busy || ids.length === 0} onClick={() => dismiss.mutate({ ids })}>
+          <Button variant="outline" disabled={busy || ids.length === 0} onClick={() => void dismissSelected()}>
             Dismiss selected
           </Button>
-          <Button disabled={busy || ids.length === 0} onClick={() => approve.mutate({ ids })}>
+          <Button disabled={busy || ids.length === 0} onClick={() => void approveSelected()}>
             {approve.isPending ? "Adding…" : `Approve selected (${ids.length})`}
           </Button>
         </SheetFooter>
