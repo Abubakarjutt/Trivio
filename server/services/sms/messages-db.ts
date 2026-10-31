@@ -11,7 +11,10 @@ import { appleToDate, dateToAppleNs } from "./apple-time";
 import { decodeAttributedBody } from "./attributed-body";
 
 export const SQLITE_BIN = "/usr/bin/sqlite3";
-export const CHAT_DB_PATH = join(homedir(), "Library", "Messages", "chat.db");
+// HOME first: Next's output file tracing statically evaluates os.homedir()
+// and would otherwise try to copy the user's Messages database into the
+// standalone build (next.config.ts also excludes it as a second guard).
+export const CHAT_DB_PATH = join(process.env.HOME || homedir(), "Library", "Messages", "chat.db");
 export const PAGE_SIZE = 200;
 
 export interface ChatMessage {
