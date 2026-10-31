@@ -131,7 +131,7 @@ export async function runSmsTick(deps: PollerDeps): Promise<void> {
   running = true;
   try {
     const sources = await deps.db.smsSource.findMany({
-      where: { enabled: true, status: { not: "NO_ACCESS" } },
+      where: { enabled: true, status: { not: "NO_ACCESS" }, senderIds: { isEmpty: false } },
       select: { id: true, organisationId: true, senderIds: true, lastRowId: true },
     });
     for (const source of sources) {

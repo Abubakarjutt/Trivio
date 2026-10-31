@@ -36,7 +36,9 @@ describe("runSmsTick", () => {
   it("only loads enabled sources that have access", async () => {
     db.smsSource.findMany.mockResolvedValue([]);
     await runSmsTick(deps());
-    expect(db.smsSource.findMany.mock.calls[0]![0].where).toEqual({ enabled: true, status: { not: "NO_ACCESS" } });
+    expect(db.smsSource.findMany.mock.calls[0]![0].where).toEqual({
+      enabled: true, status: { not: "NO_ACCESS" }, senderIds: { isEmpty: false },
+    });
   });
 
   it("looks back 7 days on first sync", async () => {

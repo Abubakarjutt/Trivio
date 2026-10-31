@@ -5,6 +5,8 @@ import { createTRPCRouter, orgProcedure } from "@/server/trpc";
 import { ChatDbError, checkChatDbAccess, readMessages } from "@/server/services/sms/messages-db";
 import { rankSenderSuggestions } from "@/server/services/sms/suggest";
 import {
+  MAX_AMOUNT,
+  isRealIsoDate,
   loadExistingForDedup,
   localDateString,
   processSms,
@@ -16,10 +18,10 @@ const SUGGEST_LOOKBACK_DAYS = 30;
 const SUGGEST_SCAN_LIMIT = 2000;
 
 const parsedTxn = z.object({
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  date: z.string().refine(isRealIsoDate, "Invalid date"),
   description: z.string().min(1).max(500),
   merchantName: z.string().min(1).max(200),
-  amount: z.number().finite().nonnegative(),
+  amount: z.number().finite().nonnegative().lt(MAX_AMOUNT),
   type: z.enum(["DEBIT", "CREDIT"]),
   category: z.string().min(1).max(100),
   mccCode: z.string().max(10),
@@ -76,7 +78,7 @@ export const smsImportRouter = createTRPCRouter({
     if (process.platform !== "darwin") return [];
     try {
       const since = new Date(Date.now() - SUGGEST_LOOKBACK_DAYS * 86_400_000);
-      const messages = await readMessages({ since }, SUGGEST_SCAN_LIMIT);
+      const messages = await readMessages({ since }, SUGGEST_SCAN_LIMIT, "desc");
       return rankSenderSuggestions(messages, redactPiiText);
     } catch (err) {
       if (err instanceof ChatDbError) {
@@ -148,6 +150,13 @@ export const smsImportRouter = createTRPCRouter({
           select: { parsedJson: true },
         });
         const rows = items.flatMap((it) => it.parsedJson as unknown as ParsedSmsTransaction[]);
+        // parsedJson is only as good as whatever wrote it; re-check before it becomes money.
+        if (!z.array(parsedTxn).safeParse(rows).success) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "One of the selected SMS has an invalid amount or date. Fix or dismiss it, then try again.",
+          });
+        }
 
         const org = await tx.organisation.findUnique({ where: { id: organisationId }, select: { hasSampleData: true } });
         if (org?.hasSampleData) {
@@ -199,14 +208,16 @@ export const smsImportRouter = createTRPCRouter({
       if (!item.text) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "This message has no readable text." });
       const existing = await loadExistingForDedup(ctx.db, ctx.organisationId, new Date());
       const result = await processSms(item.text, item.receivedAt, existing);
-      await ctx.db.smsImportItem.update({
-        where: { id: item.id },
+      // Guarded on status: a Hide/dismiss that lands while we re-parse wins.
+      const res = await ctx.db.smsImportItem.updateMany({
+        where: { id: item.id, organisationId: ctx.organisationId, status: { in: ["FAILED", "NO_TRANSACTION"] } },
         data: {
           status: result.status,
           parsedJson: result.parsed as unknown as Prisma.InputJsonValue,
           errorMessage: result.status === "FAILED" ? result.error : null,
         },
       });
+      if (res.count === 0) throw new TRPCError({ code: "NOT_FOUND" });
       return { status: result.status };
     }),
 });

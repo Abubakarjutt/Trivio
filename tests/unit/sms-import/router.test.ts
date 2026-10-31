@@ -99,6 +99,46 @@ describe("smsImport.approve", () => {
     expect(db.statementTransaction.createMany).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["a null amount", { ...txn, amount: null }],
+    ["an amount of 1e15", { ...txn, amount: 1e15 }],
+    ["an impossible date", { ...txn, date: "2026-02-30" }],
+  ])("rejects a stored item with %s and saves nothing", async (_label, bad) => {
+    pendingOk(2);
+    db.statementImportBatch.create.mockResolvedValue({ id: "b1" });
+    db.smsImportItem.updateMany.mockResolvedValue({ count: 2 });
+    db.smsImportItem.findMany.mockResolvedValue([{ parsedJson: [txn] }, { parsedJson: [bad] }]);
+    db.organisation.findUnique.mockResolvedValue({ hasSampleData: false });
+    const err = await caller().approve({ ids: ["i1", "i2"] }).catch((e) => e);
+    expect(err).toBeInstanceOf(TRPCError);
+    expect(err.code).toBe("BAD_REQUEST");
+    expect(err.message).toBe("One of the selected SMS has an invalid amount or date. Fix or dismiss it, then try again.");
+    expect(db.statementTransaction.createMany).not.toHaveBeenCalled();
+  });
+
+  it("leaves the items PENDING_REVIEW when validation fails (the claim rolls back)", async () => {
+    // Real Prisma rolls back the interactive transaction on throw; model that by
+    // only committing the claim when the callback resolves.
+    const status = new Map([["i1", "PENDING_REVIEW"]]);
+    db.$transaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+      const staged = new Map(status);
+      const smsImportItem = {
+        count: vi.fn(async () => [...staged.values()].filter((s) => s === "PENDING_REVIEW").length),
+        updateMany: vi.fn(async () => { staged.set("i1", "APPROVED"); return { count: 1 }; }),
+        findMany: vi.fn(async () => [{ parsedJson: [{ ...txn, amount: null }] }]),
+      };
+      const tx = new Proxy(db, { get: (t, k) => (k === "smsImportItem" ? smsImportItem : Reflect.get(t, k)) });
+      const out = await fn(tx);
+      for (const [k, v] of staged) status.set(k, v);
+      return out;
+    });
+    db.statementImportBatch.create.mockResolvedValue({ id: "b1" });
+    db.organisation.findUnique.mockResolvedValue({ hasSampleData: false });
+    const err = await caller().approve({ ids: ["i1"] }).catch((e) => e);
+    expect(err.code).toBe("BAD_REQUEST");
+    expect(status.get("i1")).toBe("PENDING_REVIEW");
+  });
+
   it("clears sample data before saving real transactions", async () => {
     pendingOk(1);
     db.statementImportBatch.create.mockResolvedValue({ id: "b1" });
@@ -119,9 +159,16 @@ describe("smsImport.updateItem", () => {
     expect(db.smsImportItem.updateMany.mock.calls[0]![0].where).toEqual({ id: "i1", organisationId: "org-1", status: "PENDING_REVIEW" });
   });
 
-  it("rejects a malformed date", async () => {
-    const err = await caller().updateItem({ id: "i1", parsed: [{ ...txn, date: "30/10/2026" }] }).catch((e) => e);
+  it.each(["30/10/2026", "2026-02-30", "2026-13-01"])("rejects the date %s", async (date) => {
+    const err = await caller().updateItem({ id: "i1", parsed: [{ ...txn, date }] }).catch((e) => e);
     expect(err.code).toBe("BAD_REQUEST");
+    expect(db.smsImportItem.updateMany).not.toHaveBeenCalled();
+  });
+
+  it.each([1e15, -1, NaN])("rejects the amount %s", async (amount) => {
+    const err = await caller().updateItem({ id: "i1", parsed: [{ ...txn, amount }] }).catch((e) => e);
+    expect(err.code).toBe("BAD_REQUEST");
+    expect(db.smsImportItem.updateMany).not.toHaveBeenCalled();
   });
 });
 
@@ -153,10 +200,30 @@ describe("smsImport.retry", () => {
     db.smsImportItem.findFirst.mockResolvedValue({ id: "i1", text: "PKR 1,450 at KFC", receivedAt: new Date("2026-10-30T10:00:00Z") });
     db.statementTransaction.findMany.mockResolvedValue([]);
     svc.processSms.mockResolvedValue({ status: "PENDING_REVIEW", redactedText: "PKR 1,450 at KFC", parsed: [txn] });
+    db.smsImportItem.updateMany.mockResolvedValue({ count: 1 });
     expect(await caller().retry({ id: "i1" })).toEqual({ status: "PENDING_REVIEW" });
     expect(db.smsImportItem.findFirst.mock.calls[0]![0].where).toEqual({ id: "i1", organisationId: "org-1", status: { in: ["FAILED", "NO_TRANSACTION"] } });
-    expect(db.smsImportItem.update.mock.calls[0]![0]).toEqual({
-      where: { id: "i1" }, data: { status: "PENDING_REVIEW", parsedJson: [txn], errorMessage: null },
+    expect(db.smsImportItem.updateMany.mock.calls[0]![0]).toEqual({
+      where: { id: "i1", organisationId: "org-1", status: { in: ["FAILED", "NO_TRANSACTION"] } },
+      data: { status: "PENDING_REVIEW", parsedJson: [txn], errorMessage: null },
     });
+  });
+
+  it("returns NOT_FOUND when the item changed status while re-parsing", async () => {
+    db.smsImportItem.findFirst.mockResolvedValue({ id: "i1", text: "PKR 1,450 at KFC", receivedAt: new Date("2026-10-30T10:00:00Z") });
+    db.statementTransaction.findMany.mockResolvedValue([]);
+    svc.processSms.mockResolvedValue({ status: "PENDING_REVIEW", redactedText: "x", parsed: [txn] });
+    db.smsImportItem.updateMany.mockResolvedValue({ count: 0 });
+    const err = await caller().retry({ id: "i1" }).catch((e) => e);
+    expect(err.code).toBe("NOT_FOUND");
+  });
+});
+
+describe("smsImport.suggestSenders", () => {
+  it.runIf(process.platform === "darwin")("scans the newest messages first", async () => {
+    mdb.readMessages.mockResolvedValue([]);
+    await caller().suggestSenders();
+    expect(mdb.readMessages.mock.calls[0]![1]).toBe(2000);
+    expect(mdb.readMessages.mock.calls[0]![2]).toBe("desc");
   });
 });

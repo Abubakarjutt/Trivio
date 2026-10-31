@@ -44,6 +44,19 @@ describe("readMessages", () => {
     expect(sqlOf()).toContain("LIMIT 200");
   });
 
+  it("reads oldest-first by default", async () => {
+    sqliteReturns("[]");
+    await readMessages({ afterRowId: 0n });
+    expect(sqlOf()).toContain("ORDER BY m.ROWID ASC");
+  });
+
+  it("reads newest-first when asked", async () => {
+    sqliteReturns("[]");
+    await readMessages({ since: new Date("2026-10-01T00:00:00Z") }, 2000, "desc");
+    expect(sqlOf()).toContain("ORDER BY m.ROWID DESC");
+    expect(sqlOf()).toContain("LIMIT 2000");
+  });
+
   it("uses an Apple-nanosecond date bound on first sync", async () => {
     sqliteReturns("[]");
     const since = new Date("2026-10-23T00:00:00Z");

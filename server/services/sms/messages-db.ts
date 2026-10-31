@@ -13,7 +13,7 @@ import { decodeAttributedBody } from "./attributed-body";
 export const SQLITE_BIN = "/usr/bin/sqlite3";
 // HOME first: Next's output file tracing statically evaluates os.homedir()
 // and would otherwise try to copy the user's Messages database into the
-// standalone build (next.config.ts also excludes it as a second guard).
+// standalone build. scripts/check-no-messages-db.mjs fails the build if it ever does.
 export const CHAT_DB_PATH = join(process.env.HOME || homedir(), "Library", "Messages", "chat.db");
 export const PAGE_SIZE = 200;
 
@@ -112,7 +112,8 @@ function toMessage(r: RawRow): ChatMessage {
 
 export async function readMessages(
   cursor: MessageCursor,
-  limit = PAGE_SIZE
+  limit = PAGE_SIZE,
+  order: "asc" | "desc" = "asc"
 ): Promise<ChatMessage[]> {
   if (!Number.isSafeInteger(limit) || limit < 1) throw new RangeError(`bad limit: ${limit}`);
   const bound =
@@ -123,7 +124,7 @@ export async function readMessages(
     "SELECT m.ROWID AS rowId, m.guid AS guid, m.text AS text, hex(m.attributedBody) AS body, " +
     "m.date AS date, h.id AS sender " +
     "FROM message m JOIN handle h ON m.handle_id = h.ROWID " +
-    `WHERE m.is_from_me = 0 AND ${bound} ORDER BY m.ROWID LIMIT ${limit};`;
+    `WHERE m.is_from_me = 0 AND ${bound} ORDER BY m.ROWID ${order === "desc" ? "DESC" : "ASC"} LIMIT ${limit};`;
   const rows = (await runSql(sql)) as RawRow[];
   return rows.map(toMessage);
 }

@@ -7,7 +7,7 @@ vi.mock("@/server/services/statement-categorization.service", () => cat);
 const pii = vi.hoisted(() => ({ redactPiiText: vi.fn((s: string) => s.replace(/\d{4} \d{4}/g, "[CARD]")) }));
 vi.mock("@/server/services/pii-redaction.service", () => pii);
 
-import { loadExistingForDedup, processSms, resolveDate } from "@/server/services/sms/sms-import.service";
+import { isRealIsoDate, loadExistingForDedup, processSms, resolveDate } from "@/server/services/sms/sms-import.service";
 
 const RECEIVED = new Date(2026, 9, 30, 14, 5); // 30 Oct 2026 14:05 local
 const kfc = { date: "2026-10-30", description: "KFC DHA", amount: 1450, type: "DEBIT" as const };
@@ -54,6 +54,32 @@ describe("processSms", () => {
     expect(r.parsed[0]!.possibleDuplicate).toBe(true);
   });
 
+  it("drops rows with a non-finite or out-of-range amount and keeps amounts positive", async () => {
+    pdf.parseTransactionsFromText.mockResolvedValue([
+      { ...kfc, description: "NAN", amount: NaN },
+      { ...kfc, description: "HUGE", amount: 1e15 },
+      { ...kfc, amount: -1450 },
+    ]);
+    cat.categorizeBatch.mockResolvedValue([catKfc]);
+    const r = await processSms("PKR 1,450 at KFC DHA", RECEIVED, []);
+    expect(cat.categorizeBatch).toHaveBeenCalledWith(["KFC DHA"]);
+    expect(r.parsed.map((p) => [p.description, p.amount])).toEqual([["KFC DHA", 1450]]);
+  });
+
+  it("returns NO_TRANSACTION when every parsed amount is unusable", async () => {
+    pdf.parseTransactionsFromText.mockResolvedValue([{ ...kfc, amount: NaN }, { ...kfc, description: "INF", amount: Infinity }]);
+    const r = await processSms("PKR ??? at KFC", RECEIVED, []);
+    expect(r.status).toBe("NO_TRANSACTION");
+    expect(cat.categorizeBatch).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the description when the merchant name is empty", async () => {
+    pdf.parseTransactionsFromText.mockResolvedValue([kfc]);
+    cat.categorizeBatch.mockResolvedValue([{ ...catKfc, merchantName: "" }]);
+    const r = await processSms("PKR 1,450 at KFC DHA", RECEIVED, []);
+    expect(r.parsed[0]!.merchantName).toBe("KFC DHA");
+  });
+
   it("keeps both transactions from a two-transaction SMS", async () => {
     pdf.parseTransactionsFromText.mockResolvedValue([kfc, { ...kfc, description: "REFUND DARAZ", amount: 900, type: "CREDIT" }]);
     cat.categorizeBatch.mockResolvedValue([catKfc, { ...catKfc, description: "REFUND DARAZ", merchantName: "Daraz", category: "Shopping" }]);
@@ -69,9 +95,27 @@ describe("resolveDate", () => {
   it("falls back to the received date for a wrong year", () => {
     expect(resolveDate("2023-10-30", RECEIVED)).toBe("2026-10-30");
   });
+  it("falls back for a date that does not exist", () => {
+    const march1 = new Date(2026, 2, 1, 9, 0);
+    expect(resolveDate("2026-02-30", march1)).toBe("2026-03-01");
+    expect(resolveDate("2026-02-29", march1)).toBe("2026-03-01");
+  });
   it("falls back for garbage", () => {
     expect(resolveDate("30-Oct", RECEIVED)).toBe("2026-10-30");
     expect(resolveDate("", RECEIVED)).toBe("2026-10-30");
+  });
+});
+
+describe("isRealIsoDate", () => {
+  it("accepts only real calendar dates in YYYY-MM-DD form", () => {
+    expect(isRealIsoDate("2026-10-30")).toBe(true);
+    expect(isRealIsoDate("2028-02-29")).toBe(true);
+    expect(isRealIsoDate("2026-02-30")).toBe(false);
+    expect(isRealIsoDate("2026-13-01")).toBe(false);
+    expect(isRealIsoDate("2026-00-10")).toBe(false);
+    expect(isRealIsoDate("9999-99-99")).toBe(false);
+    expect(isRealIsoDate("30-10-2026")).toBe(false);
+    expect(isRealIsoDate("")).toBe(false);
   });
 });
 

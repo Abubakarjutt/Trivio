@@ -31,6 +31,8 @@ export type ProcessSmsResult =
 const MAX_DATE_DRIFT_DAYS = 3;
 const DEDUP_WINDOW_DAYS = 90;
 const DAY_MS = 86_400_000;
+// Above NUMERIC(19,4)'s 15 integer digits.
+export const MAX_AMOUNT = 1e15;
 
 export function localDateString(d: Date): string {
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -38,11 +40,18 @@ export function localDateString(d: Date): string {
   return `${d.getFullYear()}-${m}-${day}`;
 }
 
+// YYYY-MM-DD that names a day on the calendar ("2026-02-30" does not).
+export function isRealIsoDate(s: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const d = new Date(`${s}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+}
+
 // Bank SMS often omit the year ("on 30-Oct"), so the AI can guess wrong.
 // Trust the parsed date only when it is a real date close to when the SMS arrived.
 export function resolveDate(parsed: string, receivedAt: Date): string {
   const fallback = localDateString(receivedAt);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(parsed)) return fallback;
+  if (!isRealIsoDate(parsed)) return fallback;
   const t = Date.parse(`${parsed}T12:00:00`);
   if (Number.isNaN(t)) return fallback;
   return Math.abs(t - receivedAt.getTime()) / DAY_MS > MAX_DATE_DRIFT_DAYS ? fallback : parsed;
@@ -55,7 +64,9 @@ export async function processSms(
 ): Promise<ProcessSmsResult> {
   const redactedText = redactPiiText(text);
   try {
-    const raw = deduplicateIncoming(await parseTransactionsFromText(redactedText));
+    const raw = deduplicateIncoming(await parseTransactionsFromText(redactedText))
+      .filter((t) => Number.isFinite(t.amount) && Math.abs(t.amount) < MAX_AMOUNT)
+      .map((t) => ({ ...t, amount: Math.abs(t.amount) }));
     if (raw.length === 0) return { status: "NO_TRANSACTION", redactedText, parsed: [] };
 
     const dated = raw.map((t) => ({ ...t, date: resolveDate(t.date, receivedAt) }));
@@ -65,7 +76,7 @@ export async function processSms(
     const parsed = dated.map((t, i): ParsedSmsTransaction => ({
       date: t.date,
       description: t.description,
-      merchantName: categories[i]?.merchantName ?? t.description,
+      merchantName: categories[i]?.merchantName || t.description,
       amount: t.amount,
       type: t.type,
       category: categories[i]?.category ?? "Other",
