@@ -56,6 +56,7 @@ export function SmsImportCard() {
   const hasAccess = access === "ok" || (access === null && source?.status === "ACTIVE" && !!source.lastSyncedAt);
   const setSenders = (next: string[]) => save.mutate({ senderIds: next, enabled });
   const addSender = (id: string) => {
+    if (save.isPending) return;
     const v = id.trim();
     if (v && !senders.includes(v)) setSenders([...senders, v]);
     setDraft("");
@@ -111,14 +112,14 @@ export function SmsImportCard() {
             {senders.map((s) => (
               <span key={s} className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 font-mono">
                 {s}
-                <button type="button" aria-label={`Remove ${s}`} className="text-muted-foreground hover:text-foreground"
+                <button type="button" aria-label={`Remove ${s}`} className="text-muted-foreground hover:text-foreground disabled:opacity-50" disabled={save.isPending}
                   onClick={() => setSenders(senders.filter((x) => x !== s))}>×</button>
               </span>
             ))}
           </div>
           <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); addSender(draft); }}>
             <Input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="e.g. HBL or 8250" className="h-7 text-xs" maxLength={64} />
-            <Button type="submit" size="sm" variant="outline" className="h-7 text-xs" disabled={!draft.trim()}>Add</Button>
+            <Button type="submit" size="sm" variant="outline" className="h-7 text-xs" disabled={!draft.trim() || save.isPending}>Add</Button>
             <Button type="button" size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setShowSuggest((v) => !v)}>
               Suggest senders
             </Button>
@@ -130,7 +131,7 @@ export function SmsImportCard() {
               {suggestions.data?.length === 0 && <p className="text-muted-foreground">No likely bank senders found.</p>}
               {suggestions.data?.map((s) => (
                 <label key={s.sender} className="flex items-start gap-2 cursor-pointer">
-                  <input type="checkbox" className="mt-0.5" checked={senders.includes(s.sender)}
+                  <input type="checkbox" className="mt-0.5" checked={senders.includes(s.sender)} disabled={save.isPending}
                     onChange={(e) => (e.target.checked ? addSender(s.sender) : setSenders(senders.filter((x) => x !== s.sender)))} />
                   <span>
                     <span className="font-mono font-medium text-foreground">{s.sender}</span>
@@ -145,7 +146,7 @@ export function SmsImportCard() {
 
       <div className="flex items-center justify-between border-t border-border/40 pt-3 text-xs">
         <label className="flex items-center gap-2 cursor-pointer">
-          <input type="checkbox" checked={enabled} onChange={(e) => save.mutate({ senderIds: senders, enabled: e.target.checked })} />
+          <input type="checkbox" checked={enabled} disabled={save.isPending} onChange={(e) => save.mutate({ senderIds: senders, enabled: e.target.checked })} />
           Import SMS automatically
         </label>
         <span className={source?.status && source.status !== "ACTIVE" ? "text-red-600" : "text-muted-foreground"}>
