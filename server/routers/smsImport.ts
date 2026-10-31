@@ -113,19 +113,18 @@ export const smsImportRouter = createTRPCRouter({
       return { ok: true as const };
     }),
 
-  // Claiming the items (status → APPROVED) before inserting makes a second,
-  // concurrent approval of the same items match zero rows and roll back.
+  // Claim the items (status → APPROVED) first, then read their parsedJson, so an
+  // edit that commits before the claim is what gets saved and one after it
+  // matches zero rows. A concurrent second approval also claims zero and rolls back.
   approve: orgProcedure
     .input(z.object({ ids }))
     .mutation(({ ctx, input }) =>
       ctx.db.$transaction(async (tx) => {
         const organisationId = ctx.organisationId;
-        const items = await tx.smsImportItem.findMany({
+        const pending = await tx.smsImportItem.count({
           where: { id: { in: input.ids }, organisationId, status: "PENDING_REVIEW" },
-          select: { id: true, parsedJson: true },
         });
-        if (items.length === 0) return { approved: 0, transactions: 0 };
-        const rows = items.flatMap((it) => it.parsedJson as unknown as ParsedSmsTransaction[]);
+        if (pending === 0) return { approved: 0, transactions: 0 };
 
         const batch = await tx.statementImportBatch.create({
           data: {
@@ -133,16 +132,22 @@ export const smsImportRouter = createTRPCRouter({
             filename: `SMS import ${localDateString(new Date())}`,
             fileType: "SMS",
             status: "DONE",
-            transactionCount: rows.length,
+            transactionCount: 0,
           },
         });
         const claimed = await tx.smsImportItem.updateMany({
-          where: { id: { in: items.map((i) => i.id) }, organisationId, status: "PENDING_REVIEW" },
+          where: { id: { in: input.ids }, organisationId, status: "PENDING_REVIEW" },
           data: { status: "APPROVED", importBatchId: batch.id },
         });
-        if (claimed.count !== items.length) {
+        if (claimed.count === 0) {
           throw new TRPCError({ code: "CONFLICT", message: "Some of these were already approved. Refresh and try again." });
         }
+
+        const items = await tx.smsImportItem.findMany({
+          where: { importBatchId: batch.id, organisationId },
+          select: { parsedJson: true },
+        });
+        const rows = items.flatMap((it) => it.parsedJson as unknown as ParsedSmsTransaction[]);
 
         const org = await tx.organisation.findUnique({ where: { id: organisationId }, select: { hasSampleData: true } });
         if (org?.hasSampleData) {
@@ -164,7 +169,8 @@ export const smsImportRouter = createTRPCRouter({
             mccLabel: r.mccLabel,
           })),
         });
-        return { approved: items.length, transactions: rows.length };
+        await tx.statementImportBatch.update({ where: { id: batch.id }, data: { transactionCount: rows.length } });
+        return { approved: claimed.count, transactions: rows.length };
       }),
     ),
 

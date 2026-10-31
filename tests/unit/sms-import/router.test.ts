@@ -39,41 +39,58 @@ beforeEach(() => {
 });
 
 describe("smsImport.approve", () => {
-  it("creates one SMS batch with every parsed row and marks items APPROVED", async () => {
-    db.smsImportItem.findMany.mockResolvedValue([
-      { id: "i1", parsedJson: [txn] },
-      { id: "i2", parsedJson: [{ ...txn, merchantName: "Daraz", amount: 900, type: "CREDIT" }] },
-    ]);
+  const pendingOk = (n: number) => db.smsImportItem.count.mockResolvedValue(n);
+
+  it("creates one SMS batch with every claimed row and marks items APPROVED", async () => {
+    pendingOk(2);
     db.statementImportBatch.create.mockResolvedValue({ id: "b1" });
     db.smsImportItem.updateMany.mockResolvedValue({ count: 2 });
+    db.smsImportItem.findMany.mockResolvedValue([
+      { parsedJson: [txn] },
+      { parsedJson: [{ ...txn, merchantName: "Daraz", amount: 900, type: "CREDIT" }] },
+    ]);
     db.organisation.findUnique.mockResolvedValue({ hasSampleData: false });
 
     expect(await caller().approve({ ids: ["i1", "i2", "other-org"] })).toEqual({ approved: 2, transactions: 2 });
 
-    expect(db.smsImportItem.findMany.mock.calls[0]![0].where).toEqual({
+    expect(db.smsImportItem.count.mock.calls[0]![0].where).toEqual({
       id: { in: ["i1", "i2", "other-org"] }, organisationId: "org-1", status: "PENDING_REVIEW",
     });
     expect(db.statementImportBatch.create.mock.calls[0]![0].data).toMatchObject({
-      organisationId: "org-1", fileType: "SMS", status: "DONE", transactionCount: 2,
+      organisationId: "org-1", fileType: "SMS", status: "DONE",
     });
     expect(db.smsImportItem.updateMany.mock.calls[0]![0]).toEqual({
-      where: { id: { in: ["i1", "i2"] }, organisationId: "org-1", status: "PENDING_REVIEW" },
+      where: { id: { in: ["i1", "i2", "other-org"] }, organisationId: "org-1", status: "PENDING_REVIEW" },
       data: { status: "APPROVED", importBatchId: "b1" },
     });
+    expect(db.smsImportItem.findMany.mock.calls[0]![0].where).toEqual({ importBatchId: "b1", organisationId: "org-1" });
     const rows = db.statementTransaction.createMany.mock.calls[0]![0].data;
     expect(rows).toHaveLength(2);
     expect(rows[1]).toMatchObject({ organisationId: "org-1", importBatchId: "b1", merchantName: "Daraz", amount: 900, type: "CREDIT" });
     expect(rows[0]).not.toHaveProperty("possibleDuplicate");
+    expect(db.statementImportBatch.update.mock.calls[0]![0]).toEqual({ where: { id: "b1" }, data: { transactionCount: 2 } });
+  });
+
+  it("saves the parsedJson read after the claim, not an earlier one", async () => {
+    pendingOk(1);
+    db.statementImportBatch.create.mockResolvedValue({ id: "b1" });
+    db.smsImportItem.updateMany.mockResolvedValue({ count: 1 });
+    db.smsImportItem.findMany.mockResolvedValue([{ parsedJson: [{ ...txn, merchantName: "Edited", amount: 1 }] }]);
+    db.organisation.findUnique.mockResolvedValue({ hasSampleData: false });
+    await caller().approve({ ids: ["i1"] });
+    expect(db.smsImportItem.findMany).toHaveBeenCalledTimes(1);
+    expect(db.smsImportItem.updateMany.mock.invocationCallOrder[0]!).toBeLessThan(db.smsImportItem.findMany.mock.invocationCallOrder[0]!);
+    expect(db.statementTransaction.createMany.mock.calls[0]![0].data[0]).toMatchObject({ merchantName: "Edited", amount: 1 });
   });
 
   it("does nothing when no pending items match", async () => {
-    db.smsImportItem.findMany.mockResolvedValue([]);
+    pendingOk(0);
     expect(await caller().approve({ ids: ["x"] })).toEqual({ approved: 0, transactions: 0 });
     expect(db.statementImportBatch.create).not.toHaveBeenCalled();
   });
 
   it("aborts with CONFLICT when another approval claimed the items first", async () => {
-    db.smsImportItem.findMany.mockResolvedValue([{ id: "i1", parsedJson: [txn] }]);
+    pendingOk(1);
     db.statementImportBatch.create.mockResolvedValue({ id: "b1" });
     db.smsImportItem.updateMany.mockResolvedValue({ count: 0 });
     const err = await caller().approve({ ids: ["i1"] }).catch((e) => e);
@@ -83,9 +100,10 @@ describe("smsImport.approve", () => {
   });
 
   it("clears sample data before saving real transactions", async () => {
-    db.smsImportItem.findMany.mockResolvedValue([{ id: "i1", parsedJson: [txn] }]);
+    pendingOk(1);
     db.statementImportBatch.create.mockResolvedValue({ id: "b1" });
     db.smsImportItem.updateMany.mockResolvedValue({ count: 1 });
+    db.smsImportItem.findMany.mockResolvedValue([{ parsedJson: [txn] }]);
     db.organisation.findUnique.mockResolvedValue({ hasSampleData: true });
     await caller().approve({ ids: ["i1"] });
     expect(db.statementTransaction.deleteMany.mock.calls[0]![0]).toEqual({ where: { organisationId: "org-1", isSampleData: true } });
