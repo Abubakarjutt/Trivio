@@ -9,6 +9,7 @@ import { CurrencyPicker } from "./_components/currency-picker";
 import { TaxRegimePicker } from "./_components/tax-regime-picker";
 import { VoiceInputCard } from "./_components/voice-input-card";
 import { BackupCard } from "./_components/backup-card";
+import { SmsImportCard } from "./_components/sms-import-card";
 
 export default async function SettingsPage() {
   const session = await auth();
@@ -158,6 +159,9 @@ export default async function SettingsPage() {
             </div>
             <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
           </Link>
+
+          {/* SMS Import (macOS only — the card hides itself elsewhere) */}
+          <SmsImportCard />
 
           {/* Privacy & Data (GDPR) */}
           <div className="rounded-xl border border-border bg-card p-6 space-y-4">
