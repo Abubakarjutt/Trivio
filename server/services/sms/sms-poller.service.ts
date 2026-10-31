@@ -50,7 +50,8 @@ async function importOne(
     });
     return;
   }
-  const result = await deps.processSms(msg.text, msg.receivedAt, existing);
+  // Postgres TEXT/JSONB reject NUL characters.
+  const result = await deps.processSms(msg.text.replace(/\u0000/g, ""), msg.receivedAt, existing);
   await db.smsImportItem.create({
     data: {
       ...base,
@@ -60,6 +61,30 @@ async function importOne(
       errorMessage: result.status === "FAILED" ? result.error : null,
     },
   });
+}
+
+// One bad message must not block the org: record it as FAILED and move on.
+async function recordImportFailure(deps: PollerDeps, source: SourceRow, msg: ChatMessage, err: unknown): Promise<void> {
+  console.error("[sms] failed to import message", msg.guid, err);
+  try {
+    const where = { organisationId_messageGuid: { organisationId: source.organisationId, messageGuid: msg.guid } };
+    if (await deps.db.smsImportItem.findUnique({ where, select: { id: true } })) return;
+    await deps.db.smsImportItem.create({
+      data: {
+        organisationId: source.organisationId,
+        sourceId: source.id,
+        messageGuid: msg.guid,
+        sender: msg.sender,
+        receivedAt: msg.receivedAt,
+        text: "",
+        parsedJson: [],
+        status: "FAILED",
+        errorMessage: err instanceof Error ? err.message : String(err),
+      },
+    });
+  } catch (err2) {
+    console.error("[sms] could not record failed message", msg.guid, err2);
+  }
 }
 
 // lastRowId only ever moves to a message that is fully handled, so a crash
@@ -83,7 +108,11 @@ async function syncSource(deps: PollerDeps, source: SourceRow): Promise<void> {
     for (const msg of messages) {
       if (matches(msg.sender)) {
         existing ??= await loadExistingForDedup(deps.db, source.organisationId, deps.now());
-        await importOne(deps, source, msg, existing);
+        try {
+          await importOne(deps, source, msg, existing);
+        } catch (err) {
+          await recordImportFailure(deps, source, msg, err);
+        }
         await setRowId(msg.rowId);
         lastWritten = msg.rowId;
       }

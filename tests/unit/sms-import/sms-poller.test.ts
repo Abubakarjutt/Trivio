@@ -135,4 +135,29 @@ describe("runSmsTick", () => {
     await first;
     expect(db.smsSource.findMany).toHaveBeenCalledTimes(1);
   });
+
+  it("records a FAILED item and carries on when one message blows up", async () => {
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    db.smsSource.findMany.mockResolvedValue([source()]);
+    readMessages.mockResolvedValueOnce([msg(11), msg(12)]);
+    db.smsImportItem.create.mockRejectedValueOnce(new Error("invalid byte sequence"));
+    await runSmsTick(deps());
+    const created = db.smsImportItem.create.mock.calls.map((c) => c[0].data);
+    expect(created).toHaveLength(3);
+    expect(created[1]).toMatchObject({
+      messageGuid: "g-11", status: "FAILED", text: "", parsedJson: [], errorMessage: "invalid byte sequence",
+    });
+    expect(created[2]).toMatchObject({ messageGuid: "g-12", status: "PENDING_REVIEW" });
+    const updates = db.smsSource.update.mock.calls.map((c) => c[0].data);
+    expect(updates.map((d) => d.lastRowId).filter((v) => v !== undefined)).toEqual([11n, 12n]);
+    expect(updates.at(-1)).toEqual({ lastSyncedAt: NOW, status: "ACTIVE", lastError: null });
+    errSpy.mockRestore();
+  });
+
+  it("strips NUL characters before parsing", async () => {
+    db.smsSource.findMany.mockResolvedValue([source()]);
+    readMessages.mockResolvedValueOnce([msg(11, "HBL", "PKR 5\u0000 at X")]);
+    await runSmsTick(deps());
+    expect(processSms).toHaveBeenCalledWith("PKR 5 at X", NOW, []);
+  });
 });
