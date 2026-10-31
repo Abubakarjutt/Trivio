@@ -151,6 +151,8 @@ model Organisation {
   watchlists             Watchlist[]
   statementImportBatches StatementImportBatch[]
   statementTransactions  StatementTransaction[]
+  smsSource             SmsSource?
+  smsImportItems        SmsImportItem[]
   pfCycles               PfCycle[]
   // CRM
   crmLeads          CrmLead[]
@@ -688,6 +690,7 @@ enum StatementFileType {
   CSV
   IMAGE
   EMAIL
+  SMS
   MANUAL
 }
 
@@ -732,6 +735,7 @@ model StatementImportBatch {
   createdAt            DateTime              @default(now())
 
   transactions StatementTransaction[]
+  smsImportItems SmsImportItem[]
 
   @@index([organisationId])
 }
@@ -767,6 +771,66 @@ model StatementTransaction {
   @@index([goalId])
   @@index([organisationId, date])
   @@index([organisationId, category])
+}
+
+// ─── SMS Import ───────────────────────────────────────────────────────────────
+
+enum SmsSourceStatus {
+  ACTIVE
+  NO_ACCESS
+  ERROR
+}
+
+enum SmsImportStatus {
+  PENDING_REVIEW
+  APPROVED
+  DISMISSED
+  FAILED
+  NO_TRANSACTION
+}
+
+/// Reads bank SMS from the Mac's Messages database (macOS only).
+model SmsSource {
+  id             String          @id @default(cuid())
+  organisationId String          @unique
+  organisation   Organisation    @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  enabled        Boolean         @default(true)
+  /// Bank sender ids as the user typed them; matched after normalising.
+  senderIds      String[]
+  /// Highest chat.db message.ROWID processed; null = never synced (7-day look-back).
+  lastRowId      BigInt?
+  lastSyncedAt   DateTime?
+  status         SmsSourceStatus @default(ACTIVE)
+  lastError      String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  items SmsImportItem[]
+}
+
+/// One bank SMS waiting for (or past) review. Never a transaction by itself.
+model SmsImportItem {
+  id             String                @id @default(cuid())
+  organisationId String
+  organisation   Organisation          @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  sourceId       String
+  source         SmsSource             @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  messageGuid    String
+  sender         String
+  receivedAt     DateTime
+  /// SMS body after PII redaction.
+  text           String
+  /// ParsedSmsTransaction[] (server/services/sms/sms-import.service.ts)
+  parsedJson     Json
+  status         SmsImportStatus       @default(PENDING_REVIEW)
+  errorMessage   String?
+  importBatchId  String?
+  importBatch    StatementImportBatch? @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  @@unique([organisationId, messageGuid])
+  @@index([organisationId, status])
 }
 
 // ─── CRM Module ───────────────────────────────────────────────────────────────

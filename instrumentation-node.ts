@@ -21,10 +21,13 @@ export async function registerNode() {
 
   if (process.platform === "darwin") {
     try {
-      const { checkChatDbAccess } = await import("@/server/services/sms/messages-db");
-      console.info("[sms] chat.db access:", await checkChatDbAccess());
+      const messagesDb = await import("@/server/services/sms/messages-db");
+      const { processSms } = await import("@/server/services/sms/sms-import.service");
+      const { startSmsPoller } = await import("@/server/services/sms/sms-poller.service");
+      console.info("[sms] chat.db access:", await messagesDb.checkChatDbAccess());
+      startSmsPoller({ db, readMessages: messagesDb.readMessages, processSms, now: () => new Date() });
     } catch (err) {
-      console.error("[sms] access check failed:", err);
+      console.error("[sms] poller failed to start:", err);
     }
   }
 }
