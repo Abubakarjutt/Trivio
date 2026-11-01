@@ -5,6 +5,9 @@ import { seedDefaultChartOfAccounts } from "@/server/services/chart-of-accounts.
 import { SAMPLE_TRANSACTIONS } from "@/lib/sample-data";
 import { loadAccountingSampleData } from "@/lib/accounting-sample-data";
 
+// Never sent to the client: the key that makes counterparty tokens unguessable.
+const PRIVATE_ORG_FIELDS = { counterpartySecret: true } as const;
+
 const SUPPORTED_CURRENCIES = [
   { code: "USD", name: "US Dollar" },
   { code: "GBP", name: "British Pound" },
@@ -81,6 +84,7 @@ export const orgRouter = createTRPCRouter({
 
       let org = await ctx.db.organisation.findFirst({
         where: { users: { some: { id: userId } } },
+        omit: PRIVATE_ORG_FIELDS,
       });
 
       if (!org) {
@@ -91,6 +95,7 @@ export const orgRouter = createTRPCRouter({
             onboardingStep: "CURRENCY_TAX",
             users: { connect: { id: userId } },
           },
+          omit: PRIVATE_ORG_FIELDS,
         });
         await ctx.db.user.update({
           where: { id: userId },
@@ -104,6 +109,7 @@ export const orgRouter = createTRPCRouter({
             businessType: input.businessType,
             onboardingStep: "CURRENCY_TAX",
           },
+          omit: PRIVATE_ORG_FIELDS,
         });
       }
       return org;
@@ -136,6 +142,7 @@ export const orgRouter = createTRPCRouter({
           onboardingStep: "COMPLETE",
           onboardingComplete: true,
         },
+        omit: PRIVATE_ORG_FIELDS,
       });
 
       await seedDefaultChartOfAccounts(ctx.db, org.id);
@@ -149,6 +156,7 @@ export const orgRouter = createTRPCRouter({
     const org = await ctx.db.organisation.findUnique({
       where: { id: ctx.organisationId },
       include: { taxRegime: { include: { rates: true } } },
+      omit: PRIVATE_ORG_FIELDS,
     });
 
     // Use the canonical usageRecord counter — this is what the gate enforces
@@ -179,6 +187,7 @@ export const orgRouter = createTRPCRouter({
       return ctx.db.organisation.update({
         where: { id: ctx.organisationId },
         data: input,
+        omit: PRIVATE_ORG_FIELDS,
       });
     }),
 

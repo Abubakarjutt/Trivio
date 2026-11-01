@@ -67,7 +67,12 @@ export const authRouter = createTRPCRouter({
   me: protectedProcedure.query(async ({ ctx }) => {
     const user = await ctx.db.user.findUnique({
       where: { id: ctx.session.user.id },
-      include: { organisation: { include: { taxRegime: { include: { rates: true } } } } },
+      include: {
+        organisation: {
+          omit: { counterpartySecret: true },
+          include: { taxRegime: { include: { rates: true } } },
+        },
+      },
     });
     return user;
   }),
