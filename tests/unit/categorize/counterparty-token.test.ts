@@ -97,6 +97,11 @@ describe("tokenizeCounterparties", () => {
     expect(tok("[PHONE ••4567 #a03001234567]")).toBe("[PHONE ••4567 #a03001234567]");
     expect(redactPiiText(once)).toBe(once);
   });
+
+  it("keeps a token whose hash looks like 'acc'+digits intact through redactPiiText", () => {
+    const t = "Raast to [PHONE ••4567 #3acc12345670] A/C 12345678";
+    expect(redactPiiText(t)).toBe("Raast to [PHONE ••4567 #3acc12345670] A/C [ACCT REDACTED]");
+  });
 });
 
 describe("rule keys", () => {

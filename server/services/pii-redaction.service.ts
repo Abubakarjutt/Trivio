@@ -120,7 +120,18 @@ export function redactPii(text: string): RedactionResult {
     ibans: 0, sortCodes: 0, bsbs: 0, cards: 0,
     accountNumbers: 0, emails: 0, phones: 0,
   };
+  // Counterparty tokens ("[PHONE ••4567 #3acc12345670]") are already safe; their
+  // hex hash can look like "acc1234…", so redact only the text between them.
+  const redacted = text
+    .split(COUNTERPARTY_TOKEN_RE)
+    .map((part, i) => (i % 2 === 1 ? part : redactSegment(part, stats)))
+    .join("");
+  return { redacted, stats };
+}
 
+const COUNTERPARTY_TOKEN_RE = /(\[(?:PHONE|ACCT) ••\d{4} #[0-9a-f]{12}\])/;
+
+function redactSegment(text: string, stats: RedactionStats): string {
   let t = text;
 
   // ── IBANs ─────────────────────────────────────────────────────────────────
@@ -159,7 +170,7 @@ export function redactPii(text: string): RedactionResult {
   // ── International phone numbers (standalone) ───────────────────────────────
   t = t.replace(INTL_PHONE_RE, () => { stats.phones++; return "[PHONE REDACTED]"; });
 
-  return { redacted: t, stats };
+  return t;
 }
 
 /**
