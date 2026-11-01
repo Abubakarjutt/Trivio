@@ -355,6 +355,9 @@ export const smsImportRouter = createTRPCRouter({
           status: result.status,
           parsedJson: result.parsed as unknown as Prisma.InputJsonValue,
           errorMessage: result.status === "FAILED" ? result.error : null,
+          // Now a transaction to review: give it a notification (items from before
+          // notifications existed were closed when they were added).
+          ...(result.status === "PENDING_REVIEW" ? { notificationClosedAt: null } : {}),
         },
       });
       if (res.count === 0) throw new TRPCError({ code: "NOT_FOUND" });

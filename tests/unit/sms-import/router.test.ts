@@ -333,8 +333,17 @@ describe("smsImport.retry", () => {
     expect(db.smsImportItem.findFirst.mock.calls[0]![0].where).toEqual({ id: "i1", organisationId: "org-1", status: { in: ["FAILED", "NO_TRANSACTION"] } });
     expect(db.smsImportItem.updateMany.mock.calls[0]![0]).toEqual({
       where: { id: "i1", organisationId: "org-1", status: { in: ["FAILED", "NO_TRANSACTION"] } },
-      data: { status: "PENDING_REVIEW", parsedJson: [txn], errorMessage: null },
+      data: { status: "PENDING_REVIEW", parsedJson: [txn], errorMessage: null, notificationClosedAt: null },
     });
+  });
+
+  it("leaves notificationClosedAt alone when the retry still finds no transaction", async () => {
+    db.smsImportItem.findFirst.mockResolvedValue({ id: "i1", text: "Your OTP is 1234", receivedAt: new Date("2026-10-30T10:00:00Z") });
+    db.statementTransaction.findMany.mockResolvedValue([]);
+    svc.processSms.mockResolvedValue({ status: "NO_TRANSACTION", redactedText: "x", parsed: [] });
+    db.smsImportItem.updateMany.mockResolvedValue({ count: 1 });
+    await caller().retry({ id: "i1" });
+    expect(db.smsImportItem.updateMany.mock.calls[0]![0].data).not.toHaveProperty("notificationClosedAt");
   });
 
   it("returns NOT_FOUND when the item changed status while re-parsing", async () => {
