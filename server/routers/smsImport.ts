@@ -148,7 +148,7 @@ export const smsImportRouter = createTRPCRouter({
         const pending = await tx.smsImportItem.count({
           where: { id: { in: input.ids }, organisationId, status: "PENDING_REVIEW" },
         });
-        if (pending === 0) return { approved: 0, transactions: 0 };
+        if (pending === 0) return { approved: 0, transactions: 0, rulesSaved: 0, alsoAppliedTo: 0 };
 
         const batch = await tx.statementImportBatch.create({
           data: {
@@ -198,10 +198,49 @@ export const smsImportRouter = createTRPCRouter({
             category: r.category,
             mccCode: r.mccCode,
             mccLabel: r.mccLabel,
+            needsCategory: r.needsCategory ?? false,
+            ruleKind: r.ruleKey?.kind ?? null,
+            ruleMatchKey: r.ruleKey?.matchKey ?? null,
+            ruleLabel: r.ruleKey?.label ?? null,
           })),
         });
         await tx.statementImportBatch.update({ where: { id: batch.id }, data: { transactionCount: rows.length } });
-        return { approved: claimed.count, transactions: rows.length };
+        // "Always use…" answers become rules (the last answer for a key wins) and
+        // fill in other waiting SMS that still need a category for the same key.
+        const answers = new Map<string, { key: NonNullable<ParsedSmsTransaction["ruleKey"]>; category: string }>();
+        for (const r of rows) {
+          if (r.ruleKey && r.userCategorized && r.rememberRule !== false) {
+            answers.set(`${r.ruleKey.kind}:${r.ruleKey.matchKey}`, { key: r.ruleKey, category: r.category });
+          }
+        }
+        for (const { key, category } of answers.values()) {
+          await tx.categoryRule.upsert({
+            where: { organisationId_kind_matchKey: { organisationId, kind: key.kind, matchKey: key.matchKey } },
+            create: { organisationId, kind: key.kind, matchKey: key.matchKey, label: key.label, category },
+            update: { category, label: key.label },
+          });
+        }
+        let alsoAppliedTo = 0;
+        if (answers.size > 0) {
+          const others = await tx.smsImportItem.findMany({
+            where: { organisationId, status: "PENDING_REVIEW" },
+            select: { id: true, parsedJson: true },
+          });
+          for (const other of others) {
+            let changed = false;
+            const parsed = (other.parsedJson as unknown as ParsedSmsTransaction[]).map((p) => {
+              const hit = p.ruleKey && p.needsCategory ? answers.get(`${p.ruleKey.kind}:${p.ruleKey.matchKey}`) : undefined;
+              if (!hit) return p;
+              changed = true;
+              return { ...p, category: hit.category, mccLabel: hit.category, needsCategory: false, ruleApplied: true };
+            });
+            if (changed) {
+              await tx.smsImportItem.update({ where: { id: other.id }, data: { parsedJson: parsed as unknown as Prisma.InputJsonValue } });
+              alsoAppliedTo++;
+            }
+          }
+        }
+        return { approved: claimed.count, transactions: rows.length, rulesSaved: answers.size, alsoAppliedTo };
       }),
     ),
 
