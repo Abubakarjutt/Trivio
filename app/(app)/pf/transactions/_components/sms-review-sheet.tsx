@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import { trpc } from "@/lib/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,6 +13,9 @@ const POLL_MS = 60_000;
 
 export function SmsReviewBanner() {
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("smsReview") === "1") setOpen(true);
+  }, []);
   const { data: count = 0 } = trpc.smsImport.pendingCount.useQuery(undefined, { refetchInterval: POLL_MS });
   if (count === 0 && !open) return null;
   return (
@@ -31,6 +34,7 @@ export function SmsReviewBanner() {
 
 function SmsReviewSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const utils = trpc.useUtils();
+  const [, rerender] = useReducer((n: number) => n + 1, 0);
   const pending = trpc.smsImport.listItems.useQuery({ statuses: ["PENDING_REVIEW"] }, { enabled: open });
   const skipped = trpc.smsImport.listItems.useQuery({ statuses: ["NO_TRANSACTION", "FAILED"] }, { enabled: open });
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -84,6 +88,7 @@ function SmsReviewSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (
     onSuccess: (r) => {
       if (r.transactions === 0) toast.info("Nothing new to add");
       else toast.success(`Added ${r.transactions} transaction${r.transactions === 1 ? "" : "s"}`);
+      if (r.alsoAppliedTo > 0) toast.info(`Also applied to ${r.alsoAppliedTo} other SMS`);
       void refresh();
     },
     onError: (e) => { toast.error(e.message); void refresh(); },
@@ -102,6 +107,7 @@ function SmsReviewSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (
     const id = item.id;
     const rows = (drafts.current.get(id) ?? item.parsed).map((r, i) => (i === index ? { ...r, ...patch } : r));
     drafts.current.set(id, rows);
+    rerender();
     inflight.current.set(id, (inflight.current.get(id) ?? 0) + 1);
     const run = (chains.current.get(id) ?? Promise.resolve())
       .then(() => update.mutateAsync({ id, parsed: rows }))
@@ -149,7 +155,7 @@ function SmsReviewSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (
                   <p className="font-mono text-xs text-muted-foreground break-words">{item.text}</p>
                 </div>
               </div>
-              {item.parsed.map((row, i) => (
+              {(drafts.current.get(item.id) ?? item.parsed).map((row, i) => (
                 <div key={i} className="grid grid-cols-[7.5rem_1fr_6rem] items-center gap-2 pl-6">
                   <Input type="date" defaultValue={row.date} className="h-7 text-xs"
                     onBlur={(e) => { if (e.target.value && e.target.value !== row.date) editRow(item, i, { date: e.target.value }); }} />
@@ -158,7 +164,7 @@ function SmsReviewSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (
                   <div className="flex items-center gap-1">
                     <button type="button" title="Switch debit/credit"
                       className={`text-xs font-semibold ${row.type === "DEBIT" ? "text-red-500" : "text-emerald-500"}`}
-                      onClick={() => editRow(item, i, { type: ((drafts.current.get(item.id) ?? item.parsed)[i]?.type ?? row.type) === "DEBIT" ? "CREDIT" : "DEBIT" })}>
+                      onClick={() => editRow(item, i, { type: row.type === "DEBIT" ? "CREDIT" : "DEBIT" })}>
                       {row.type === "DEBIT" ? "−" : "+"}
                     </button>
                     <Input type="number" step="0.01" min="0" defaultValue={row.amount} className="h-7 text-xs tabular-nums"
@@ -169,11 +175,25 @@ function SmsReviewSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (
                         if (Number.isFinite(v) && v > 0 && v < 1e15 && v !== row.amount) editRow(item, i, { amount: v });
                       }} />
                   </div>
-                  <div className="col-span-3 flex items-center gap-2">
-                    <CategoryPicker value={row.category} onChange={(c) => editRow(item, i, { category: c })}
+                  <div className="col-span-3 flex flex-wrap items-center gap-2">
+                    <CategoryPicker value={row.category}
+                      onChange={(c) => editRow(item, i, { category: c, mccLabel: c, needsCategory: false, userCategorized: true, rememberRule: row.rememberRule ?? true })}
                       triggerClassName="h-6 px-2 text-xs rounded-full bg-muted" />
+                    {row.needsCategory && (
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">Where did this money go?</span>
+                    )}
+                    {row.ruleApplied && !row.userCategorized && (
+                      <span className="text-[11px] text-muted-foreground">remembered</span>
+                    )}
                     {row.possibleDuplicate && (
-                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800">Possible duplicate</span>
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">Possible duplicate</span>
+                    )}
+                    {row.ruleKey && row.userCategorized && (
+                      <label className="flex w-full items-center gap-1.5 text-[11px] text-muted-foreground">
+                        <input type="checkbox" checked={row.rememberRule !== false}
+                          onChange={(e) => editRow(item, i, { rememberRule: e.target.checked })} />
+                        Always use {row.category} for {row.ruleKey.label}
+                      </label>
                     )}
                   </div>
                 </div>
