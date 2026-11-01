@@ -116,6 +116,15 @@ describe("processSms rules", () => {
     expect(c.categorize).toHaveBeenCalledWith([{ description: "Raast transfer", counterpartyHint: "[PHONE ••4567 #0123456789ab]" }]);
   });
 
+  it("prefers the single phone token as the hint when an account token is also present", async () => {
+    pdf.parseTransactionsFromText.mockResolvedValue([{ date: "2026-10-30", description: "Raast transfer", amount: 5000, type: "DEBIT" }]);
+    const c = fakeCategorizer();
+    c.tokenize.mockImplementation((t: string) =>
+      t.replace("03001234567", "[PHONE ••4567 #0123456789ab]").replace("11112222333344", "[ACCT ••3344 #aaaaaaaaaaaa]"));
+    await processSms("Raast PKR 5,000 from A/C 11112222333344 to 03001234567", RECEIVED, [], c);
+    expect(c.categorize.mock.calls[0]![0]).toEqual([{ description: "Raast transfer", counterpartyHint: "[PHONE ••4567 #0123456789ab]" }]);
+  });
+
   it("tokenizes existing descriptions before duplicate detection", async () => {
     pdf.parseTransactionsFromText.mockResolvedValue([{ date: "2026-10-30", description: "Raast [PHONE ••4567 #0123456789ab]", amount: 5000, type: "DEBIT" }]);
     const r = await processSms("Raast PKR 5,000 to 03001234567", RECEIVED,

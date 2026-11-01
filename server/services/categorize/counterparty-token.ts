@@ -21,6 +21,11 @@ const LABELLED_PHONE_RE = /((?:phone|tel(?:ephone)?|mobile|mob)\s*:?\s*)(\+?\d[\
 // longer number or word (e.g. an existing token's hex hash).
 const PK_MOBILE_RE = /(?<![\w+#])(?:\+?92[\s-]?|0)3\d{2}[\s-]?\d{7}(?!\w)/g;
 const INTL_PHONE_RE = /\+\d{1,3}[\s-]?\(?\d{1,4}\)?[\s-]?\d{3,4}[\s-]?\d{3,6}/g;
+// A masked number ("0123XXXX4567", "****1234") is the user's own account as the
+// bank prints it; so is anything labelled "your A/C" / "your account".
+const MASK_AFTER_RE = /^[\s-]*[Xx*•]/;
+const MASK_BEFORE_RE = /[Xx*•][\s-]*$/;
+const OWN_ACCT_LABEL_RE = /\byour\s+$/i;
 
 function normaliseNumber(raw: string): string {
   let n = raw.replace(/[^0-9A-Za-z]/g, "").toUpperCase();
@@ -47,7 +52,18 @@ export function tokenizeCounterparties(text: string, secret: string): string {
     })
     .replace(
       LABELLED_ACCT_RE,
-      (_, label: string, num: string) => label + makeToken("ACCT", num, secret)
+      (m: string, label: string, num: string, offset: number, whole: string) => {
+        const before = whole.slice(0, offset);
+        const after = whole.slice(offset + m.length);
+        if (
+          OWN_ACCT_LABEL_RE.test(before) ||
+          MASK_AFTER_RE.test(after) ||
+          MASK_BEFORE_RE.test(before + label)
+        ) {
+          return m;
+        }
+        return label + makeToken("ACCT", num, secret);
+      }
     )
     .replace(
       LABELLED_PHONE_RE,
@@ -59,6 +75,11 @@ export function tokenizeCounterparties(text: string, secret: string): string {
 
 export function findTokens(text: string): string[] {
   return [...text.matchAll(TOKEN_RE)].map((m) => m[0]);
+}
+
+/** The counterparty to key on: a phone (who the money went to) beats an account number. */
+export function pickToken(tokens: string[]): string | undefined {
+  return tokens.find((t) => t.startsWith("[PHONE ")) ?? tokens[0];
 }
 
 export function hasCounterpartyToken(text: string): boolean {
@@ -82,7 +103,7 @@ export function candidateRuleKeys(
   hint?: string | null
 ): RuleKey[] {
   const keys: RuleKey[] = [];
-  const token = findTokens(description)[0] ?? (hint ? findTokens(hint)[0] : undefined);
+  const token = pickToken(findTokens(description)) ?? (hint ? pickToken(findTokens(hint)) : undefined);
   const cp = token ? tokenKey(token) : null;
   if (cp) keys.push(cp);
   const m = normaliseMerchant(merchantName);

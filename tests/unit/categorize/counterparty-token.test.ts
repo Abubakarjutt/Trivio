@@ -54,6 +54,37 @@ describe("tokenizeCounterparties", () => {
     expect(tok("A/C ****1234 debited")).toBe("A/C ****1234 debited");
   });
 
+  it("never tokenizes the user's own (masked or 'your') account number", () => {
+    const masked = "PKR 2,450.00 debited from your A/C 0123XXXX4567 at IMTIAZ";
+    expect(tok(masked)).toBe(masked);
+    expect(tok("A/C 0123XXXX4567 debited at IMTIAZ")).toBe("A/C 0123XXXX4567 debited at IMTIAZ");
+    expect(tok("A/C 0123-****-4567 debited")).toBe("A/C 0123-****-4567 debited");
+    const own = "Dear customer, your account 01234567890123 has been credited with PKR 500";
+    expect(tok(own)).toBe(own);
+    expect(tok("Your A/C No. 1234-5678-9012 was debited")).toBe("Your A/C No. 1234-5678-9012 was debited");
+    for (const t of [masked, own]) {
+      expect(findTokens(tok(t))).toEqual([]);
+      expect(candidateRuleKeys(tok(t), "").filter((k) => k.kind === "COUNTERPARTY")).toEqual([]);
+    }
+  });
+
+  it("keys a transfer from the user's own account on the recipient's phone", () => {
+    const t = tok("Rs 5,000 sent from your A/C 0123XXXX4567 to 0300-1234567 via Raast");
+    expect(findTokens(t)).toHaveLength(1);
+    expect(extractRuleKey(t, "Raast")).toMatchObject({
+      kind: "COUNTERPARTY",
+      label: "Transfers to ••4567",
+    });
+  });
+
+  it("prefers a PHONE token over an ACCT token for the rule key", () => {
+    const t = tok("IBFT from A/C 11112222333344 to 03001234567");
+    const tokens = findTokens(t);
+    expect(tokens.map((x) => x.slice(1, 6))).toEqual(["ACCT ", "PHONE"]);
+    const phoneHash = tokens[1]!.match(/#([0-9a-f]{12})/)![1];
+    expect(extractRuleKey(t, "IBFT")?.matchKey).toBe(phoneHash);
+  });
+
   it("rejects bogus IBAN-like patterns and non-label words before account numbers", () => {
     expect(tok("TX12 DEBIT CARD PURCHASE at DARAZ")).toBe("TX12 DEBIT CARD PURCHASE at DARAZ");
     expect(tok("Ref AB12 PAYMENT RECEIVED FROM ALI")).toBe("Ref AB12 PAYMENT RECEIVED FROM ALI");

@@ -87,8 +87,10 @@ export async function processSms(
     const dupes = new Set(detectDuplicates(dated, comparable).duplicates.map((d) => d.incoming));
     // One SMS is (almost always) one transaction: if it names exactly one counterparty,
     // that's who the money went to even if the parser's description dropped the token.
+    // A single phone wins over account numbers (a transfer names both).
     const tokens = [...new Set(findTokens(redactedText))];
-    const hint = tokens.length === 1 ? tokens[0]! : null;
+    const phones = tokens.filter((t) => t.startsWith("[PHONE "));
+    const hint = phones.length === 1 ? phones[0]! : tokens.length === 1 ? tokens[0]! : null;
     const categories = await categorizer.categorize(
       dated.map((t) => (hint && !t.description.includes(hint) ? { description: t.description, counterpartyHint: hint } : { description: t.description })),
     );
