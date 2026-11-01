@@ -45,6 +45,21 @@ describe("categoryRules", () => {
     });
   });
 
+  it("never sends the private match key to the client", async () => {
+    db.categoryRule.findMany.mockResolvedValue([]);
+    await caller().list();
+    const { select } = db.categoryRule.findMany.mock.calls[0]![0];
+    expect(select).not.toHaveProperty("matchKey");
+    expect(select).toMatchObject({ id: true, label: true, category: true });
+  });
+
+  it("is NOT_FOUND when updating a rule outside the org", async () => {
+    db.categoryRule.updateMany.mockResolvedValue({ count: 0 });
+    await expect(caller().update({ id: "x", category: "Rent" })).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+  });
+
   it("deletes within the org and is NOT_FOUND otherwise", async () => {
     db.categoryRule.deleteMany.mockResolvedValue({ count: 0 });
     await expect(caller().delete({ id: "x" })).rejects.toMatchObject({ code: "NOT_FOUND" });
