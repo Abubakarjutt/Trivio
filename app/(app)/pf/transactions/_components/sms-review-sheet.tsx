@@ -109,6 +109,7 @@ function SmsReviewSheet({
       utils.smsImport.pendingCount.invalidate(),
       utils.smsImport.notifications.invalidate(),
       utils.statementTransactions.list.invalidate(),
+      utils.statementTransactions.needsCategoryCount.invalidate(),
     ]);
   };
   const update = trpc.smsImport.updateItem.useMutation({

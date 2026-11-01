@@ -107,7 +107,8 @@ export default function PfTransactionsPage() {
 
   const list = trpc.statementTransactions.list.useQuery(
     {
-      ...range,
+      // The needs-category count is all-time, so the filtered list is too.
+      ...(needsCategoryOnly ? {} : range),
       category: category === "__all__" ? undefined : category,
       type: type === "__all__" ? undefined : (type as "DEBIT" | "CREDIT"),
       search: search || undefined,
@@ -150,6 +151,7 @@ export default function PfTransactionsPage() {
     onSuccess: () => {
       utils.statementTransactions.list.invalidate();
       utils.statementTransactions.summary.invalidate();
+      utils.statementTransactions.needsCategoryCount.invalidate();
       utils.goals.list.invalidate(); // a goal contribution is taken back off
     },
     onError: (e) => toast.error(e.message),
@@ -461,6 +463,7 @@ export default function PfTransactionsPage() {
           setCursor(undefined);
           utils.statementTransactions.list.invalidate();
           utils.statementTransactions.summary.invalidate();
+          utils.statementTransactions.needsCategoryCount.invalidate();
         }}
       />
 
@@ -484,6 +487,7 @@ export default function PfTransactionsPage() {
         onComplete={() => {
           utils.statementTransactions.list.invalidate();
           utils.statementTransactions.summary.invalidate();
+          utils.statementTransactions.needsCategoryCount.invalidate();
         }}
       />
     </div>
