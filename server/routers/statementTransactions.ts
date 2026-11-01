@@ -49,6 +49,7 @@ export const statementTransactionsRouter = createTRPCRouter({
         category: z.string().optional(),
         type: z.enum(["DEBIT", "CREDIT"]).optional(),
         search: z.string().optional(),
+        needsCategory: z.boolean().optional(),
         includeExcluded: z.boolean().default(false),
         cursor: z.string().optional(),
         limit: z.number().min(1).max(100).default(50),
@@ -59,6 +60,7 @@ export const statementTransactionsRouter = createTRPCRouter({
       const where: any = { organisationId: ctx.organisationId };
       if (!input.includeExcluded) where.isExcluded = false;
       if (input.category) where.category = input.category;
+      if (input.needsCategory !== undefined) where.needsCategory = input.needsCategory;
       if (input.type) where.type = input.type;
       if (input.search) where.merchantName = { contains: input.search, mode: "insensitive" };
 
@@ -87,6 +89,10 @@ export const statementTransactionsRouter = createTRPCRouter({
       return { items, nextCursor };
     }),
 
+  needsCategoryCount: orgProcedure.query(({ ctx }) =>
+    ctx.db.statementTransaction.count({ where: { organisationId: ctx.organisationId, needsCategory: true, isExcluded: false } }),
+  ),
+
   create: orgProcedure
     .input(
       z.object({
@@ -113,23 +119,43 @@ export const statementTransactionsRouter = createTRPCRouter({
     .input(
       z.object({
         id: z.string(),
-        category: z.string(),
+        category: z.string().min(1).max(100),
         mccCode: z.string().optional(),
         mccLabel: z.string().optional(),
+        /** "Always use this category" for this row's counterparty/merchant. */
+        remember: z.boolean().optional(),
       })
     )
     .mutation(async ({ ctx, input }) => {
-      const txn = await ctx.db.statementTransaction.findFirst({
-        where: { id: input.id, organisationId: ctx.organisationId },
-      });
+      const organisationId = ctx.organisationId;
+      const txn = await ctx.db.statementTransaction.findFirst({ where: { id: input.id, organisationId } });
       if (!txn) throw new TRPCError({ code: "NOT_FOUND" });
-      return ctx.db.statementTransaction.update({
-        where: { id: input.id },
-        data: {
-          category: input.category,
-          ...(input.mccCode !== undefined ? { mccCode: input.mccCode } : {}),
-          ...(input.mccLabel !== undefined ? { mccLabel: input.mccLabel } : {}),
-        },
+      return ctx.db.$transaction(async (tx) => {
+        const updated = await tx.statementTransaction.update({
+          where: { id: input.id },
+          data: {
+            category: input.category,
+            needsCategory: false,
+            ...(input.mccCode !== undefined ? { mccCode: input.mccCode } : {}),
+            ...(input.mccLabel !== undefined ? { mccLabel: input.mccLabel } : {}),
+          },
+        });
+        let alsoUpdated = 0;
+        if (input.remember && txn.ruleKind && txn.ruleMatchKey) {
+          const label = txn.ruleLabel ?? txn.merchantName;
+          await tx.categoryRule.upsert({
+            where: { organisationId_kind_matchKey: { organisationId, kind: txn.ruleKind, matchKey: txn.ruleMatchKey } },
+            create: { organisationId, kind: txn.ruleKind, matchKey: txn.ruleMatchKey, label, category: input.category },
+            update: { category: input.category, label },
+          });
+          // Only rows still waiting for an answer; anything already categorised stays as it is.
+          const res = await tx.statementTransaction.updateMany({
+            where: { organisationId, ruleKind: txn.ruleKind, ruleMatchKey: txn.ruleMatchKey, needsCategory: true, id: { not: txn.id } },
+            data: { category: input.category, mccLabel: input.category, needsCategory: false },
+          });
+          alsoUpdated = res.count;
+        }
+        return { ...updated, alsoUpdated };
       });
     }),
 
