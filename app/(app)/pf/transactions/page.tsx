@@ -391,7 +391,7 @@ export default function PfTransactionsPage() {
                         triggerClassName={`h-6 px-2 text-xs rounded-full ${CATEGORY_COLORS[txn.category] ?? CATEGORY_COLORS["Other"]}`}
                       />
                       {txn.needsCategory && (
-                        <span className="ml-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800">
+                        <span className="ml-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
                           Needs category
                         </span>
                       )}

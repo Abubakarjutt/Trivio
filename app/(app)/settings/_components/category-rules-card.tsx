@@ -1,9 +1,8 @@
 "use client";
 
-import { Trash2 } from "lucide-react";
+import { Tags, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc/client";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CategoryPicker } from "../../pf/transactions/_components/category-picker";
 
 export function CategoryRulesCard() {
@@ -19,15 +18,20 @@ export function CategoryRulesCard() {
   });
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Category rules</CardTitle>
-        <CardDescription>
-          Categories Trivio remembers for a transfer recipient or merchant. Changes apply to future
-          imports only.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-2">
+    <div className="bg-card shadow-card border-border/40 space-y-4 rounded-2xl border p-6">
+      <div className="flex items-center gap-3">
+        <div className="bg-muted flex h-8 w-8 items-center justify-center rounded-lg">
+          <Tags className="h-4 w-4" />
+        </div>
+        <div>
+          <h2 className="text-sm font-semibold">Category rules</h2>
+          <p className="text-muted-foreground mt-0.5 text-xs">
+            Categories Trivio remembers for a transfer recipient or merchant. Changes apply to
+            future imports only.
+          </p>
+        </div>
+      </div>
+      <div className="space-y-2">
         {isLoading && <p className="text-muted-foreground text-sm">Loading…</p>}
         {!isLoading && rules.length === 0 && (
           <p className="text-muted-foreground text-sm">
@@ -66,7 +70,7 @@ export function CategoryRulesCard() {
             </div>
           </div>
         ))}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
