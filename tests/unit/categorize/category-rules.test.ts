@@ -128,6 +128,27 @@ describe("categorizeWithRules", () => {
     expect(r).toMatchObject({ needsCategory: false, ruleKey: { kind: "MERCHANT", matchKey: "imtiaz" } });
   });
 
+  it("gives a row the AI fell back on no merchant key", async () => {
+    cat.categorizeBatch.mockResolvedValue([ai("Other", "POS XYZ 123", true)]);
+    const [r] = await categorizeWithRules(asDb(), "org-1", [{ description: "POS XYZ 123", type: "DEBIT" }]);
+    expect(r).toMatchObject({ needsCategory: true, ruleKey: null });
+    expect(db.categoryRule.findMany).not.toHaveBeenCalled();
+  });
+
+  it("keeps the counterparty key when the AI fell back", async () => {
+    cat.categorizeBatch.mockResolvedValue([ai("Other", `Raast ${token}`, true)]);
+    const [r] = await categorizeWithRules(asDb(), "org-1", [{ description: `Raast ${token}`, type: "DEBIT" }]);
+    expect(r!.ruleKey).toMatchObject({ kind: "COUNTERPARTY", matchKey: `${hash}:D` });
+  });
+
+  it("names a pre-AI rule hit after the rule, not the tokenized description", async () => {
+    db.categoryRule.findMany.mockResolvedValueOnce([
+      { id: "r1", kind: "COUNTERPARTY", matchKey: `${hash}:D`, label: "Transfers to ••4567", category: "Rent" },
+    ]);
+    const [r] = await categorizeWithRules(asDb(), "org-1", [{ description: `Raast ${token}`, type: "DEBIT" }]);
+    expect(r!.merchantName).toBe("Transfers to ••4567");
+  });
+
   it("returns [] for no rows", async () => {
     expect(await categorizeWithRules(asDb(), "org-1", [])).toEqual([]);
   });

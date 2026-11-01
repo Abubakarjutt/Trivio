@@ -101,7 +101,8 @@ export async function categorizeWithRules(
     const hit = before[i]!.map((k) => rulesBefore.get(keyOf(k))).find(Boolean);
     if (!hit) return;
     used.set(hit.id, (used.get(hit.id) ?? 0) + 1);
-    out[i] = fromRule(hit, r.merchantName || r.description, before[i]![0] ?? null);
+    // No merchant name yet: show the rule's label, never the raw (tokenized) description.
+    out[i] = fromRule(hit, r.merchantName || hit.label, before[i]![0] ?? null);
   });
 
   // 2. The AI for the rest, then merchant rules on its cleaned merchant names.
@@ -110,8 +111,14 @@ export async function categorizeWithRules(
     const ai = await categorizeBatch(rest.map((i) => rows[i]!.description));
     const merchantOf = (j: number) =>
       ai[j]?.merchantName || rows[rest[j]!]!.merchantName || rows[rest[j]!]!.description;
+    // When the AI fell back, its "merchant" is just the description: no merchant key.
     const after = rest.map((i, j) =>
-      extractRuleKey(rows[i]!.description, merchantOf(j), rows[i]!.counterpartyHint, rows[i]!.type),
+      extractRuleKey(
+        rows[i]!.description,
+        ai[j] && !ai[j]!.fallback ? merchantOf(j) : "",
+        rows[i]!.counterpartyHint,
+        rows[i]!.type,
+      ),
     );
     const merchantKeys = after.filter((k): k is RuleKey => k?.kind === "MERCHANT");
     const rulesAfter = await loadRules(db, organisationId, merchantKeys);
