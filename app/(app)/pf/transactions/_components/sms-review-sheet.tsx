@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useReducer, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { trpc } from "@/lib/trpc/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,17 +14,32 @@ const POLL_MS = 60_000;
 
 export function SmsReviewBanner() {
   const [open, setOpen] = useState(false);
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("smsReview") === "1") setOpen(true);
-  }, []);
-  const { data: count = 0 } = trpc.smsImport.pendingCount.useQuery(undefined, { refetchInterval: POLL_MS });
+    if (searchParams.get("smsReview") !== "1") return;
+    setOpen(true);
+    const rest = new URLSearchParams(searchParams.toString());
+    rest.delete("smsReview");
+    const qs = rest.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  }, [searchParams, pathname, router]);
+  const { data: count = 0 } = trpc.smsImport.pendingCount.useQuery(undefined, {
+    refetchInterval: POLL_MS,
+  });
   if (count === 0 && !open) return null;
   return (
     <>
       {count > 0 && (
-        <button type="button" onClick={() => setOpen(true)}
-          className="flex w-full items-center justify-between rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-left text-sm text-blue-800 hover:bg-blue-100">
-          <span>📱 {count} transaction{count === 1 ? "" : "s"} from SMS to review</span>
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="flex w-full items-center justify-between rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-left text-sm text-blue-800 hover:bg-blue-100"
+        >
+          <span>
+            📱 {count} transaction{count === 1 ? "" : "s"} from SMS to review
+          </span>
           <span className="font-semibold">Review</span>
         </button>
       )}
@@ -32,11 +48,23 @@ export function SmsReviewBanner() {
   );
 }
 
-function SmsReviewSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+function SmsReviewSheet({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+}) {
   const utils = trpc.useUtils();
   const [, rerender] = useReducer((n: number) => n + 1, 0);
-  const pending = trpc.smsImport.listItems.useQuery({ statuses: ["PENDING_REVIEW"] }, { enabled: open });
-  const skipped = trpc.smsImport.listItems.useQuery({ statuses: ["NO_TRANSACTION", "FAILED"] }, { enabled: open });
+  const pending = trpc.smsImport.listItems.useQuery(
+    { statuses: ["PENDING_REVIEW"] },
+    { enabled: open }
+  );
+  const skipped = trpc.smsImport.listItems.useQuery(
+    { statuses: ["NO_TRANSACTION", "FAILED"] },
+    { enabled: open }
+  );
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showSkipped, setShowSkipped] = useState(false);
   const seen = useRef(new Set<string>());
@@ -56,6 +84,7 @@ function SmsReviewSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (
     for (const item of pending.data ?? []) {
       if (!inflight.current.get(item.id)) drafts.current.set(item.id, item.parsed);
     }
+    rerender();
   }, [pending.data]);
 
   // New items start selected unless they look like duplicates. Refetches after
@@ -91,21 +120,41 @@ function SmsReviewSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (
       if (r.alsoAppliedTo > 0) toast.info(`Also applied to ${r.alsoAppliedTo} other SMS`);
       void refresh();
     },
-    onError: (e) => { toast.error(e.message); void refresh(); },
+    onError: (e) => {
+      toast.error(e.message);
+      void refresh();
+    },
   });
   const dismiss = trpc.smsImport.dismiss.useMutation({
     onSuccess: () => void refresh(),
-    onError: (e) => { toast.error(e.message); void refresh(); },
+    onError: (e) => {
+      toast.error(e.message);
+      void refresh();
+    },
   });
-  const retry = trpc.smsImport.retry.useMutation({ onSuccess: () => void refresh(), onError: (e) => toast.error(e.message) });
+  const retry = trpc.smsImport.retry.useMutation({
+    onSuccess: () => void refresh(),
+    onError: (e) => toast.error(e.message),
+  });
 
   const busy = approve.isPending || dismiss.isPending;
   const ids = [...selected];
   const toggle = (id: string) =>
-    setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
-  const editRow = (item: { id: string; parsed: ParsedSmsTransaction[] }, index: number, patch: Partial<ParsedSmsTransaction>) => {
+    setSelected((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  const editRow = (
+    item: { id: string; parsed: ParsedSmsTransaction[] },
+    index: number,
+    patch: Partial<ParsedSmsTransaction>
+  ) => {
     const id = item.id;
-    const rows = (drafts.current.get(id) ?? item.parsed).map((r, i) => (i === index ? { ...r, ...patch } : r));
+    const rows = (drafts.current.get(id) ?? item.parsed).map((r, i) =>
+      i === index ? { ...r, ...patch } : r
+    );
     drafts.current.set(id, rows);
     rerender();
     inflight.current.set(id, (inflight.current.get(id) ?? 0) + 1);
@@ -113,6 +162,7 @@ function SmsReviewSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (
       .then(() => update.mutateAsync({ id, parsed: rows }))
       .catch(() => {
         failed.current.add(id);
+        drafts.current.delete(id);
         setRevisions((r) => ({ ...r, [id]: (r[id] ?? 0) + 1 }));
       })
       .finally(() => {
@@ -121,6 +171,7 @@ function SmsReviewSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (
         if (left === 0) {
           if (failed.current.has(id)) drafts.current.delete(id);
           void utils.smsImport.listItems.invalidate();
+          rerender();
         }
       });
     chains.current.set(id, run);
@@ -134,8 +185,12 @@ function SmsReviewSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (
     if (bad) void refresh();
     return !bad;
   };
-  const approveSelected = async () => { if (await flushSaves(ids)) approve.mutate({ ids }); };
-  const dismissSelected = async () => { if (await flushSaves(ids)) dismiss.mutate({ ids }); };
+  const approveSelected = async () => {
+    if (await flushSaves(ids)) approve.mutate({ ids });
+  };
+  const dismissSelected = async () => {
+    if (await flushSaves(ids)) dismiss.mutate({ ids });
+  };
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -145,53 +200,109 @@ function SmsReviewSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (
         </SheetHeader>
 
         <div className="flex-1 space-y-3 overflow-y-auto py-4">
-          {pending.data?.length === 0 && <p className="text-sm text-muted-foreground">Nothing to review.</p>}
+          {pending.data?.length === 0 && (
+            <p className="text-muted-foreground text-sm">Nothing to review.</p>
+          )}
           {pending.data?.map((item) => (
-            <div key={`${item.id}:${revisions[item.id] ?? 0}`} className="rounded-xl border border-border/60 p-3 space-y-2">
+            <div
+              key={`${item.id}:${revisions[item.id] ?? 0}`}
+              className="border-border/60 space-y-2 rounded-xl border p-3"
+            >
               <div className="flex items-start gap-2">
-                <input type="checkbox" className="mt-1" checked={selected.has(item.id)} onChange={() => toggle(item.id)} aria-label="Select" />
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={selected.has(item.id)}
+                  onChange={() => toggle(item.id)}
+                  aria-label="Select"
+                />
                 <div className="min-w-0 flex-1">
-                  <p className="text-[11px] text-muted-foreground">{item.sender} · {new Date(item.receivedAt).toLocaleString()}</p>
-                  <p className="font-mono text-xs text-muted-foreground break-words">{item.text}</p>
+                  <p className="text-muted-foreground text-[11px]">
+                    {item.sender} · {new Date(item.receivedAt).toLocaleString()}
+                  </p>
+                  <p className="text-muted-foreground font-mono text-xs break-words">{item.text}</p>
                 </div>
               </div>
               {(drafts.current.get(item.id) ?? item.parsed).map((row, i) => (
                 <div key={i} className="grid grid-cols-[7.5rem_1fr_6rem] items-center gap-2 pl-6">
-                  <Input type="date" defaultValue={row.date} className="h-7 text-xs"
-                    onBlur={(e) => { if (e.target.value && e.target.value !== row.date) editRow(item, i, { date: e.target.value }); }} />
-                  <Input defaultValue={row.merchantName} className="h-7 text-xs" maxLength={200}
-                    onBlur={(e) => { const v = e.target.value.trim(); if (v && v !== row.merchantName) editRow(item, i, { merchantName: v }); }} />
+                  <Input
+                    type="date"
+                    defaultValue={row.date}
+                    className="h-7 text-xs"
+                    onBlur={(e) => {
+                      if (e.target.value && e.target.value !== row.date)
+                        editRow(item, i, { date: e.target.value });
+                    }}
+                  />
+                  <Input
+                    defaultValue={row.merchantName}
+                    className="h-7 text-xs"
+                    maxLength={200}
+                    onBlur={(e) => {
+                      const v = e.target.value.trim();
+                      if (v && v !== row.merchantName) editRow(item, i, { merchantName: v });
+                    }}
+                  />
                   <div className="flex items-center gap-1">
-                    <button type="button" title="Switch debit/credit"
+                    <button
+                      type="button"
+                      title="Switch debit/credit"
                       className={`text-xs font-semibold ${row.type === "DEBIT" ? "text-red-500" : "text-emerald-500"}`}
-                      onClick={() => editRow(item, i, { type: row.type === "DEBIT" ? "CREDIT" : "DEBIT" })}>
+                      onClick={() =>
+                        editRow(item, i, { type: row.type === "DEBIT" ? "CREDIT" : "DEBIT" })
+                      }
+                    >
                       {row.type === "DEBIT" ? "−" : "+"}
                     </button>
-                    <Input type="number" step="0.01" min="0" defaultValue={row.amount} className="h-7 text-xs tabular-nums"
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      defaultValue={row.amount}
+                      className="h-7 text-xs tabular-nums"
                       onBlur={(e) => {
                         const raw = e.target.value.trim();
                         if (raw === "") return;
                         const v = Number(raw);
-                        if (Number.isFinite(v) && v > 0 && v < 1e15 && v !== row.amount) editRow(item, i, { amount: v });
-                      }} />
+                        if (Number.isFinite(v) && v > 0 && v < 1e15 && v !== row.amount)
+                          editRow(item, i, { amount: v });
+                      }}
+                    />
                   </div>
                   <div className="col-span-3 flex flex-wrap items-center gap-2">
-                    <CategoryPicker value={row.category}
-                      onChange={(c) => editRow(item, i, { category: c, mccLabel: c, needsCategory: false, userCategorized: true, rememberRule: row.rememberRule ?? true })}
-                      triggerClassName="h-6 px-2 text-xs rounded-full bg-muted" />
+                    <CategoryPicker
+                      value={row.category}
+                      onChange={(c) =>
+                        editRow(item, i, {
+                          category: c,
+                          mccLabel: c,
+                          needsCategory: false,
+                          userCategorized: true,
+                          rememberRule: row.rememberRule ?? true,
+                        })
+                      }
+                      triggerClassName="h-6 px-2 text-xs rounded-full bg-muted"
+                    />
                     {row.needsCategory && (
-                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">Where did this money go?</span>
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+                        Where did this money go?
+                      </span>
                     )}
                     {row.ruleApplied && !row.userCategorized && (
-                      <span className="text-[11px] text-muted-foreground">remembered</span>
+                      <span className="text-muted-foreground text-[11px]">remembered</span>
                     )}
                     {row.possibleDuplicate && (
-                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">Possible duplicate</span>
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
+                        Possible duplicate
+                      </span>
                     )}
                     {row.ruleKey && row.userCategorized && (
-                      <label className="flex w-full items-center gap-1.5 text-[11px] text-muted-foreground">
-                        <input type="checkbox" checked={row.rememberRule !== false}
-                          onChange={(e) => editRow(item, i, { rememberRule: e.target.checked })} />
+                      <label className="text-muted-foreground flex w-full items-center gap-1.5 text-[11px]">
+                        <input
+                          type="checkbox"
+                          checked={row.rememberRule !== false}
+                          onChange={(e) => editRow(item, i, { rememberRule: e.target.checked })}
+                        />
                         Always use {row.category} for {row.ruleKey.label}
                       </label>
                     )}
@@ -203,29 +314,60 @@ function SmsReviewSheet({ open, onOpenChange }: { open: boolean; onOpenChange: (
 
           {(skipped.data?.length ?? 0) > 0 && (
             <div className="pt-2">
-              <button type="button" className="text-xs font-medium text-muted-foreground" onClick={() => setShowSkipped((v) => !v)}>
+              <button
+                type="button"
+                className="text-muted-foreground text-xs font-medium"
+                onClick={() => setShowSkipped((v) => !v)}
+              >
                 {showSkipped ? "▾" : "▸"} Skipped ({skipped.data!.length})
               </button>
-              {showSkipped && skipped.data!.map((item) => (
-                <div key={item.id} className="mt-2 flex items-start justify-between gap-2 rounded-lg bg-muted/40 p-2">
-                  <div className="min-w-0">
-                    <p className="text-[11px] text-muted-foreground">
-                      {item.status === "FAILED" ? `Couldn't read: ${item.errorMessage ?? "unknown error"}` : "No transaction found"}
-                    </p>
-                    <p className="font-mono text-xs text-muted-foreground break-words">{item.text}</p>
+              {showSkipped &&
+                skipped.data!.map((item) => (
+                  <div
+                    key={item.id}
+                    className="bg-muted/40 mt-2 flex items-start justify-between gap-2 rounded-lg p-2"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-muted-foreground text-[11px]">
+                        {item.status === "FAILED"
+                          ? `Couldn't read: ${item.errorMessage ?? "unknown error"}`
+                          : "No transaction found"}
+                      </p>
+                      <p className="text-muted-foreground font-mono text-xs break-words">
+                        {item.text}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 gap-1">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-6 text-xs"
+                        disabled={retry.isPending || !item.text}
+                        onClick={() => retry.mutate({ id: item.id })}
+                      >
+                        Retry
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 text-xs"
+                        onClick={() => dismiss.mutate({ ids: [item.id] })}
+                      >
+                        Hide
+                      </Button>
+                    </div>
                   </div>
-                  <div className="flex shrink-0 gap-1">
-                    <Button size="sm" variant="outline" className="h-6 text-xs" disabled={retry.isPending || !item.text} onClick={() => retry.mutate({ id: item.id })}>Retry</Button>
-                    <Button size="sm" variant="ghost" className="h-6 text-xs" onClick={() => dismiss.mutate({ ids: [item.id] })}>Hide</Button>
-                  </div>
-                </div>
-              ))}
+                ))}
             </div>
           )}
         </div>
 
         <SheetFooter className="gap-2 border-t pt-3">
-          <Button variant="outline" disabled={busy || ids.length === 0} onClick={() => void dismissSelected()}>
+          <Button
+            variant="outline"
+            disabled={busy || ids.length === 0}
+            onClick={() => void dismissSelected()}
+          >
             Dismiss selected
           </Button>
           <Button disabled={busy || ids.length === 0} onClick={() => void approveSelected()}>
