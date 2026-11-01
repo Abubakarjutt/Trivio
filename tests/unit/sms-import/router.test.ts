@@ -293,6 +293,27 @@ describe("smsImport.updateItem merge", () => {
     expect(saved.data.parsedJson[0]).toMatchObject({ category: "Rent", ruleKey: stored.ruleKey, ruleApplied: false, needsCategory: false, userCategorized: true });
   });
 
+  it("re-keys a counterparty row for its new direction when the user flips debit/credit", async () => {
+    const stored = { ...txn, ruleKey: { kind: "COUNTERPARTY" as const, matchKey: "0123456789ab:D", label: "Transfers to ••4567" }, ruleApplied: true, needsCategory: false };
+    db.smsImportItem.findFirst.mockResolvedValue({ parsedJson: [stored] });
+    db.smsImportItem.updateMany.mockResolvedValue({ count: 1 });
+    await caller().updateItem({ id: "i1", parsed: [{ ...stored, type: "CREDIT" }] });
+    expect(db.smsImportItem.updateMany.mock.calls[0]![0].data.parsedJson[0]).toMatchObject({
+      type: "CREDIT",
+      ruleKey: { kind: "COUNTERPARTY", matchKey: "0123456789ab:C", label: "Money from ••4567" },
+      ruleApplied: false,
+      needsCategory: true,
+    });
+  });
+
+  it("keeps a merchant key when the direction flips", async () => {
+    const key = { kind: "MERCHANT", matchKey: "kfc", label: "KFC" };
+    db.smsImportItem.findFirst.mockResolvedValue({ parsedJson: [{ ...txn, ruleKey: key }] });
+    db.smsImportItem.updateMany.mockResolvedValue({ count: 1 });
+    await caller().updateItem({ id: "i1", parsed: [{ ...txn, type: "CREDIT" }] });
+    expect(db.smsImportItem.updateMany.mock.calls[0]![0].data.parsedJson[0].ruleKey).toEqual(key);
+  });
+
   it("rejects a different number of rows", async () => {
     db.smsImportItem.findFirst.mockResolvedValue({ parsedJson: [txn, txn] });
     await expect(caller().updateItem({ id: "i1", parsed: [txn] })).rejects.toMatchObject({ code: "BAD_REQUEST" });

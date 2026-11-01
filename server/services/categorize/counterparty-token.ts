@@ -101,6 +101,16 @@ function tokenKey(token: string, type: TxnDirection): RuleKey | null {
   return { kind: "COUNTERPARTY", matchKey: `${m[3]}:${type === "CREDIT" ? "C" : "D"}`, label };
 }
 
+// The same counterparty key for the other direction, for when the user flips a
+// row between debit and credit. Merchant keys don't carry a direction.
+export function redirectRuleKey(key: RuleKey, type: TxnDirection): RuleKey {
+  if (key.kind !== "COUNTERPARTY") return key;
+  const hash = key.matchKey.replace(/:[CD]$/, "");
+  const who = key.label.replace(/^(Money from|Transfers to) /, "");
+  const label = type === "CREDIT" ? `Money from ${who}` : `Transfers to ${who}`;
+  return { kind: "COUNTERPARTY", matchKey: `${hash}:${type === "CREDIT" ? "C" : "D"}`, label };
+}
+
 export function candidateRuleKeys(
   description: string,
   merchantName: string,

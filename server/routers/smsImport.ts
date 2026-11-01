@@ -13,6 +13,7 @@ import {
   type ParsedSmsTransaction,
 } from "@/server/services/sms/sms-import.service";
 import { createImportCategorizer } from "@/server/services/categorize/category-rules.service";
+import { redirectRuleKey } from "@/server/services/categorize/counterparty-token";
 import {
   answerKey,
   applyAnswersToFlaggedTransactions,
@@ -163,11 +164,22 @@ export const smsImportRouter = createTRPCRouter({
           message: "This SMS changed. Refresh and try again.",
         });
       }
-      const merged = input.parsed.map((row, i) => ({
-        ...row,
-        ruleKey: stored[i]?.ruleKey ?? null,
-        ruleApplied: stored[i]?.ruleApplied ?? false,
-      }));
+      const merged = input.parsed.map((row, i) => {
+        const before = stored[i];
+        const ruleKey = before?.ruleKey ?? null;
+        const ruleApplied = before?.ruleApplied ?? false;
+        // A counterparty key carries the direction, so flipping debit/credit
+        // re-keys the row; a rule's guess for the other direction no longer holds.
+        if (ruleKey?.kind === "COUNTERPARTY" && before && row.type !== before.type) {
+          return {
+            ...row,
+            ruleKey: redirectRuleKey(ruleKey, row.type),
+            ruleApplied: false,
+            needsCategory: row.userCategorized ? row.needsCategory : true,
+          };
+        }
+        return { ...row, ruleKey, ruleApplied };
+      });
       const res = await ctx.db.smsImportItem.updateMany({
         where,
         data: { parsedJson: merged as unknown as Prisma.InputJsonValue },
