@@ -44,9 +44,13 @@ const ids = z.array(z.string().min(1)).min(1).max(500);
 
 export const smsImportRouter = createTRPCRouter({
   getSource: orgProcedure.query(async ({ ctx }) => {
-    const source = await ctx.db.smsSource.findUnique({ where: { organisationId: ctx.organisationId } });
+    const source = await ctx.db.smsSource.findUnique({
+      where: { organisationId: ctx.organisationId },
+    });
     const approvedCount = source
-      ? await ctx.db.smsImportItem.count({ where: { organisationId: ctx.organisationId, status: "APPROVED" } })
+      ? await ctx.db.smsImportItem.count({
+          where: { organisationId: ctx.organisationId, status: "APPROVED" },
+        })
       : 0;
     return {
       platformSupported: process.platform === "darwin",
@@ -63,7 +67,12 @@ export const smsImportRouter = createTRPCRouter({
   }),
 
   saveSource: orgProcedure
-    .input(z.object({ senderIds: z.array(z.string().trim().min(1).max(64)).max(20), enabled: z.boolean() }))
+    .input(
+      z.object({
+        senderIds: z.array(z.string().trim().min(1).max(64)).max(20),
+        enabled: z.boolean(),
+      })
+    )
     .mutation(async ({ ctx, input }) => {
       const senderIds = [...new Set(input.senderIds)];
       await ctx.db.smsSource.upsert({
@@ -106,13 +115,26 @@ export const smsImportRouter = createTRPCRouter({
         where: { organisationId: ctx.organisationId, status: { in: input.statuses } },
         orderBy: { receivedAt: "desc" },
         take: 200,
-        select: { id: true, sender: true, receivedAt: true, text: true, parsedJson: true, status: true, errorMessage: true },
+        select: {
+          id: true,
+          sender: true,
+          receivedAt: true,
+          text: true,
+          parsedJson: true,
+          status: true,
+          errorMessage: true,
+        },
       });
-      return items.map(({ parsedJson, ...rest }) => ({ ...rest, parsed: parsedJson as unknown as ParsedSmsTransaction[] }));
+      return items.map(({ parsedJson, ...rest }) => ({
+        ...rest,
+        parsed: parsedJson as unknown as ParsedSmsTransaction[],
+      }));
     }),
 
   pendingCount: orgProcedure.query(({ ctx }) =>
-    ctx.db.smsImportItem.count({ where: { organisationId: ctx.organisationId, status: "PENDING_REVIEW" } }),
+    ctx.db.smsImportItem.count({
+      where: { organisationId: ctx.organisationId, status: "PENDING_REVIEW" },
+    })
   ),
 
   // The client edits what the user sees; which rule a row belongs to (and whether a
@@ -120,19 +142,29 @@ export const smsImportRouter = createTRPCRouter({
   updateItem: orgProcedure
     .input(z.object({ id: z.string().min(1), parsed: z.array(parsedTxn).min(1).max(20) }))
     .mutation(async ({ ctx, input }) => {
-      const where = { id: input.id, organisationId: ctx.organisationId, status: "PENDING_REVIEW" as const };
+      const where = {
+        id: input.id,
+        organisationId: ctx.organisationId,
+        status: "PENDING_REVIEW" as const,
+      };
       const item = await ctx.db.smsImportItem.findFirst({ where, select: { parsedJson: true } });
       if (!item) throw new TRPCError({ code: "NOT_FOUND" });
       const stored = item.parsedJson as unknown as ParsedSmsTransaction[];
       if (stored.length !== input.parsed.length) {
-        throw new TRPCError({ code: "BAD_REQUEST", message: "This SMS changed. Refresh and try again." });
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "This SMS changed. Refresh and try again.",
+        });
       }
       const merged = input.parsed.map((row, i) => ({
         ...row,
         ruleKey: stored[i]?.ruleKey ?? null,
         ruleApplied: stored[i]?.ruleApplied ?? false,
       }));
-      const res = await ctx.db.smsImportItem.updateMany({ where, data: { parsedJson: merged as unknown as Prisma.InputJsonValue } });
+      const res = await ctx.db.smsImportItem.updateMany({
+        where,
+        data: { parsedJson: merged as unknown as Prisma.InputJsonValue },
+      });
       if (res.count === 0) throw new TRPCError({ code: "NOT_FOUND" });
       return { ok: true as const };
     }),
@@ -140,139 +172,195 @@ export const smsImportRouter = createTRPCRouter({
   // Claim the items (status → APPROVED) first, then read their parsedJson, so an
   // edit that commits before the claim is what gets saved and one after it
   // matches zero rows. A concurrent second approval also claims zero and rolls back.
-  approve: orgProcedure
-    .input(z.object({ ids }))
-    .mutation(({ ctx, input }) =>
-      ctx.db.$transaction(async (tx) => {
-        const organisationId = ctx.organisationId;
-        const pending = await tx.smsImportItem.count({
-          where: { id: { in: input.ids }, organisationId, status: "PENDING_REVIEW" },
-        });
-        if (pending === 0) return { approved: 0, transactions: 0, rulesSaved: 0, alsoAppliedTo: 0 };
-
-        const batch = await tx.statementImportBatch.create({
-          data: {
-            organisationId,
-            filename: `SMS import ${localDateString(new Date())}`,
-            fileType: "SMS",
-            status: "DONE",
-            transactionCount: 0,
-          },
-        });
-        const claimed = await tx.smsImportItem.updateMany({
-          where: { id: { in: input.ids }, organisationId, status: "PENDING_REVIEW" },
-          data: { status: "APPROVED", importBatchId: batch.id },
-        });
-        if (claimed.count === 0) {
-          throw new TRPCError({ code: "CONFLICT", message: "Some of these were already approved. Refresh and try again." });
-        }
-
-        const items = await tx.smsImportItem.findMany({
-          where: { importBatchId: batch.id, organisationId },
-          select: { parsedJson: true },
-        });
-        const rows = items.flatMap((it) => it.parsedJson as unknown as ParsedSmsTransaction[]);
-        // parsedJson is only as good as whatever wrote it; re-check before it becomes money.
-        if (!z.array(parsedTxn).safeParse(rows).success) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: "One of the selected SMS has an invalid amount or date. Fix or dismiss it, then try again.",
-          });
-        }
-
-        const org = await tx.organisation.findUnique({ where: { id: organisationId }, select: { hasSampleData: true } });
-        if (org?.hasSampleData) {
-          await tx.statementTransaction.deleteMany({ where: { organisationId, isSampleData: true } });
-          await tx.organisation.update({ where: { id: organisationId }, data: { hasSampleData: false } });
-        }
-
-        await tx.statementTransaction.createMany({
-          data: rows.map((r) => ({
-            organisationId,
-            importBatchId: batch.id,
-            date: new Date(r.date),
-            description: r.description,
-            merchantName: r.merchantName,
-            amount: r.amount,
-            type: r.type,
-            category: r.category,
-            mccCode: r.mccCode,
-            mccLabel: r.mccLabel,
-            needsCategory: r.needsCategory ?? false,
-            ruleKind: r.ruleKey?.kind ?? null,
-            ruleMatchKey: r.ruleKey?.matchKey ?? null,
-            ruleLabel: r.ruleKey?.label ?? null,
-          })),
-        });
-        await tx.statementImportBatch.update({ where: { id: batch.id }, data: { transactionCount: rows.length } });
-        // "Always use…" answers become rules (the last answer for a key wins) and
-        // fill in other waiting SMS that still need a category for the same key.
-        const answers = new Map<string, { key: NonNullable<ParsedSmsTransaction["ruleKey"]>; category: string }>();
-        for (const r of rows) {
-          if (r.ruleKey && r.userCategorized && r.rememberRule !== false) {
-            answers.set(`${r.ruleKey.kind}:${r.ruleKey.matchKey}`, { key: r.ruleKey, category: r.category });
-          }
-        }
-        for (const { key, category } of answers.values()) {
-          await tx.categoryRule.upsert({
-            where: { organisationId_kind_matchKey: { organisationId, kind: key.kind, matchKey: key.matchKey } },
-            create: { organisationId, kind: key.kind, matchKey: key.matchKey, label: key.label, category },
-            update: { category, label: key.label },
-          });
-        }
-        let alsoAppliedTo = 0;
-        if (answers.size > 0) {
-          const others = await tx.smsImportItem.findMany({
-            where: { organisationId, status: "PENDING_REVIEW" },
-            select: { id: true, parsedJson: true },
-          });
-          for (const other of others) {
-            let changed = false;
-            const parsed = (other.parsedJson as unknown as ParsedSmsTransaction[]).map((p) => {
-              const hit = p.ruleKey && p.needsCategory ? answers.get(`${p.ruleKey.kind}:${p.ruleKey.matchKey}`) : undefined;
-              if (!hit) return p;
-              changed = true;
-              return { ...p, category: hit.category, mccLabel: hit.category, needsCategory: false, ruleApplied: true };
-            });
-            if (changed) {
-              await tx.smsImportItem.update({ where: { id: other.id }, data: { parsedJson: parsed as unknown as Prisma.InputJsonValue } });
-              alsoAppliedTo++;
-            }
-          }
-        }
-        return { approved: claimed.count, transactions: rows.length, rulesSaved: answers.size, alsoAppliedTo };
-      }),
-    ),
-
-  dismiss: orgProcedure
-    .input(z.object({ ids }))
-    .mutation(async ({ ctx, input }) => {
-      const res = await ctx.db.smsImportItem.updateMany({
-        where: {
-          id: { in: input.ids },
-          organisationId: ctx.organisationId,
-          status: { in: ["PENDING_REVIEW", "FAILED", "NO_TRANSACTION"] },
-        },
-        data: { status: "DISMISSED" },
+  approve: orgProcedure.input(z.object({ ids })).mutation(({ ctx, input }) =>
+    ctx.db.$transaction(async (tx) => {
+      const organisationId = ctx.organisationId;
+      const pending = await tx.smsImportItem.count({
+        where: { id: { in: input.ids }, organisationId, status: "PENDING_REVIEW" },
       });
-      return { dismissed: res.count };
-    }),
+      if (pending === 0) return { approved: 0, transactions: 0, rulesSaved: 0, alsoAppliedTo: 0 };
+
+      const batch = await tx.statementImportBatch.create({
+        data: {
+          organisationId,
+          filename: `SMS import ${localDateString(new Date())}`,
+          fileType: "SMS",
+          status: "DONE",
+          transactionCount: 0,
+        },
+      });
+      const claimed = await tx.smsImportItem.updateMany({
+        where: { id: { in: input.ids }, organisationId, status: "PENDING_REVIEW" },
+        data: { status: "APPROVED", importBatchId: batch.id },
+      });
+      if (claimed.count === 0) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "Some of these were already approved. Refresh and try again.",
+        });
+      }
+
+      const items = await tx.smsImportItem.findMany({
+        where: { importBatchId: batch.id, organisationId },
+        select: { parsedJson: true },
+      });
+      const rows = items.flatMap((it) => it.parsedJson as unknown as ParsedSmsTransaction[]);
+      // parsedJson is only as good as whatever wrote it; re-check before it becomes money.
+      if (!z.array(parsedTxn).safeParse(rows).success) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            "One of the selected SMS has an invalid amount or date. Fix or dismiss it, then try again.",
+        });
+      }
+
+      const org = await tx.organisation.findUnique({
+        where: { id: organisationId },
+        select: { hasSampleData: true },
+      });
+      if (org?.hasSampleData) {
+        await tx.statementTransaction.deleteMany({ where: { organisationId, isSampleData: true } });
+        await tx.organisation.update({
+          where: { id: organisationId },
+          data: { hasSampleData: false },
+        });
+      }
+
+      await tx.statementTransaction.createMany({
+        data: rows.map((r) => ({
+          organisationId,
+          importBatchId: batch.id,
+          date: new Date(r.date),
+          description: r.description,
+          merchantName: r.merchantName,
+          amount: r.amount,
+          type: r.type,
+          category: r.category,
+          mccCode: r.mccCode,
+          mccLabel: r.mccLabel,
+          needsCategory: r.needsCategory ?? false,
+          ruleKind: r.ruleKey?.kind ?? null,
+          ruleMatchKey: r.ruleKey?.matchKey ?? null,
+          ruleLabel: r.ruleKey?.label ?? null,
+        })),
+      });
+      await tx.statementImportBatch.update({
+        where: { id: batch.id },
+        data: { transactionCount: rows.length },
+      });
+      // "Always use…" answers become rules (the last answer for a key wins) and
+      // fill in other waiting SMS that still need a category for the same key.
+      const answers = new Map<
+        string,
+        { key: NonNullable<ParsedSmsTransaction["ruleKey"]>; category: string }
+      >();
+      for (const r of rows) {
+        if (r.ruleKey && r.userCategorized && r.rememberRule !== false) {
+          answers.set(`${r.ruleKey.kind}:${r.ruleKey.matchKey}`, {
+            key: r.ruleKey,
+            category: r.category,
+          });
+        }
+      }
+      for (const { key, category } of answers.values()) {
+        await tx.categoryRule.upsert({
+          where: {
+            organisationId_kind_matchKey: {
+              organisationId,
+              kind: key.kind,
+              matchKey: key.matchKey,
+            },
+          },
+          create: {
+            organisationId,
+            kind: key.kind,
+            matchKey: key.matchKey,
+            label: key.label,
+            category,
+          },
+          update: { category, label: key.label },
+        });
+      }
+      let alsoAppliedTo = 0;
+      if (answers.size > 0) {
+        const others = await tx.smsImportItem.findMany({
+          where: { organisationId, status: "PENDING_REVIEW" },
+          select: { id: true, parsedJson: true },
+        });
+        for (const other of others) {
+          let changed = false;
+          const parsed = (other.parsedJson as unknown as ParsedSmsTransaction[]).map((p) => {
+            const hit =
+              p.ruleKey && p.needsCategory
+                ? answers.get(`${p.ruleKey.kind}:${p.ruleKey.matchKey}`)
+                : undefined;
+            if (!hit) return p;
+            changed = true;
+            return {
+              ...p,
+              category: hit.category,
+              mccLabel: hit.category,
+              needsCategory: false,
+              ruleApplied: true,
+            };
+          });
+          if (changed) {
+            await tx.smsImportItem.update({
+              where: { id: other.id },
+              data: { parsedJson: parsed as unknown as Prisma.InputJsonValue },
+            });
+            alsoAppliedTo++;
+          }
+        }
+      }
+      return {
+        approved: claimed.count,
+        transactions: rows.length,
+        rulesSaved: answers.size,
+        alsoAppliedTo,
+      };
+    })
+  ),
+
+  dismiss: orgProcedure.input(z.object({ ids })).mutation(async ({ ctx, input }) => {
+    const res = await ctx.db.smsImportItem.updateMany({
+      where: {
+        id: { in: input.ids },
+        organisationId: ctx.organisationId,
+        status: { in: ["PENDING_REVIEW", "FAILED", "NO_TRANSACTION"] },
+      },
+      data: { status: "DISMISSED" },
+    });
+    return { dismissed: res.count };
+  }),
 
   retry: orgProcedure
     .input(z.object({ id: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
       const item = await ctx.db.smsImportItem.findFirst({
-        where: { id: input.id, organisationId: ctx.organisationId, status: { in: ["FAILED", "NO_TRANSACTION"] } },
+        where: {
+          id: input.id,
+          organisationId: ctx.organisationId,
+          status: { in: ["FAILED", "NO_TRANSACTION"] },
+        },
         select: { id: true, text: true, receivedAt: true },
       });
       if (!item) throw new TRPCError({ code: "NOT_FOUND" });
-      if (!item.text) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "This message has no readable text." });
+      if (!item.text)
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: "This message has no readable text.",
+        });
       const existing = await loadExistingForDedup(ctx.db, ctx.organisationId, new Date());
       const categorizer = await createImportCategorizer(ctx.db, ctx.organisationId);
       const result = await processSms(item.text, item.receivedAt, existing, categorizer);
       // Guarded on status: a Hide/dismiss that lands while we re-parse wins.
       const res = await ctx.db.smsImportItem.updateMany({
-        where: { id: item.id, organisationId: ctx.organisationId, status: { in: ["FAILED", "NO_TRANSACTION"] } },
+        where: {
+          id: item.id,
+          organisationId: ctx.organisationId,
+          status: { in: ["FAILED", "NO_TRANSACTION"] },
+        },
         data: {
           status: result.status,
           parsedJson: result.parsed as unknown as Prisma.InputJsonValue,
@@ -281,5 +369,51 @@ export const smsImportRouter = createTRPCRouter({
       });
       if (res.count === 0) throw new TRPCError({ code: "NOT_FOUND" });
       return { status: result.status };
+    }),
+
+  // One notification per SMS that reached review, until the user closes it.
+  notifications: orgProcedure.query(async ({ ctx }) => {
+    const items = await ctx.db.smsImportItem.findMany({
+      where: {
+        organisationId: ctx.organisationId,
+        notificationClosedAt: null,
+        status: { in: ["PENDING_REVIEW", "APPROVED", "DISMISSED"] },
+      },
+      orderBy: { receivedAt: "desc" },
+      take: 50,
+      select: { id: true, receivedAt: true, parsedJson: true },
+    });
+    return items.flatMap(({ id, receivedAt, parsedJson }) => {
+      // Defensive: a malformed row is skipped rather than failing the whole list.
+      if (!Array.isArray(parsedJson)) return [];
+      const rows = parsedJson as unknown as ParsedSmsTransaction[];
+      const first = rows[0];
+      if (!first || typeof first !== "object") return [];
+      return [
+        {
+          id,
+          receivedAt,
+          amount: first.amount,
+          type: first.type,
+          merchantName: first.merchantName,
+          category: first.category,
+          counterpartyLabel: first.ruleKey?.kind === "COUNTERPARTY" ? first.ruleKey.label : null,
+          flagged: !!first.needsCategory,
+          ruleApplied: !!first.ruleApplied,
+          extraRows: rows.length - 1,
+        },
+      ];
+    });
+  }),
+
+  closeNotification: orgProcedure
+    .input(z.object({ id: z.string().min(1) }))
+    .mutation(async ({ ctx, input }) => {
+      const res = await ctx.db.smsImportItem.updateMany({
+        where: { id: input.id, organisationId: ctx.organisationId },
+        data: { notificationClosedAt: new Date() },
+      });
+      if (res.count === 0) throw new TRPCError({ code: "NOT_FOUND" });
+      return { ok: true as const };
     }),
 });

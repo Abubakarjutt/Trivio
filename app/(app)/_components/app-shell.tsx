@@ -5,6 +5,7 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Sidebar } from "./sidebar";
 import { MobileHeader } from "./mobile-header";
 import { ChatPanel } from "./chat-panel";
+import { SmsNotifications } from "@/components/sms-notifications";
 import { trpc } from "@/lib/trpc/client";
 
 interface Props {
@@ -18,27 +19,33 @@ export function AppShell({ orgName, children }: Props) {
   const hasSampleData = org?.hasSampleData ?? false;
 
   return (
-    <div className="flex h-screen overflow-hidden paper-grain bg-background">
+    <div className="paper-grain bg-background flex h-screen overflow-hidden">
       {/* Desktop sidebar */}
-      <aside className="hidden md:flex md:shrink-0" style={{ boxShadow: "4px 0 24px -8px rgba(8,27,18,0.35)" }}>
+      <aside
+        className="hidden md:flex md:shrink-0"
+        style={{ boxShadow: "4px 0 24px -8px rgba(8,27,18,0.35)" }}
+      >
         <Sidebar orgName={orgName} hasSampleData={hasSampleData} />
       </aside>
 
       {/* Mobile drawer */}
       <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
-        <SheetContent side="left" className="p-0 w-56">
+        <SheetContent side="left" className="w-56 p-0">
           <SheetTitle className="sr-only">Navigation</SheetTitle>
-          <Sidebar orgName={orgName} hasSampleData={hasSampleData} onNavigate={() => setDrawerOpen(false)} />
+          <Sidebar
+            orgName={orgName}
+            hasSampleData={hasSampleData}
+            onNavigate={() => setDrawerOpen(false)}
+          />
         </SheetContent>
       </Sheet>
 
       <main id="main-content" className="flex flex-1 flex-col overflow-hidden">
         <MobileHeader orgName={orgName} onMenuClick={() => setDrawerOpen(true)} />
-        <div className="flex-1 overflow-y-auto">
-          {children}
-        </div>
+        <div className="flex-1 overflow-y-auto">{children}</div>
       </main>
       <ChatPanel />
+      <SmsNotifications />
     </div>
   );
 }

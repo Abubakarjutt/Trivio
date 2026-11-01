@@ -107,6 +107,7 @@ function SmsReviewSheet({
     await Promise.all([
       utils.smsImport.listItems.invalidate(),
       utils.smsImport.pendingCount.invalidate(),
+      utils.smsImport.notifications.invalidate(),
       utils.statementTransactions.list.invalidate(),
     ]);
   };
