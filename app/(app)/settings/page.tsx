@@ -10,6 +10,7 @@ import { TaxRegimePicker } from "./_components/tax-regime-picker";
 import { VoiceInputCard } from "./_components/voice-input-card";
 import { BackupCard } from "./_components/backup-card";
 import { SmsImportCard } from "./_components/sms-import-card";
+import { CategoryRulesCard } from "./_components/category-rules-card";
 
 export default async function SettingsPage() {
   const session = await auth();
@@ -162,6 +163,9 @@ export default async function SettingsPage() {
 
           {/* SMS Import (macOS only — the card hides itself elsewhere) */}
           <SmsImportCard />
+
+          {/* Category Rules */}
+          <CategoryRulesCard />
 
           {/* Privacy & Data (GDPR) */}
           <div className="rounded-xl border border-border bg-card p-6 space-y-4">
