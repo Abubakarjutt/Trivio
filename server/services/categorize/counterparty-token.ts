@@ -12,9 +12,11 @@ export interface RuleKey {
   label: string;
 }
 
-const TOKEN_RE = /\[(PHONE|ACCT) ••([0-9A-Z]{4}) #([0-9a-f]{12})\]/g;
-const IBAN_RE = /\b[A-Z]{2}\d{2} ?(?:[A-Z0-9] ?){11,30}\b/g;
-const LABELLED_ACCT_RE = /(a(?:cc(?:ount)?|\/c)\.?\s*(?:no\.?|number|#|:)?\s*:?\s*)(\d[\d -]{2,18}\d)/gi;
+const TOKEN_RE = /\[(PHONE|ACCT) ••(\d{4}) #([0-9a-f]{12})\]/g;
+const IBAN_RE =
+  /\b[A-Z]{2}\d{2}(?:\s?[A-Z0-9]{4})*\s?[A-Z0-9]{1,4}(?=\s|$|\b)/g;
+const LABELLED_ACCT_RE =
+  /\b(a(?:cc(?:ount)?|\/c)\.?\s*(?:no\.?|number|#|:)?\s*:?\s*)(\d[\d -]{2,18}\d)/gi;
 const LABELLED_PHONE_RE = /((?:phone|tel(?:ephone)?|mobile|mob)\s*:?\s*)(\+?\d[\d\s()-]{6,18}\d)/gi;
 // Pakistani mobiles: 03XX-XXXXXXX, +92 3XX XXXXXXX, 923XXXXXXXXX. Not inside a
 // longer number or word (e.g. an existing token's hex hash).
@@ -35,9 +37,24 @@ function makeToken(kind: "PHONE" | "ACCT", raw: string, secret: string): string 
 
 export function tokenizeCounterparties(text: string, secret: string): string {
   return text
-    .replace(IBAN_RE, (m) => makeToken("ACCT", m, secret))
-    .replace(LABELLED_ACCT_RE, (_, label: string, num: string) => label + makeToken("ACCT", num, secret))
-    .replace(LABELLED_PHONE_RE, (_, label: string, num: string) => label + makeToken("PHONE", num, secret))
+    .replace(IBAN_RE, (m) => {
+      const n = normaliseNumber(m);
+      // Validate IBAN: must have at least 8 digits and end with 4 digits
+      const digitCount = (n.match(/\d/g) || []).length;
+      if (digitCount >= 8 && /\d{4}$/.test(n)) {
+        return makeToken("ACCT", m, secret);
+      }
+      return m;
+    })
+    .replace(
+      LABELLED_ACCT_RE,
+      (_, label: string, num: string) => label + makeToken("ACCT", num, secret)
+    )
+    .replace(
+      LABELLED_PHONE_RE,
+      (_, label: string, num: string) =>
+        label + makeToken("PHONE", num, secret)
+    )
     .replace(PK_MOBILE_RE, (m) => makeToken("PHONE", m, secret))
     .replace(INTL_PHONE_RE, (m) => makeToken("PHONE", m, secret));
 }
@@ -61,16 +78,25 @@ function tokenKey(token: string): RuleKey | null {
   return { kind: "COUNTERPARTY", matchKey: m[3]!, label };
 }
 
-export function candidateRuleKeys(description: string, merchantName: string, hint?: string | null): RuleKey[] {
+export function candidateRuleKeys(
+  description: string,
+  merchantName: string,
+  hint?: string | null
+): RuleKey[] {
   const keys: RuleKey[] = [];
   const token = findTokens(description)[0] ?? (hint ? findTokens(hint)[0] : undefined);
   const cp = token ? tokenKey(token) : null;
   if (cp) keys.push(cp);
   const m = normaliseMerchant(merchantName);
-  if (m) keys.push({ kind: "MERCHANT", matchKey: m, label: merchantName.trim().replace(/\s+/g, " ") });
+  if (m)
+    keys.push({ kind: "MERCHANT", matchKey: m, label: merchantName.trim().replace(/\s+/g, " ") });
   return keys;
 }
 
-export function extractRuleKey(description: string, merchantName: string, hint?: string | null): RuleKey | null {
+export function extractRuleKey(
+  description: string,
+  merchantName: string,
+  hint?: string | null
+): RuleKey | null {
   return candidateRuleKeys(description, merchantName, hint)[0] ?? null;
 }
