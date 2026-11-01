@@ -108,7 +108,8 @@ export function candidateRuleKeys(
   type: TxnDirection
 ): RuleKey[] {
   const keys: RuleKey[] = [];
-  const token = pickToken(findTokens(description)) ?? (hint ? pickToken(findTokens(hint)) : undefined);
+  const token =
+    pickToken(findTokens(description)) ?? (hint ? pickToken(findTokens(hint)) : undefined);
   const cp = token ? tokenKey(token, type) : null;
   if (cp) keys.push(cp);
   const m = normaliseMerchant(merchantName);
