@@ -18,10 +18,17 @@ const caller = () =>
     ip: "test",
   } as Parameters<typeof createCaller>[0]);
 
-const ORG = { id: "org-1", name: "Acme", currency: "PKR", hasSampleData: false, counterpartySecret: "s".repeat(64) };
+const ORG = {
+  id: "org-1",
+  name: "Acme",
+  currency: "PKR",
+  hasSampleData: false,
+  counterpartySecret: "s".repeat(64),
+};
 // Behaves like Prisma: a field in `omit` is not returned.
-const honourOmit = (row: Record<string, unknown>) => async (args: { omit?: Record<string, boolean> }) =>
-  Object.fromEntries(Object.entries(row).filter(([k]) => !args?.omit?.[k]));
+const honourOmit =
+  (row: Record<string, unknown>) => async (args: { omit?: Record<string, boolean> }) =>
+    Object.fromEntries(Object.entries(row).filter(([k]) => !args?.omit?.[k]));
 
 beforeEach(() => {
   db = makeDb();
