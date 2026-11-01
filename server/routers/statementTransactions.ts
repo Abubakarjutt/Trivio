@@ -8,12 +8,7 @@ import {
 import { ownPfCategories } from "@/server/services/pf-categories.service";
 import { CATEGORY_NAMES } from "@/lib/categories";
 import { buildInsights } from "@/server/services/pf-insights.service";
-import {
-  dateOf,
-  listPeriods,
-  localToday,
-  periodLabel,
-} from "@/server/services/pf-cycle.service";
+import { dateOf, listPeriods, localToday, periodLabel } from "@/server/services/pf-cycle.service";
 
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a YYYY-MM-DD date");
 
@@ -90,7 +85,9 @@ export const statementTransactionsRouter = createTRPCRouter({
     }),
 
   needsCategoryCount: orgProcedure.query(({ ctx }) =>
-    ctx.db.statementTransaction.count({ where: { organisationId: ctx.organisationId, needsCategory: true, isExcluded: false } }),
+    ctx.db.statementTransaction.count({
+      where: { organisationId: ctx.organisationId, needsCategory: true, isExcluded: false },
+    })
   ),
 
   create: orgProcedure
@@ -128,7 +125,9 @@ export const statementTransactionsRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       const organisationId = ctx.organisationId;
-      const txn = await ctx.db.statementTransaction.findFirst({ where: { id: input.id, organisationId } });
+      const txn = await ctx.db.statementTransaction.findFirst({
+        where: { id: input.id, organisationId },
+      });
       if (!txn) throw new TRPCError({ code: "NOT_FOUND" });
       return ctx.db.$transaction(async (tx) => {
         const updated = await tx.statementTransaction.update({
@@ -144,13 +143,31 @@ export const statementTransactionsRouter = createTRPCRouter({
         if (input.remember && txn.ruleKind && txn.ruleMatchKey) {
           const label = txn.ruleLabel ?? txn.merchantName;
           await tx.categoryRule.upsert({
-            where: { organisationId_kind_matchKey: { organisationId, kind: txn.ruleKind, matchKey: txn.ruleMatchKey } },
-            create: { organisationId, kind: txn.ruleKind, matchKey: txn.ruleMatchKey, label, category: input.category },
+            where: {
+              organisationId_kind_matchKey: {
+                organisationId,
+                kind: txn.ruleKind,
+                matchKey: txn.ruleMatchKey,
+              },
+            },
+            create: {
+              organisationId,
+              kind: txn.ruleKind,
+              matchKey: txn.ruleMatchKey,
+              label,
+              category: input.category,
+            },
             update: { category: input.category, label },
           });
           // Only rows still waiting for an answer; anything already categorised stays as it is.
           const res = await tx.statementTransaction.updateMany({
-            where: { organisationId, ruleKind: txn.ruleKind, ruleMatchKey: txn.ruleMatchKey, needsCategory: true, id: { not: txn.id } },
+            where: {
+              organisationId,
+              ruleKind: txn.ruleKind,
+              ruleMatchKey: txn.ruleMatchKey,
+              needsCategory: true,
+              id: { not: txn.id },
+            },
             data: { category: input.category, mccLabel: input.category, needsCategory: false },
           });
           alsoUpdated = res.count;

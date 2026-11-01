@@ -122,9 +122,11 @@ describe("runAppAction", () => {
           user: { findUnique: vi.fn().mockResolvedValue({ organisationId: "org-1" }) },
         } as unknown as PrismaClient,
         "user-1",
-        "statementTransactions.updateCategory", {
-        id: "t1",
-      })
+        "statementTransactions.updateCategory",
+        {
+          id: "t1",
+        }
+      )
     ).rejects.toThrow(/category/);
   });
 
