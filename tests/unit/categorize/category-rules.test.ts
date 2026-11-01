@@ -36,14 +36,14 @@ beforeEach(() => {
 describe("categorizeWithRules", () => {
   it("applies a counterparty rule without calling the AI", async () => {
     db.categoryRule.findMany.mockResolvedValueOnce([
-      { id: "r1", kind: "COUNTERPARTY", matchKey: hash, label: "Transfers to ••4567", category: "Rent" },
+      { id: "r1", kind: "COUNTERPARTY", matchKey: `${hash}:D`, label: "Transfers to ••4567", category: "Rent" },
     ]);
-    const [r] = await categorizeWithRules(asDb(), "org-1", [{ description: `Raast ${token}` }]);
+    const [r] = await categorizeWithRules(asDb(), "org-1", [{ description: `Raast ${token}`, type: "DEBIT" }]);
     expect(r).toMatchObject({
       category: "Rent",
       needsCategory: false,
       ruleApplied: true,
-      ruleKey: { kind: "COUNTERPARTY", matchKey: hash },
+      ruleKey: { kind: "COUNTERPARTY", matchKey: `${hash}:D` },
     });
     expect(cat.categorizeBatch).not.toHaveBeenCalled();
     expect(db.categoryRule.findMany.mock.calls[0]![0].where.organisationId).toBe("org-1");
@@ -53,12 +53,39 @@ describe("categorizeWithRules", () => {
     });
   });
 
-  it("uses the counterparty hint when the parsed description lost the token", async () => {
+  it("does not apply a money-out counterparty rule to money in from the same number", async () => {
+    // The DB returns only rules matching the requested keys; a DEBIT rule's key is <hash>:D.
+    db.categoryRule.findMany.mockImplementation(async ({ where }: { where: { OR: { matchKey: string }[] } }) =>
+      where.OR.some((k) => k.matchKey === `${hash}:D`)
+        ? [{ id: "r1", kind: "COUNTERPARTY", matchKey: `${hash}:D`, label: "x", category: "Rent" }]
+        : []
+    );
+    cat.categorizeBatch.mockResolvedValue([ai("Income", "Raast")]);
+    const [r] = await categorizeWithRules(asDb(), "org-1", [{ description: `Raast ${token}`, type: "CREDIT" }]);
+    expect(r).toMatchObject({
+      ruleApplied: false,
+      needsCategory: true,
+      ruleKey: { kind: "COUNTERPARTY", matchKey: `${hash}:C`, label: "Money from ••4567" },
+    });
+    expect(db.categoryRule.update).not.toHaveBeenCalled();
+  });
+
+  it("applies a merchant rule whatever the direction", async () => {
     db.categoryRule.findMany.mockResolvedValueOnce([
-      { id: "r1", kind: "COUNTERPARTY", matchKey: hash, label: "x", category: "Rent" },
+      { id: "r2", kind: "MERCHANT", matchKey: "daraz", label: "Daraz", category: "Shopping" },
     ]);
     const [r] = await categorizeWithRules(asDb(), "org-1", [
-      { description: "Raast transfer", counterpartyHint: token },
+      { description: "DARAZ REFUND", merchantName: "Daraz", type: "CREDIT" },
+    ]);
+    expect(r).toMatchObject({ category: "Shopping", ruleApplied: true });
+  });
+
+  it("uses the counterparty hint when the parsed description lost the token", async () => {
+    db.categoryRule.findMany.mockResolvedValueOnce([
+      { id: "r1", kind: "COUNTERPARTY", matchKey: `${hash}:D`, label: "x", category: "Rent" },
+    ]);
+    const [r] = await categorizeWithRules(asDb(), "org-1", [
+      { description: "Raast transfer", type: "DEBIT", counterpartyHint: token },
     ]);
     expect(r).toMatchObject({ category: "Rent", ruleApplied: true });
   });
@@ -69,7 +96,7 @@ describe("categorizeWithRules", () => {
     db.categoryRule.findMany.mockResolvedValueOnce([
       { id: "r2", kind: "MERCHANT", matchKey: "daraz", label: "Daraz", category: "Household" },
     ]);
-    const [r] = await categorizeWithRules(asDb(), "org-1", [{ description: "POS DARAZ PK 123" }]);
+    const [r] = await categorizeWithRules(asDb(), "org-1", [{ description: "POS DARAZ PK 123", type: "DEBIT" }]);
     expect(r).toMatchObject({
       category: "Household",
       needsCategory: false,
@@ -85,19 +112,19 @@ describe("categorizeWithRules", () => {
     ["Groceries", "Imtiaz", true],
   ])("flags %s (fallback=%s) as needing a category", async (category, merchant, fb) => {
     cat.categorizeBatch.mockResolvedValue([ai(category, merchant, fb)]);
-    const [r] = await categorizeWithRules(asDb(), "org-1", [{ description: merchant }]);
+    const [r] = await categorizeWithRules(asDb(), "org-1", [{ description: merchant, type: "DEBIT" }]);
     expect(r).toMatchObject({ needsCategory: true, ruleApplied: false, category });
   });
 
   it("flags a row with a counterparty token even when the AI is confident", async () => {
     cat.categorizeBatch.mockResolvedValue([ai("Bills & Utilities", "Raast")]);
-    const [r] = await categorizeWithRules(asDb(), "org-1", [{ description: `Raast ${token}` }]);
-    expect(r).toMatchObject({ needsCategory: true, ruleKey: { kind: "COUNTERPARTY", matchKey: hash } });
+    const [r] = await categorizeWithRules(asDb(), "org-1", [{ description: `Raast ${token}`, type: "DEBIT" }]);
+    expect(r).toMatchObject({ needsCategory: true, ruleKey: { kind: "COUNTERPARTY", matchKey: `${hash}:D` } });
   });
 
   it("does not flag a confident merchant row", async () => {
     cat.categorizeBatch.mockResolvedValue([ai("Groceries", "Imtiaz")]);
-    const [r] = await categorizeWithRules(asDb(), "org-1", [{ description: "POS IMTIAZ" }]);
+    const [r] = await categorizeWithRules(asDb(), "org-1", [{ description: "POS IMTIAZ", type: "DEBIT" }]);
     expect(r).toMatchObject({ needsCategory: false, ruleKey: { kind: "MERCHANT", matchKey: "imtiaz" } });
   });
 

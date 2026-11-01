@@ -92,7 +92,11 @@ export async function processSms(
     const phones = tokens.filter((t) => t.startsWith("[PHONE "));
     const hint = phones.length === 1 ? phones[0]! : tokens.length === 1 ? tokens[0]! : null;
     const categories = await categorizer.categorize(
-      dated.map((t) => (hint && !t.description.includes(hint) ? { description: t.description, counterpartyHint: hint } : { description: t.description })),
+      dated.map((t) =>
+        hint && !t.description.includes(hint)
+          ? { description: t.description, type: t.type, counterpartyHint: hint }
+          : { description: t.description, type: t.type }
+      ),
     );
 
     const parsed = dated.map((t, i): ParsedSmsTransaction => ({

@@ -6,6 +6,7 @@
 import { createHmac } from "node:crypto";
 
 export type RuleKind = "COUNTERPARTY" | "MERCHANT";
+export type TxnDirection = "DEBIT" | "CREDIT";
 export interface RuleKey {
   kind: RuleKind;
   matchKey: string;
@@ -90,21 +91,25 @@ export function normaliseMerchant(name: string): string {
   return name.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
-function tokenKey(token: string): RuleKey | null {
+// A counterparty key carries the direction: what you pay someone and what they
+// pay you are different things, so a rule learned on one never applies to the other.
+function tokenKey(token: string, type: TxnDirection): RuleKey | null {
   const m = new RegExp(TOKEN_RE.source).exec(token);
   if (!m) return null;
-  const label = m[1] === "PHONE" ? `Transfers to ••${m[2]}` : `Transfers to account ••${m[2]}`;
-  return { kind: "COUNTERPARTY", matchKey: m[3]!, label };
+  const who = m[1] === "PHONE" ? `••${m[2]}` : `account ••${m[2]}`;
+  const label = type === "CREDIT" ? `Money from ${who}` : `Transfers to ${who}`;
+  return { kind: "COUNTERPARTY", matchKey: `${m[3]}:${type === "CREDIT" ? "C" : "D"}`, label };
 }
 
 export function candidateRuleKeys(
   description: string,
   merchantName: string,
-  hint?: string | null
+  hint: string | null | undefined,
+  type: TxnDirection
 ): RuleKey[] {
   const keys: RuleKey[] = [];
   const token = pickToken(findTokens(description)) ?? (hint ? pickToken(findTokens(hint)) : undefined);
-  const cp = token ? tokenKey(token) : null;
+  const cp = token ? tokenKey(token, type) : null;
   if (cp) keys.push(cp);
   const m = normaliseMerchant(merchantName);
   if (m)
@@ -115,7 +120,8 @@ export function candidateRuleKeys(
 export function extractRuleKey(
   description: string,
   merchantName: string,
-  hint?: string | null
+  hint: string | null | undefined,
+  type: TxnDirection
 ): RuleKey | null {
-  return candidateRuleKeys(description, merchantName, hint)[0] ?? null;
+  return candidateRuleKeys(description, merchantName, hint, type)[0] ?? null;
 }

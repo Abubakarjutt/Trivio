@@ -114,7 +114,7 @@ async function handleCsvImport(buffer: Buffer, filename: string, organisationId:
     return NextResponse.json({ error: "No transactions found in CSV" }, { status: 400 });
   }
 
-  const categorized = await categorizer.categorize(rawTransactions.map((t) => ({ description: t.description })));
+  const categorized = await categorizer.categorize(rawTransactions.map((t) => ({ description: t.description, type: t.type })));
 
   const existingRaw = await db.statementTransaction.findMany({
     where: { organisationId, importBatch: { status: "DONE" } },
@@ -226,7 +226,7 @@ async function runStreamingImport(
   // Gemini can take up to 30s when rate-limited. Ping the SSE stream every 5s so
   // Caddy / browser proxies don't close the idle connection before we emit results.
   const keepaliveId = setInterval(() => emit("progress", { step: "categorizing", pct: 50, count: rawTransactions.length }), 5_000);
-  const categorized = await categorizer.categorize(rawTransactions.map((t) => ({ description: t.description }))).finally(() => clearInterval(keepaliveId));
+  const categorized = await categorizer.categorize(rawTransactions.map((t) => ({ description: t.description, type: t.type }))).finally(() => clearInterval(keepaliveId));
   console.log("[import] categorizer done, results:", categorized.length);
 
   emit("progress", { step: "deduplicating", pct: 75, count: rawTransactions.length });

@@ -10,12 +10,15 @@ import {
   hasCounterpartyToken,
   tokenizeCounterparties,
   type RuleKey,
+  type TxnDirection,
 } from "./counterparty-token";
 
 type Db = Pick<PrismaClient, "organisation" | "categoryRule">;
 
 export interface CategorizeInput {
   description: string;
+  /** Counterparty rules are per direction (money out vs money in). */
+  type: TxnDirection;
   merchantName?: string;
   /** A counterparty token from the surrounding SMS, for when the parsed description lost it. */
   counterpartyHint?: string | null;
@@ -92,7 +95,7 @@ export async function categorizeWithRules(
   const used = new Map<string, number>(); // rule id → times applied
 
   // 1. Rules on what we know before the AI (token, hint, a merchant name if given).
-  const before = rows.map((r) => candidateRuleKeys(r.description, r.merchantName ?? "", r.counterpartyHint));
+  const before = rows.map((r) => candidateRuleKeys(r.description, r.merchantName ?? "", r.counterpartyHint, r.type));
   const rulesBefore = await loadRules(db, organisationId, before.flat());
   rows.forEach((r, i) => {
     const hit = before[i]!.map((k) => rulesBefore.get(keyOf(k))).find(Boolean);
@@ -108,7 +111,7 @@ export async function categorizeWithRules(
     const merchantOf = (j: number) =>
       ai[j]?.merchantName || rows[rest[j]!]!.merchantName || rows[rest[j]!]!.description;
     const after = rest.map((i, j) =>
-      extractRuleKey(rows[i]!.description, merchantOf(j), rows[i]!.counterpartyHint),
+      extractRuleKey(rows[i]!.description, merchantOf(j), rows[i]!.counterpartyHint, rows[i]!.type),
     );
     const merchantKeys = after.filter((k): k is RuleKey => k?.kind === "MERCHANT");
     const rulesAfter = await loadRules(db, organisationId, merchantKeys);

@@ -64,14 +64,14 @@ describe("tokenizeCounterparties", () => {
     expect(tok("Your A/C No. 1234-5678-9012 was debited")).toBe("Your A/C No. 1234-5678-9012 was debited");
     for (const t of [masked, own]) {
       expect(findTokens(tok(t))).toEqual([]);
-      expect(candidateRuleKeys(tok(t), "").filter((k) => k.kind === "COUNTERPARTY")).toEqual([]);
+      expect(candidateRuleKeys(tok(t), "", null, "DEBIT").filter((k) => k.kind === "COUNTERPARTY")).toEqual([]);
     }
   });
 
   it("keys a transfer from the user's own account on the recipient's phone", () => {
     const t = tok("Rs 5,000 sent from your A/C 0123XXXX4567 to 0300-1234567 via Raast");
     expect(findTokens(t)).toHaveLength(1);
-    expect(extractRuleKey(t, "Raast")).toMatchObject({
+    expect(extractRuleKey(t, "Raast", null, "DEBIT")).toMatchObject({
       kind: "COUNTERPARTY",
       label: "Transfers to ••4567",
     });
@@ -82,7 +82,7 @@ describe("tokenizeCounterparties", () => {
     const tokens = findTokens(t);
     expect(tokens.map((x) => x.slice(1, 6))).toEqual(["ACCT ", "PHONE"]);
     const phoneHash = tokens[1]!.match(/#([0-9a-f]{12})/)![1];
-    expect(extractRuleKey(t, "IBFT")?.matchKey).toBe(phoneHash);
+    expect(extractRuleKey(t, "IBFT", null, "DEBIT")?.matchKey).toBe(`${phoneHash}:D`);
   });
 
   it("rejects bogus IBAN-like patterns and non-label words before account numbers", () => {
@@ -104,31 +104,46 @@ describe("rule keys", () => {
   const hash = t.match(/#([0-9a-f]{12})/)![1];
 
   it("prefers the counterparty token over the merchant", () => {
-    expect(extractRuleKey(`Raast ${t}`, "Raast")).toEqual({
+    expect(extractRuleKey(`Raast ${t}`, "Raast", null, "DEBIT")).toEqual({
       kind: "COUNTERPARTY",
-      matchKey: hash,
+      matchKey: `${hash}:D`,
       label: "Transfers to ••4567",
     });
-    expect(candidateRuleKeys(`Raast ${t}`, "Raast").map((k) => k.kind)).toEqual([
+    expect(candidateRuleKeys(`Raast ${t}`, "Raast", null, "DEBIT").map((k) => k.kind)).toEqual([
       "COUNTERPARTY",
       "MERCHANT",
     ]);
   });
 
-  it("uses the hint when the description has no token", () => {
-    expect(extractRuleKey("Raast transfer", "Raast", t)).toMatchObject({
+  it("keys counterparties per direction, and labels money in as 'Money from'", () => {
+    expect(extractRuleKey(`Raast ${t}`, "Raast", null, "CREDIT")).toEqual({
       kind: "COUNTERPARTY",
-      matchKey: hash,
+      matchKey: `${hash}:C`,
+      label: "Money from ••4567",
+    });
+  });
+
+  it("keys merchants the same whatever the direction", () => {
+    expect(extractRuleKey("POS DARAZ", "Daraz", null, "CREDIT")).toEqual(
+      extractRuleKey("POS DARAZ", "Daraz", null, "DEBIT")
+    );
+  });
+
+  it("uses the hint when the description has no token", () => {
+    expect(extractRuleKey("Raast transfer", "Raast", t, "DEBIT")).toMatchObject({
+      kind: "COUNTERPARTY",
+      matchKey: `${hash}:D`,
     });
   });
 
   it("labels ACCT tokens as account transfers", () => {
     const a = findTokens(tok("to PK36SCBL0000001123456702"))[0]!;
-    expect(extractRuleKey(a, "")?.label).toBe("Transfers to account ••6702");
+    expect(extractRuleKey(a, "", null, "DEBIT")?.label).toBe("Transfers to account ••6702");
+    expect(extractRuleKey(a, "", null, "CREDIT")?.label).toBe("Money from account ••6702");
   });
 
   it("falls back to the normalised merchant name", () => {
-    expect(extractRuleKey("POS DARAZ PK", "  Daraz   Online ")).toEqual({
+    expect(extractRuleKey("POS DARAZ PK", "  Daraz   Online ", null, "DEBIT")).toEqual({
       kind: "MERCHANT",
       matchKey: "daraz online",
       label: "Daraz Online",
@@ -137,7 +152,7 @@ describe("rule keys", () => {
   });
 
   it("returns null with neither token nor merchant", () => {
-    expect(extractRuleKey("x", "  ")).toBeNull();
+    expect(extractRuleKey("x", "  ", null, "DEBIT")).toBeNull();
     expect(hasCounterpartyToken("plain text")).toBe(false);
     expect(hasCounterpartyToken(t)).toBe(true);
   });

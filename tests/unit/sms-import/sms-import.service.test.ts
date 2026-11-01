@@ -71,7 +71,7 @@ describe("processSms", () => {
     ]);
     const c = fakeCategorizer();
     const r = await processSms("PKR 1,450 at KFC DHA", RECEIVED, [], c);
-    expect(c.categorize).toHaveBeenCalledWith([{ description: "KFC DHA" }]);
+    expect(c.categorize).toHaveBeenCalledWith([{ description: "KFC DHA", type: "DEBIT" }]);
     expect(r.parsed.map((p) => [p.description, p.amount])).toEqual([["KFC DHA", 1450]]);
   });
 
@@ -113,7 +113,7 @@ describe("processSms rules", () => {
     pdf.parseTransactionsFromText.mockResolvedValue([{ date: "2026-10-30", description: "Raast transfer", amount: 5000, type: "DEBIT" }]);
     const c = fakeCategorizer();
     await processSms("Raast PKR 5,000 to 03001234567", RECEIVED, [], c);
-    expect(c.categorize).toHaveBeenCalledWith([{ description: "Raast transfer", counterpartyHint: "[PHONE ••4567 #0123456789ab]" }]);
+    expect(c.categorize).toHaveBeenCalledWith([{ description: "Raast transfer", type: "DEBIT", counterpartyHint: "[PHONE ••4567 #0123456789ab]" }]);
   });
 
   it("prefers the single phone token as the hint when an account token is also present", async () => {
@@ -122,7 +122,7 @@ describe("processSms rules", () => {
     c.tokenize.mockImplementation((t: string) =>
       t.replace("03001234567", "[PHONE ••4567 #0123456789ab]").replace("11112222333344", "[ACCT ••3344 #aaaaaaaaaaaa]"));
     await processSms("Raast PKR 5,000 from A/C 11112222333344 to 03001234567", RECEIVED, [], c);
-    expect(c.categorize.mock.calls[0]![0]).toEqual([{ description: "Raast transfer", counterpartyHint: "[PHONE ••4567 #0123456789ab]" }]);
+    expect(c.categorize.mock.calls[0]![0]).toEqual([{ description: "Raast transfer", type: "DEBIT", counterpartyHint: "[PHONE ••4567 #0123456789ab]" }]);
   });
 
   it("tokenizes existing descriptions before duplicate detection", async () => {
