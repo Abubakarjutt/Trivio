@@ -131,7 +131,7 @@ NOTIFICATION FORMAT (bank alert or payment confirmation emails):
 
 Each transaction MUST have:
 - date: YYYY-MM-DD format (use today's date if not mentioned)
-- description: payee, merchant, sender, or transaction reference
+- description: payee, merchant, sender, or transaction reference. Copy any [PHONE …] or [ACCT …] token from the text into the description exactly as written
 - amount: positive number (NEVER negative)
 - type: "DEBIT" if money left the account, "CREDIT" if money entered
 

@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { autoDetectColumns, parseCsvBuffer, detectDuplicates, deduplicateIncoming } from "@/server/services/statement-parser.service";
-import { categorizeBatch } from "@/server/services/statement-categorization.service";
+import { createImportCategorizer, type ImportCategorizer } from "@/server/services/categorize/category-rules.service";
+import { toStatementRow, tokenizeExisting } from "@/server/services/categorize/statement-rows";
 import { extractPdfPages, parsePageTransactions } from "@/server/services/pdf-statement.service";
 import { parseTransactionsFromImage } from "@/server/services/image-statement.service";
 import { createRateLimiter } from "@/server/middleware/rateLimit";
@@ -107,31 +108,23 @@ async function handleCsvImport(buffer: Buffer, filename: string, organisationId:
     return NextResponse.json({ error: (e as Error).message }, { status: 400 });
   }
 
-  const rawTransactions = deduplicateIncoming(parseCsvBuffer(buffer, columnMap));
+  const categorizer = await createImportCategorizer(db, organisationId);
+  const rawTransactions = deduplicateIncoming(parseCsvBuffer(buffer, columnMap)).map((t) => ({ ...t, description: categorizer.tokenize(t.description) }));
   if (rawTransactions.length === 0) {
     return NextResponse.json({ error: "No transactions found in CSV" }, { status: 400 });
   }
 
-  const categorized = await categorizeBatch(rawTransactions.map((t) => t.description));
+  const categorized = await categorizer.categorize(rawTransactions.map((t) => ({ description: t.description })));
 
   const existingRaw = await db.statementTransaction.findMany({
     where: { organisationId, importBatch: { status: "DONE" } },
     select: { id: true, date: true, description: true, amount: true },
   });
   const existing = existingRaw.map((e) => ({ ...e, amount: Number(e.amount) }));
-  const { safe, duplicates } = detectDuplicates(rawTransactions, existing);
+  const { safe, duplicates } = detectDuplicates(rawTransactions, tokenizeExisting(existing, categorizer.tokenize));
 
   // Build categorized row data indexed by description for the pending-duplicates store
-  const categorizedByIdx = (txn: typeof rawTransactions[number], i: number) => ({
-    date: new Date(txn.date),
-    description: txn.description,
-    merchantName: categorized[i]?.merchantName ?? txn.description,
-    amount: txn.amount,
-    type: txn.type,
-    category: categorized[i]?.category ?? "Other",
-    mccCode: categorized[i]?.mccCode ?? "0000",
-    mccLabel: categorized[i]?.mccLabel ?? "Uncategorized",
-  });
+  const categorizedByIdx = (txn: typeof rawTransactions[number], i: number) => toStatementRow(txn, categorized[i]);
 
   const pendingDuplicatesData = duplicates.map((d) => {
     const idx = rawTransactions.indexOf(d.incoming);
@@ -223,17 +216,18 @@ async function runStreamingImport(
   rawTxnsBeforeDedup: import("@/server/services/statement-parser.service").RawTransaction[],
   organisationId: string,
   batchId: string,
+  categorizer: ImportCategorizer,
 ) {
-  const rawTransactions = deduplicateIncoming(rawTxnsBeforeDedup);
+  const rawTransactions = deduplicateIncoming(rawTxnsBeforeDedup).map((t) => ({ ...t, description: categorizer.tokenize(t.description) }));
   console.log(`[import] runStreamingImport start: ${rawTransactions.length} txns, batchId: ${batchId}`);
 
   emit("progress", { step: "categorizing", pct: 50, count: rawTransactions.length, extracted: rawTxnsBeforeDedup.length });
-  console.log("[import] calling categorizeBatch...");
+  console.log("[import] calling categorizer...");
   // Gemini can take up to 30s when rate-limited. Ping the SSE stream every 5s so
   // Caddy / browser proxies don't close the idle connection before we emit results.
   const keepaliveId = setInterval(() => emit("progress", { step: "categorizing", pct: 50, count: rawTransactions.length }), 5_000);
-  const categorized = await categorizeBatch(rawTransactions.map((t) => t.description)).finally(() => clearInterval(keepaliveId));
-  console.log("[import] categorizeBatch done, results:", categorized.length);
+  const categorized = await categorizer.categorize(rawTransactions.map((t) => ({ description: t.description }))).finally(() => clearInterval(keepaliveId));
+  console.log("[import] categorizer done, results:", categorized.length);
 
   emit("progress", { step: "deduplicating", pct: 75, count: rawTransactions.length });
   console.log("[import] fetching existing transactions for dedup...");
@@ -243,21 +237,12 @@ async function runStreamingImport(
   });
   console.log("[import] existing txns fetched:", existingRaw.length);
   const existing = existingRaw.map((e) => ({ ...e, amount: Number(e.amount) }));
-  const { safe, duplicates } = detectDuplicates(rawTransactions, existing);
+  const { safe, duplicates } = detectDuplicates(rawTransactions, tokenizeExisting(existing, categorizer.tokenize));
   console.log(`[import] dedup done: ${safe.length} safe, ${duplicates.length} duplicates`);
 
   const pendingDuplicatesData = duplicates.map((d) => {
     const idx = rawTransactions.indexOf(d.incoming);
-    return {
-      date: new Date(d.incoming.date),
-      description: d.incoming.description,
-      merchantName: categorized[idx]?.merchantName ?? d.incoming.description,
-      amount: d.incoming.amount,
-      type: d.incoming.type,
-      category: categorized[idx]?.category ?? "Other",
-      mccCode: categorized[idx]?.mccCode ?? "0000",
-      mccLabel: categorized[idx]?.mccLabel ?? "Uncategorized",
-    };
+    return toStatementRow(d.incoming, categorized[idx]);
   });
 
   emit("progress", { step: "saving", pct: 90 });
@@ -280,18 +265,7 @@ async function runStreamingImport(
     await db.statementTransaction.createMany({
       data: safe.map((txn) => {
         const idx = rawTransactions.indexOf(txn);
-        return {
-          organisationId,
-          importBatchId: batchId,
-          date: new Date(txn.date),
-          description: txn.description,
-          merchantName: categorized[idx]?.merchantName ?? txn.description,
-          amount: txn.amount,
-          type: txn.type,
-          category: categorized[idx]?.category ?? "Other",
-          mccCode: categorized[idx]?.mccCode ?? "0000",
-          mccLabel: categorized[idx]?.mccLabel ?? "Uncategorized",
-        };
+        return { organisationId, importBatchId: batchId, ...toStatementRow(txn, categorized[idx]) };
       }),
     });
     console.log("[import] transactions inserted");
@@ -330,6 +304,7 @@ async function handlePdfImport(buffer: Buffer, filename: string, organisationId:
         data: { organisationId, filename, fileType: "PDF", status: "PROCESSING", transactionCount: 0 },
       });
       batchId = batch.id;
+      const categorizer = await createImportCategorizer(db, organisationId);
 
       emit("progress", { step: "extracting", pct: 10 });
       console.log("[import] calling extractPdfPages, batchId:", batchId, "bufferSize:", buffer.length);
@@ -342,7 +317,7 @@ async function handlePdfImport(buffer: Buffer, filename: string, organisationId:
         emit("progress", { step: "parsing", pct, page: i + 1, totalPages: pages.length });
         // Keep SSE alive during Gemini page-parse call (up to 30s per page when rate-limited).
         const pageKeepaliveId = setInterval(() => emit("progress", { step: "parsing", pct, page: i + 1, totalPages: pages.length }), 5_000);
-        const pageTxns = await parsePageTransactions(pages[i]).finally(() => clearInterval(pageKeepaliveId));
+        const pageTxns = await parsePageTransactions(categorizer.tokenize(pages[i])).finally(() => clearInterval(pageKeepaliveId));
         allRawTransactions.push(...pageTxns);
         console.log(`[import] Page ${i + 1}/${pages.length}: extracted ${pageTxns.length} transactions`);
       }
@@ -354,7 +329,7 @@ async function handlePdfImport(buffer: Buffer, filename: string, organisationId:
       }
 
       console.log(`[import] Total extracted: ${allRawTransactions.length} transactions from ${pages.length} pages`);
-      await runStreamingImport(emit, allRawTransactions, organisationId, batchId);
+      await runStreamingImport(emit, allRawTransactions, organisationId, batchId, categorizer);
     } catch (err) {
       if (batchId) {
         await db.statementImportBatch.update({ where: { id: batchId }, data: { status: "FAILED", errorMessage: String(err) } }).catch(() => {});
@@ -372,6 +347,7 @@ async function handleImageImport(buffer: Buffer, filename: string, mimeType: str
         data: { organisationId, filename, fileType: "IMAGE", status: "PROCESSING", transactionCount: 0 },
       });
       batchId = batch.id;
+      const categorizer = await createImportCategorizer(db, organisationId);
 
       emit("progress", { step: "parsing", pct: 20 });
       const rawTransactions = await parseTransactionsFromImage(buffer, mimeType);
@@ -382,7 +358,7 @@ async function handleImageImport(buffer: Buffer, filename: string, mimeType: str
         return;
       }
 
-      await runStreamingImport(emit, rawTransactions, organisationId, batchId);
+      await runStreamingImport(emit, rawTransactions, organisationId, batchId, categorizer);
     } catch (err) {
       if (batchId) {
         await db.statementImportBatch.update({ where: { id: batchId }, data: { status: "FAILED", errorMessage: String(err) } }).catch(() => {});
