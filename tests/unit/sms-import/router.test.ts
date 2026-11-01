@@ -55,7 +55,7 @@ describe("smsImport.approve", () => {
     ]);
     db.organisation.findUnique.mockResolvedValue({ hasSampleData: false });
 
-    expect(await caller().approve({ ids: ["i1", "i2", "other-org"] })).toEqual({ approved: 2, transactions: 2, rulesSaved: 0, alsoAppliedTo: 0 });
+    expect(await caller().approve({ ids: ["i1", "i2", "other-org"] })).toEqual({ approved: 2, transactions: 2, rulesSaved: 0, alsoAppliedTo: 0, alsoAppliedToSaved: 0 });
 
     expect(db.smsImportItem.count.mock.calls[0]![0].where).toEqual({
       id: { in: ["i1", "i2", "other-org"] }, organisationId: "org-1", status: "PENDING_REVIEW",
@@ -89,7 +89,7 @@ describe("smsImport.approve", () => {
 
   it("does nothing when no pending items match", async () => {
     pendingOk(0);
-    expect(await caller().approve({ ids: ["x"] })).toEqual({ approved: 0, transactions: 0, rulesSaved: 0, alsoAppliedTo: 0 });
+    expect(await caller().approve({ ids: ["x"] })).toEqual({ approved: 0, transactions: 0, rulesSaved: 0, alsoAppliedTo: 0, alsoAppliedToSaved: 0 });
     expect(db.statementImportBatch.create).not.toHaveBeenCalled();
   });
 
@@ -163,6 +163,7 @@ describe("smsImport.approve rules", () => {
     db.smsImportItem.updateMany.mockResolvedValue({ count: 1 });
     db.smsImportItem.findMany.mockResolvedValueOnce([{ parsedJson }]).mockResolvedValueOnce(others);
     db.organisation.findUnique.mockResolvedValue({ hasSampleData: false });
+    db.statementTransaction.updateMany.mockResolvedValue({ count: 0 });
   };
 
   it("saves a rule for an answered, remembered row and stores the flags on the transaction", async () => {
@@ -185,7 +186,7 @@ describe("smsImport.approve rules", () => {
       { ...txn, ruleKey: cp, needsCategory: true },
       { ...txn, ruleKey: null, userCategorized: true },
     ]);
-    expect(await caller().approve({ ids: ["i1"] })).toMatchObject({ rulesSaved: 0, alsoAppliedTo: 0 });
+    expect(await caller().approve({ ids: ["i1"] })).toMatchObject({ rulesSaved: 0, alsoAppliedTo: 0, alsoAppliedToSaved: 0 });
     expect(db.categoryRule.upsert).not.toHaveBeenCalled();
   });
 
@@ -206,11 +207,46 @@ describe("smsImport.approve rules", () => {
     ]);
     expect(await caller().approve({ ids: ["i1"] })).toMatchObject({ alsoAppliedTo: 1 });
     expect(db.smsImportItem.findMany.mock.calls[1]![0].where).toEqual({ organisationId: "org-1", status: "PENDING_REVIEW" });
-    expect(db.smsImportItem.update).toHaveBeenCalledTimes(1);
-    expect(db.smsImportItem.update.mock.calls[0]![0]).toMatchObject({
-      where: { id: "p2" },
+    // calls[0] is the claim; one more for p2 only.
+    expect(db.smsImportItem.updateMany).toHaveBeenCalledTimes(2);
+    expect(db.smsImportItem.updateMany.mock.calls[1]![0]).toMatchObject({
+      where: { id: "p2", organisationId: "org-1", status: "PENDING_REVIEW" },
       data: { parsedJson: [expect.objectContaining({ category: "Rent", needsCategory: false, ruleApplied: true })] },
     });
+  });
+
+  it("applies an answer to an unanswered sibling in the same approval before saving", async () => {
+    setup([
+      { ...txn, category: "Rent", ruleKey: cp, needsCategory: false, userCategorized: true, rememberRule: true },
+      { ...txn, category: "Transfers", mccLabel: "Transfers", ruleKey: cp, needsCategory: true },
+    ]);
+    await caller().approve({ ids: ["i1", "i2"] });
+    const saved = db.statementTransaction.createMany.mock.calls[0]![0].data;
+    expect(saved).toHaveLength(2);
+    for (const row of saved) expect(row).toMatchObject({ category: "Rent", needsCategory: false });
+    expect(saved[1]).toMatchObject({ mccLabel: "Rent" });
+  });
+
+  it("does not apply an un-remembered answer to a sibling", async () => {
+    setup([
+      { ...txn, category: "Rent", ruleKey: cp, userCategorized: true, rememberRule: false },
+      { ...txn, category: "Transfers", ruleKey: cp, needsCategory: true },
+    ]);
+    await caller().approve({ ids: ["i1"] });
+    expect(db.statementTransaction.createMany.mock.calls[0]![0].data[1]).toMatchObject({ category: "Transfers", needsCategory: true });
+  });
+
+  it("fills in this org's saved transactions still flagged for the same key", async () => {
+    setup([{ ...txn, category: "Rent", ruleKey: cp, userCategorized: true }]);
+    db.statementTransaction.updateMany.mockResolvedValue({ count: 4 });
+    expect(await caller().approve({ ids: ["i1"] })).toMatchObject({ alsoAppliedToSaved: 4 });
+    expect(db.statementTransaction.updateMany).toHaveBeenCalledWith({
+      where: { organisationId: "org-1", ruleKind: "COUNTERPARTY", ruleMatchKey: "0123456789ab", needsCategory: true },
+      data: { category: "Rent", mccLabel: "Rent", needsCategory: false },
+    });
+    expect(db.statementTransaction.updateMany.mock.invocationCallOrder[0]!).toBeGreaterThan(
+      db.statementTransaction.createMany.mock.invocationCallOrder[0]!
+    );
   });
 });
 

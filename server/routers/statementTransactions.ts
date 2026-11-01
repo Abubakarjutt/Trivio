@@ -6,6 +6,12 @@ import {
   deletePfTransactions,
 } from "@/server/services/pf-transaction.service";
 import { ownPfCategories } from "@/server/services/pf-categories.service";
+import {
+  answerKey,
+  applyAnswersToFlaggedTransactions,
+  applyAnswersToPendingSms,
+  type RuleAnswers,
+} from "@/server/services/categorize/apply-answers";
 import { CATEGORY_NAMES } from "@/lib/categories";
 import { buildInsights } from "@/server/services/pf-insights.service";
 import { dateOf, listPeriods, localToday, periodLabel } from "@/server/services/pf-cycle.service";
@@ -159,18 +165,14 @@ export const statementTransactionsRouter = createTRPCRouter({
             },
             update: { category: input.category, label },
           });
-          // Only rows still waiting for an answer; anything already categorised stays as it is.
-          const res = await tx.statementTransaction.updateMany({
-            where: {
-              organisationId,
-              ruleKind: txn.ruleKind,
-              ruleMatchKey: txn.ruleMatchKey,
-              needsCategory: true,
-              id: { not: txn.id },
-            },
-            data: { category: input.category, mccLabel: input.category, needsCategory: false },
-          });
-          alsoUpdated = res.count;
+          // Only rows still waiting for an answer — saved ones and SMS still in
+          // review; anything already categorised stays as it is.
+          const answers: RuleAnswers = new Map([
+            [answerKey({ kind: txn.ruleKind, matchKey: txn.ruleMatchKey }), input.category],
+          ]);
+          alsoUpdated =
+            (await applyAnswersToFlaggedTransactions(tx, organisationId, answers, txn.id)) +
+            (await applyAnswersToPendingSms(tx, organisationId, answers));
         }
         return { ...updated, alsoUpdated };
       });

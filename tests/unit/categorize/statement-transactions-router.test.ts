@@ -42,6 +42,7 @@ beforeEach(() => {
     needsCategory: false,
   });
   db.statementTransaction.updateMany.mockResolvedValue({ count: 3 });
+  db.smsImportItem.findMany.mockResolvedValue([]);
 });
 
 describe("updateCategory", () => {
@@ -85,6 +86,26 @@ describe("updateCategory", () => {
       data: { category: "Rent", mccLabel: "Rent", needsCategory: false },
     });
     expect(r.alsoUpdated).toBe(3);
+  });
+
+  it("also fills in this org's SMS still waiting in review for the same key", async () => {
+    const key = { kind: "COUNTERPARTY", matchKey: "0123456789ab", label: "Transfers to ••4567" };
+    const waiting = { date: "2026-10-30", description: "Raast", merchantName: "Raast", amount: 5000, type: "DEBIT",
+      category: "Transfers", mccCode: "0000", mccLabel: "Transfers", possibleDuplicate: false, ruleKey: key, needsCategory: true };
+    db.smsImportItem.findMany.mockResolvedValue([
+      { id: "s1", parsedJson: [waiting] },
+      { id: "s2", parsedJson: [{ ...waiting, needsCategory: false, category: "Gifts" }] },
+      { id: "s3", parsedJson: [{ ...waiting, ruleKey: { ...key, matchKey: "other" } }] },
+    ]);
+    db.smsImportItem.updateMany.mockResolvedValue({ count: 1 });
+    const r = await caller().updateCategory({ id: "t1", category: "Rent", remember: true });
+    expect(db.smsImportItem.findMany.mock.calls[0]![0].where).toEqual({ organisationId: "org-1", status: "PENDING_REVIEW" });
+    expect(db.smsImportItem.updateMany).toHaveBeenCalledTimes(1);
+    expect(db.smsImportItem.updateMany.mock.calls[0]![0]).toEqual({
+      where: { id: "s1", organisationId: "org-1", status: "PENDING_REVIEW" },
+      data: { parsedJson: [{ ...waiting, category: "Rent", mccLabel: "Rent", needsCategory: false, ruleApplied: true }] },
+    });
+    expect(r.alsoUpdated).toBe(4); // 3 saved rows + 1 SMS
   });
 
   it("ignores remember for a row with no rule key", async () => {

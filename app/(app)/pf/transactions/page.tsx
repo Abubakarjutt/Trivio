@@ -125,6 +125,11 @@ export default function PfTransactionsPage() {
       utils.statementTransactions.list.invalidate();
       utils.statementTransactions.summary.invalidate();
       utils.statementTransactions.needsCategoryCount.invalidate();
+      // "Always use…" may also have filled in SMS waiting for review.
+      if (r.alsoUpdated > 0) {
+        utils.smsImport.listItems.invalidate();
+        utils.smsImport.notifications.invalidate();
+      }
       if (r.alsoUpdated > 0)
         toast.success(
           `Also updated ${r.alsoUpdated} other transaction${r.alsoUpdated === 1 ? "" : "s"}`

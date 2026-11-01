@@ -118,7 +118,12 @@ function SmsReviewSheet({
     onSuccess: (r) => {
       if (r.transactions === 0) toast.info("Nothing new to add");
       else toast.success(`Added ${r.transactions} transaction${r.transactions === 1 ? "" : "s"}`);
-      if (r.alsoAppliedTo > 0) toast.info(`Also applied to ${r.alsoAppliedTo} other SMS`);
+      const also = [
+        r.alsoAppliedTo > 0 && `${r.alsoAppliedTo} other SMS`,
+        r.alsoAppliedToSaved > 0 &&
+          `${r.alsoAppliedToSaved} saved transaction${r.alsoAppliedToSaved === 1 ? "" : "s"}`,
+      ].filter(Boolean);
+      if (also.length > 0) toast.info(`Also applied to ${also.join(" and ")}`);
       void refresh();
     },
     onError: (e) => {

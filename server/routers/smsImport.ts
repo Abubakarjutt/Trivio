@@ -13,6 +13,13 @@ import {
   type ParsedSmsTransaction,
 } from "@/server/services/sms/sms-import.service";
 import { createImportCategorizer } from "@/server/services/categorize/category-rules.service";
+import {
+  answerKey,
+  applyAnswersToFlaggedTransactions,
+  applyAnswersToPendingSms,
+  applyAnswersToRows,
+  type RuleAnswers,
+} from "@/server/services/categorize/apply-answers";
 import { redactPiiText } from "@/server/services/pii-redaction.service";
 
 const SUGGEST_LOOKBACK_DAYS = 30;
@@ -178,7 +185,14 @@ export const smsImportRouter = createTRPCRouter({
       const pending = await tx.smsImportItem.count({
         where: { id: { in: input.ids }, organisationId, status: "PENDING_REVIEW" },
       });
-      if (pending === 0) return { approved: 0, transactions: 0, rulesSaved: 0, alsoAppliedTo: 0 };
+      if (pending === 0)
+        return {
+          approved: 0,
+          transactions: 0,
+          rulesSaved: 0,
+          alsoAppliedTo: 0,
+          alsoAppliedToSaved: 0,
+        };
 
       const batch = await tx.statementImportBatch.create({
         data: {
@@ -204,9 +218,9 @@ export const smsImportRouter = createTRPCRouter({
         where: { importBatchId: batch.id, organisationId },
         select: { parsedJson: true },
       });
-      const rows = items.flatMap((it) => it.parsedJson as unknown as ParsedSmsTransaction[]);
+      const rawRows = items.flatMap((it) => it.parsedJson as unknown as ParsedSmsTransaction[]);
       // parsedJson is only as good as whatever wrote it; re-check before it becomes money.
-      if (!z.array(parsedTxn).safeParse(rows).success) {
+      if (!z.array(parsedTxn).safeParse(rawRows).success) {
         throw new TRPCError({
           code: "BAD_REQUEST",
           message:
@@ -225,6 +239,18 @@ export const smsImportRouter = createTRPCRouter({
           data: { hasSampleData: false },
         });
       }
+
+      // "Always use…" answers (the last answer for a key wins). Worked out before
+      // saving so unanswered rows in this same approval take them too.
+      const answers: RuleAnswers = new Map();
+      const keys = new Map<string, NonNullable<ParsedSmsTransaction["ruleKey"]>>();
+      for (const r of rawRows) {
+        if (r.ruleKey && r.userCategorized && r.rememberRule !== false) {
+          answers.set(answerKey(r.ruleKey), r.category);
+          keys.set(answerKey(r.ruleKey), r.ruleKey);
+        }
+      }
+      const rows = applyAnswersToRows(rawRows, answers).rows;
 
       await tx.statementTransaction.createMany({
         data: rows.map((r) => ({
@@ -248,21 +274,8 @@ export const smsImportRouter = createTRPCRouter({
         where: { id: batch.id },
         data: { transactionCount: rows.length },
       });
-      // "Always use…" answers become rules (the last answer for a key wins) and
-      // fill in other waiting SMS that still need a category for the same key.
-      const answers = new Map<
-        string,
-        { key: NonNullable<ParsedSmsTransaction["ruleKey"]>; category: string }
-      >();
-      for (const r of rows) {
-        if (r.ruleKey && r.userCategorized && r.rememberRule !== false) {
-          answers.set(`${r.ruleKey.kind}:${r.ruleKey.matchKey}`, {
-            key: r.ruleKey,
-            category: r.category,
-          });
-        }
-      }
-      for (const { key, category } of answers.values()) {
+      for (const [k, category] of answers) {
+        const key = keys.get(k)!;
         await tx.categoryRule.upsert({
           where: {
             organisationId_kind_matchKey: {
@@ -281,43 +294,20 @@ export const smsImportRouter = createTRPCRouter({
           update: { category, label: key.label },
         });
       }
-      let alsoAppliedTo = 0;
-      if (answers.size > 0) {
-        const others = await tx.smsImportItem.findMany({
-          where: { organisationId, status: "PENDING_REVIEW" },
-          select: { id: true, parsedJson: true },
-        });
-        for (const other of others) {
-          let changed = false;
-          const parsed = (other.parsedJson as unknown as ParsedSmsTransaction[]).map((p) => {
-            const hit =
-              p.ruleKey && p.needsCategory
-                ? answers.get(`${p.ruleKey.kind}:${p.ruleKey.matchKey}`)
-                : undefined;
-            if (!hit) return p;
-            changed = true;
-            return {
-              ...p,
-              category: hit.category,
-              mccLabel: hit.category,
-              needsCategory: false,
-              ruleApplied: true,
-            };
-          });
-          if (changed) {
-            await tx.smsImportItem.update({
-              where: { id: other.id },
-              data: { parsedJson: parsed as unknown as Prisma.InputJsonValue },
-            });
-            alsoAppliedTo++;
-          }
-        }
-      }
+      // Then everything else still waiting on the same key: other SMS in review
+      // and saved transactions that are still flagged.
+      const alsoAppliedTo = await applyAnswersToPendingSms(tx, organisationId, answers);
+      const alsoAppliedToSaved = await applyAnswersToFlaggedTransactions(
+        tx,
+        organisationId,
+        answers
+      );
       return {
         approved: claimed.count,
         transactions: rows.length,
         rulesSaved: answers.size,
         alsoAppliedTo,
+        alsoAppliedToSaved,
       };
     })
   ),
