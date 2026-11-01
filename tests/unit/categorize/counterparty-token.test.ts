@@ -50,19 +50,13 @@ describe("tokenizeCounterparties", () => {
   });
 
   it("leaves card numbers and masked accounts alone", () => {
-    expect(tok("Card 4111 1111 1111 1111 used")).toBe(
-      "Card 4111 1111 1111 1111 used"
-    );
+    expect(tok("Card 4111 1111 1111 1111 used")).toBe("Card 4111 1111 1111 1111 used");
     expect(tok("A/C ****1234 debited")).toBe("A/C ****1234 debited");
   });
 
   it("rejects bogus IBAN-like patterns and non-label words before account numbers", () => {
-    expect(tok("TX12 DEBIT CARD PURCHASE at DARAZ")).toBe(
-      "TX12 DEBIT CARD PURCHASE at DARAZ"
-    );
-    expect(tok("Ref AB12 PAYMENT RECEIVED FROM ALI")).toBe(
-      "Ref AB12 PAYMENT RECEIVED FROM ALI"
-    );
+    expect(tok("TX12 DEBIT CARD PURCHASE at DARAZ")).toBe("TX12 DEBIT CARD PURCHASE at DARAZ");
+    expect(tok("Ref AB12 PAYMENT RECEIVED FROM ALI")).toBe("Ref AB12 PAYMENT RECEIVED FROM ALI");
     expect(tok("success12345678910111213")).toBe("success12345678910111213");
   });
 

@@ -13,8 +13,7 @@ export interface RuleKey {
 }
 
 const TOKEN_RE = /\[(PHONE|ACCT) ••(\d{4}) #([0-9a-f]{12})\]/g;
-const IBAN_RE =
-  /\b[A-Z]{2}\d{2}(?:\s?[A-Z0-9]{4})*\s?[A-Z0-9]{1,4}(?=\s|$|\b)/g;
+const IBAN_RE = /\b[A-Z]{2}\d{2}(?:\s?[A-Z0-9]{4})*\s?[A-Z0-9]{1,4}(?=\s|$|\b)/g;
 const LABELLED_ACCT_RE =
   /\b(a(?:cc(?:ount)?|\/c)\.?\s*(?:no\.?|number|#|:)?\s*:?\s*)(\d[\d -]{2,18}\d)/gi;
 const LABELLED_PHONE_RE = /((?:phone|tel(?:ephone)?|mobile|mob)\s*:?\s*)(\+?\d[\d\s()-]{6,18}\d)/gi;
@@ -52,8 +51,7 @@ export function tokenizeCounterparties(text: string, secret: string): string {
     )
     .replace(
       LABELLED_PHONE_RE,
-      (_, label: string, num: string) =>
-        label + makeToken("PHONE", num, secret)
+      (_, label: string, num: string) => label + makeToken("PHONE", num, secret)
     )
     .replace(PK_MOBILE_RE, (m) => makeToken("PHONE", m, secret))
     .replace(INTL_PHONE_RE, (m) => makeToken("PHONE", m, secret));
