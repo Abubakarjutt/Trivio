@@ -378,6 +378,8 @@ export const smsImportRouter = createTRPCRouter({
         organisationId: ctx.organisationId,
         notificationClosedAt: null,
         status: { in: ["PENDING_REVIEW", "APPROVED", "DISMISSED"] },
+        // Rowless items are never shown, so keep them out of the 50-row window.
+        NOT: { parsedJson: { equals: [] } },
       },
       orderBy: { receivedAt: "desc" },
       take: 50,

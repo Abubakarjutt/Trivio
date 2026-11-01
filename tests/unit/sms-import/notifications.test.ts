@@ -67,6 +67,7 @@ describe("smsImport.notifications", () => {
         organisationId: "org-1",
         notificationClosedAt: null,
         status: { in: ["PENDING_REVIEW", "APPROVED", "DISMISSED"] },
+        NOT: { parsedJson: { equals: [] } },
       },
       orderBy: { receivedAt: "desc" },
       take: 50,
@@ -99,5 +100,33 @@ describe("dismiss leaves notifications open", () => {
     expect(db.smsImportItem.updateMany.mock.calls[0]![0].data).not.toHaveProperty(
       "notificationClosedAt"
     );
+  });
+});
+
+describe("approve leaves notifications open", () => {
+  it("never writes notificationClosedAt", async () => {
+    const txn = {
+      date: "2026-10-30",
+      description: "KFC",
+      merchantName: "KFC",
+      amount: 1450,
+      type: "DEBIT" as const,
+      category: "Food & Dining",
+      mccCode: "5814",
+      mccLabel: "Fast Food",
+      possibleDuplicate: false,
+    };
+    db.smsImportItem.count.mockResolvedValue(1);
+    db.statementImportBatch.create.mockResolvedValue({ id: "b1" });
+    db.smsImportItem.updateMany.mockResolvedValue({ count: 1 });
+    db.smsImportItem.findMany.mockResolvedValue([{ parsedJson: [txn] }]);
+    db.organisation.findUnique.mockResolvedValue({ hasSampleData: false });
+    await caller().approve({ ids: ["a"] });
+    const writes = [
+      ...db.smsImportItem.updateMany.mock.calls,
+      ...db.smsImportItem.update.mock.calls,
+    ];
+    expect(writes.length).toBeGreaterThan(0);
+    for (const call of writes) expect(call[0].data).not.toHaveProperty("notificationClosedAt");
   });
 });
