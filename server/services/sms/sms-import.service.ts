@@ -9,7 +9,8 @@ import {
   detectDuplicates,
   type ExistingTransaction,
 } from "@/server/services/statement-parser.service";
-import { categorizeBatch } from "@/server/services/statement-categorization.service";
+import type { ImportCategorizer } from "@/server/services/categorize/category-rules.service";
+import { findTokens, type RuleKey } from "@/server/services/categorize/counterparty-token";
 
 export interface ParsedSmsTransaction {
   date: string; // YYYY-MM-DD
@@ -21,6 +22,16 @@ export interface ParsedSmsTransaction {
   mccCode: string;
   mccLabel: string;
   possibleDuplicate: boolean;
+  /** The category is a guess; the review asks "where did this money go?". */
+  needsCategory?: boolean;
+  /** What "Always use…" applies to. Set by the server only. */
+  ruleKey?: RuleKey | null;
+  /** A remembered rule set this row's category. Set by the server only. */
+  ruleApplied?: boolean;
+  /** "Always use…" checkbox; defaults to true. */
+  rememberRule?: boolean;
+  /** The user picked this row's category in review. */
+  userCategorized?: boolean;
 }
 
 export type ProcessSmsResult =
@@ -61,8 +72,9 @@ export async function processSms(
   text: string,
   receivedAt: Date,
   existing: ExistingTransaction[],
+  categorizer: ImportCategorizer,
 ): Promise<ProcessSmsResult> {
-  const redactedText = redactPiiText(text);
+  const redactedText = redactPiiText(categorizer.tokenize(text));
   try {
     const raw = deduplicateIncoming(await parseTransactionsFromText(redactedText))
       .filter((t) => Number.isFinite(t.amount) && Math.abs(t.amount) < MAX_AMOUNT)
@@ -70,8 +82,16 @@ export async function processSms(
     if (raw.length === 0) return { status: "NO_TRANSACTION", redactedText, parsed: [] };
 
     const dated = raw.map((t) => ({ ...t, date: resolveDate(t.date, receivedAt) }));
-    const dupes = new Set(detectDuplicates(dated, existing).duplicates.map((d) => d.incoming));
-    const categories = await categorizeBatch(dated.map((t) => t.description));
+    // Existing rows imported before tokens hold raw numbers; tokenize them the same way so they still match.
+    const comparable = existing.map((e) => ({ ...e, description: categorizer.tokenize(e.description) }));
+    const dupes = new Set(detectDuplicates(dated, comparable).duplicates.map((d) => d.incoming));
+    // One SMS is (almost always) one transaction: if it names exactly one counterparty,
+    // that's who the money went to even if the parser's description dropped the token.
+    const tokens = [...new Set(findTokens(redactedText))];
+    const hint = tokens.length === 1 ? tokens[0]! : null;
+    const categories = await categorizer.categorize(
+      dated.map((t) => (hint && !t.description.includes(hint) ? { description: t.description, counterpartyHint: hint } : { description: t.description })),
+    );
 
     const parsed = dated.map((t, i): ParsedSmsTransaction => ({
       date: t.date,
@@ -83,6 +103,11 @@ export async function processSms(
       mccCode: categories[i]?.mccCode ?? "0000",
       mccLabel: categories[i]?.mccLabel ?? "Uncategorized",
       possibleDuplicate: dupes.has(t),
+      needsCategory: categories[i]?.needsCategory ?? true,
+      ruleKey: categories[i]?.ruleKey ?? null,
+      ruleApplied: categories[i]?.ruleApplied ?? false,
+      rememberRule: true,
+      userCategorized: false,
     }));
     return { status: "PENDING_REVIEW", redactedText, parsed };
   } catch (err) {

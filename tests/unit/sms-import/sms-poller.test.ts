@@ -8,10 +8,13 @@ const NOW = new Date("2026-10-30T12:00:00Z");
 let db: MockDb;
 let readMessages: ReturnType<typeof vi.fn>;
 let processSms: ReturnType<typeof vi.fn>;
+const categorizer = { tokenize: (t: string) => t, categorize: vi.fn() };
+let createCategorizer: ReturnType<typeof vi.fn>;
 const deps = (): PollerDeps => ({
   db: db as unknown as PrismaClient,
   readMessages: readMessages as never,
   processSms: processSms as never,
+  createCategorizer: createCategorizer as never,
   now: () => NOW,
 });
 
@@ -29,6 +32,7 @@ beforeEach(() => {
   db.statementTransaction.findMany.mockResolvedValue([]);
   db.smsImportItem.findUnique.mockResolvedValue(null);
   readMessages = vi.fn().mockResolvedValue([]);
+  createCategorizer = vi.fn(async () => categorizer);
   processSms = vi.fn().mockResolvedValue({ status: "PENDING_REVIEW", redactedText: "red", parsed: [parsedRow] });
 });
 
@@ -52,11 +56,20 @@ describe("runSmsTick", () => {
     readMessages.mockResolvedValueOnce([msg(11, "Mom"), msg(12, "hbl")]);
     await runSmsTick(deps());
     expect(processSms).toHaveBeenCalledTimes(1);
-    expect(processSms).toHaveBeenCalledWith("PKR 12 at X", NOW, []);
+    expect(processSms).toHaveBeenCalledWith("PKR 12 at X", NOW, [], categorizer);
+    expect(createCategorizer).toHaveBeenCalledTimes(1);
+    expect(createCategorizer).toHaveBeenCalledWith("org-1");
     expect(db.smsImportItem.create.mock.calls[0]![0].data).toMatchObject({
       organisationId: "org-1", sourceId: "src-1", messageGuid: "g-12", sender: "hbl",
       text: "red", status: "PENDING_REVIEW", parsedJson: [parsedRow], errorMessage: null,
     });
+  });
+
+  it("does not build a categorizer when no message matches the senders", async () => {
+    db.smsSource.findMany.mockResolvedValue([source()]);
+    readMessages.mockResolvedValueOnce([msg(11, "Mom")]);
+    await runSmsTick(deps());
+    expect(createCategorizer).not.toHaveBeenCalled();
   });
 
   it("stores NO_TRANSACTION and FAILED results too", async () => {
@@ -160,6 +173,6 @@ describe("runSmsTick", () => {
     db.smsSource.findMany.mockResolvedValue([source()]);
     readMessages.mockResolvedValueOnce([msg(11, "HBL", "PKR 5\u0000 at X")]);
     await runSmsTick(deps());
-    expect(processSms).toHaveBeenCalledWith("PKR 5 at X", NOW, []);
+    expect(processSms).toHaveBeenCalledWith("PKR 5 at X", NOW, [], categorizer);
   });
 });

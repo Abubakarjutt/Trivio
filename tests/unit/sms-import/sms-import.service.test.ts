@@ -2,54 +2,63 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const pdf = vi.hoisted(() => ({ parseTransactionsFromText: vi.fn() }));
 vi.mock("@/server/services/pdf-statement.service", () => pdf);
-const cat = vi.hoisted(() => ({ categorizeBatch: vi.fn() }));
-vi.mock("@/server/services/statement-categorization.service", () => cat);
 const pii = vi.hoisted(() => ({ redactPiiText: vi.fn((s: string) => s.replace(/\d{4} \d{4}/g, "[CARD]")) }));
 vi.mock("@/server/services/pii-redaction.service", () => pii);
 
+import type { ImportCategorizer, RuleCategorization } from "@/server/services/categorize/category-rules.service";
 import { isRealIsoDate, loadExistingForDedup, processSms, resolveDate } from "@/server/services/sms/sms-import.service";
 
 const RECEIVED = new Date(2026, 9, 30, 14, 5); // 30 Oct 2026 14:05 local
 const kfc = { date: "2026-10-30", description: "KFC DHA", amount: 1450, type: "DEBIT" as const };
-const catKfc = { description: "KFC DHA", merchantName: "KFC", mccCode: "5814", mccLabel: "Fast Food", category: "Food & Dining" };
+
+const catRow = (over: Partial<RuleCategorization> = {}): RuleCategorization => ({
+  merchantName: "KFC", category: "Food & Dining", mccCode: "5814", mccLabel: "Fast Food",
+  needsCategory: false, ruleKey: { kind: "MERCHANT", matchKey: "kfc", label: "KFC" }, ruleApplied: false, ...over,
+});
+function fakeCategorizer(rows: RuleCategorization[] = [catRow()]) {
+  return {
+    tokenize: vi.fn((t: string) => t.replace("03001234567", "[PHONE ••4567 #0123456789ab]")),
+    categorize: vi.fn(async (_rows: unknown[]) => rows),
+  } satisfies ImportCategorizer;
+}
 
 beforeEach(() => {
   pdf.parseTransactionsFromText.mockReset();
-  cat.categorizeBatch.mockReset();
 });
 
 describe("processSms", () => {
   it("redacts, parses and categorises into PENDING_REVIEW", async () => {
     pdf.parseTransactionsFromText.mockResolvedValue([kfc]);
-    cat.categorizeBatch.mockResolvedValue([catKfc]);
-    const r = await processSms("Card 1234 5678 used PKR 1,450 at KFC DHA", RECEIVED, []);
+    const r = await processSms("Card 1234 5678 used PKR 1,450 at KFC DHA", RECEIVED, [], fakeCategorizer());
     expect(pdf.parseTransactionsFromText).toHaveBeenCalledWith("Card [CARD] used PKR 1,450 at KFC DHA");
     expect(r).toEqual({
       status: "PENDING_REVIEW",
       redactedText: "Card [CARD] used PKR 1,450 at KFC DHA",
       parsed: [{ date: "2026-10-30", description: "KFC DHA", merchantName: "KFC", amount: 1450, type: "DEBIT",
-                 category: "Food & Dining", mccCode: "5814", mccLabel: "Fast Food", possibleDuplicate: false }],
+                 category: "Food & Dining", mccCode: "5814", mccLabel: "Fast Food", possibleDuplicate: false,
+                 needsCategory: false, ruleKey: { kind: "MERCHANT", matchKey: "kfc", label: "KFC" }, ruleApplied: false,
+                 rememberRule: true, userCategorized: false }],
     });
   });
 
   it("returns NO_TRANSACTION for an OTP or promo", async () => {
     pdf.parseTransactionsFromText.mockResolvedValue([]);
-    const r = await processSms("Your OTP is 482913. Do not share.", RECEIVED, []);
+    const c = fakeCategorizer();
+    const r = await processSms("Your OTP is 482913. Do not share.", RECEIVED, [], c);
     expect(r.status).toBe("NO_TRANSACTION");
-    expect(cat.categorizeBatch).not.toHaveBeenCalled();
+    expect(c.categorize).not.toHaveBeenCalled();
   });
 
   it("returns FAILED with the error when the parser throws", async () => {
     pdf.parseTransactionsFromText.mockRejectedValue(new Error("Gemini 503"));
-    expect(await processSms("PKR 10 at X", RECEIVED, [])).toMatchObject({ status: "FAILED", error: "Gemini 503", parsed: [] });
+    expect(await processSms("PKR 10 at X", RECEIVED, [], fakeCategorizer())).toMatchObject({ status: "FAILED", error: "Gemini 503", parsed: [] });
   });
 
   it("flags, but keeps, a transaction that already exists", async () => {
     pdf.parseTransactionsFromText.mockResolvedValue([kfc]);
-    cat.categorizeBatch.mockResolvedValue([catKfc]);
     const r = await processSms("PKR 1,450 at KFC DHA", RECEIVED, [
       { id: "t1", date: "2026-10-30", description: "KFC DHA", amount: 1450 },
-    ]);
+    ], fakeCategorizer());
     expect(r.status).toBe("PENDING_REVIEW");
     expect(r.parsed[0]!.possibleDuplicate).toBe(true);
   });
@@ -60,31 +69,58 @@ describe("processSms", () => {
       { ...kfc, description: "HUGE", amount: 1e15 },
       { ...kfc, amount: -1450 },
     ]);
-    cat.categorizeBatch.mockResolvedValue([catKfc]);
-    const r = await processSms("PKR 1,450 at KFC DHA", RECEIVED, []);
-    expect(cat.categorizeBatch).toHaveBeenCalledWith(["KFC DHA"]);
+    const c = fakeCategorizer();
+    const r = await processSms("PKR 1,450 at KFC DHA", RECEIVED, [], c);
+    expect(c.categorize).toHaveBeenCalledWith([{ description: "KFC DHA" }]);
     expect(r.parsed.map((p) => [p.description, p.amount])).toEqual([["KFC DHA", 1450]]);
   });
 
   it("returns NO_TRANSACTION when every parsed amount is unusable", async () => {
     pdf.parseTransactionsFromText.mockResolvedValue([{ ...kfc, amount: NaN }, { ...kfc, description: "INF", amount: Infinity }]);
-    const r = await processSms("PKR ??? at KFC", RECEIVED, []);
+    const c = fakeCategorizer();
+    const r = await processSms("PKR ??? at KFC", RECEIVED, [], c);
     expect(r.status).toBe("NO_TRANSACTION");
-    expect(cat.categorizeBatch).not.toHaveBeenCalled();
+    expect(c.categorize).not.toHaveBeenCalled();
   });
 
   it("falls back to the description when the merchant name is empty", async () => {
     pdf.parseTransactionsFromText.mockResolvedValue([kfc]);
-    cat.categorizeBatch.mockResolvedValue([{ ...catKfc, merchantName: "" }]);
-    const r = await processSms("PKR 1,450 at KFC DHA", RECEIVED, []);
+    const c = fakeCategorizer([catRow({ merchantName: "" })]);
+    const r = await processSms("PKR 1,450 at KFC DHA", RECEIVED, [], c);
     expect(r.parsed[0]!.merchantName).toBe("KFC DHA");
   });
 
   it("keeps both transactions from a two-transaction SMS", async () => {
     pdf.parseTransactionsFromText.mockResolvedValue([kfc, { ...kfc, description: "REFUND DARAZ", amount: 900, type: "CREDIT" }]);
-    cat.categorizeBatch.mockResolvedValue([catKfc, { ...catKfc, description: "REFUND DARAZ", merchantName: "Daraz", category: "Shopping" }]);
-    const r = await processSms("two txns", RECEIVED, []);
+    const c = fakeCategorizer([catRow(), catRow({ merchantName: "Daraz", category: "Shopping" })]);
+    const r = await processSms("two txns", RECEIVED, [], c);
     expect(r.parsed.map((p) => [p.merchantName, p.type])).toEqual([["KFC", "DEBIT"], ["Daraz", "CREDIT"]]);
+  });
+});
+
+describe("processSms rules", () => {
+  it("tokenizes before redacting and stores the categorizer's flags", async () => {
+    pdf.parseTransactionsFromText.mockResolvedValue([{ date: "2026-10-30", description: "Raast [PHONE ••4567 #0123456789ab]", amount: 5000, type: "DEBIT" }]);
+    const c = fakeCategorizer([catRow({ category: "Transfers", needsCategory: true, ruleKey: { kind: "COUNTERPARTY", matchKey: "0123456789ab", label: "Transfers to ••4567" } })]);
+    const r = await processSms("Raast PKR 5,000 to 03001234567", RECEIVED, [], c);
+    expect(r.redactedText).toContain("[PHONE ••4567 #0123456789ab]");
+    expect(r.redactedText).not.toContain("03001234567");
+    expect(r.parsed[0]).toMatchObject({ needsCategory: true, ruleApplied: false, rememberRule: true, userCategorized: false,
+      ruleKey: { kind: "COUNTERPARTY", matchKey: "0123456789ab" } });
+  });
+
+  it("passes the SMS's single token as a hint when the parser dropped it", async () => {
+    pdf.parseTransactionsFromText.mockResolvedValue([{ date: "2026-10-30", description: "Raast transfer", amount: 5000, type: "DEBIT" }]);
+    const c = fakeCategorizer();
+    await processSms("Raast PKR 5,000 to 03001234567", RECEIVED, [], c);
+    expect(c.categorize).toHaveBeenCalledWith([{ description: "Raast transfer", counterpartyHint: "[PHONE ••4567 #0123456789ab]" }]);
+  });
+
+  it("tokenizes existing descriptions before duplicate detection", async () => {
+    pdf.parseTransactionsFromText.mockResolvedValue([{ date: "2026-10-30", description: "Raast [PHONE ••4567 #0123456789ab]", amount: 5000, type: "DEBIT" }]);
+    const r = await processSms("Raast PKR 5,000 to 03001234567", RECEIVED,
+      [{ id: "e1", date: new Date("2026-10-30"), description: "Raast 03001234567", amount: 5000 }], fakeCategorizer());
+    expect(r.parsed[0]!.possibleDuplicate).toBe(true);
   });
 });
 

@@ -25,7 +25,14 @@ export async function registerNode() {
       const { processSms } = await import("@/server/services/sms/sms-import.service");
       const { startSmsPoller } = await import("@/server/services/sms/sms-poller.service");
       console.info("[sms] chat.db access:", await messagesDb.checkChatDbAccess());
-      startSmsPoller({ db, readMessages: messagesDb.readMessages, processSms, now: () => new Date() });
+      const { createImportCategorizer } = await import("@/server/services/categorize/category-rules.service");
+      startSmsPoller({
+        db,
+        readMessages: messagesDb.readMessages,
+        processSms,
+        createCategorizer: (orgId) => createImportCategorizer(db, orgId),
+        now: () => new Date(),
+      });
     } catch (err) {
       console.error("[sms] poller failed to start:", err);
     }

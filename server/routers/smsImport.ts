@@ -12,12 +12,18 @@ import {
   processSms,
   type ParsedSmsTransaction,
 } from "@/server/services/sms/sms-import.service";
+import { createImportCategorizer } from "@/server/services/categorize/category-rules.service";
 import { redactPiiText } from "@/server/services/pii-redaction.service";
 
 const SUGGEST_LOOKBACK_DAYS = 30;
 const SUGGEST_SCAN_LIMIT = 2000;
 
-const parsedTxn = z.object({
+const ruleKeySchema = z.object({
+  kind: z.enum(["COUNTERPARTY", "MERCHANT"]),
+  matchKey: z.string().min(1).max(200),
+  label: z.string().min(1).max(200),
+});
+export const parsedTxn = z.object({
   date: z.string().refine(isRealIsoDate, "Invalid date"),
   description: z.string().min(1).max(500),
   merchantName: z.string().min(1).max(200),
@@ -27,6 +33,11 @@ const parsedTxn = z.object({
   mccCode: z.string().max(10),
   mccLabel: z.string().max(200),
   possibleDuplicate: z.boolean(),
+  needsCategory: z.boolean().optional(),
+  ruleKey: ruleKeySchema.nullable().optional(),
+  ruleApplied: z.boolean().optional(),
+  rememberRule: z.boolean().optional(),
+  userCategorized: z.boolean().optional(),
 });
 const statusEnum = z.enum(["PENDING_REVIEW", "APPROVED", "DISMISSED", "FAILED", "NO_TRANSACTION"]);
 const ids = z.array(z.string().min(1)).min(1).max(500);
@@ -104,13 +115,24 @@ export const smsImportRouter = createTRPCRouter({
     ctx.db.smsImportItem.count({ where: { organisationId: ctx.organisationId, status: "PENDING_REVIEW" } }),
   ),
 
+  // The client edits what the user sees; which rule a row belongs to (and whether a
+  // rule set it) stays whatever the server computed.
   updateItem: orgProcedure
     .input(z.object({ id: z.string().min(1), parsed: z.array(parsedTxn).min(1).max(20) }))
     .mutation(async ({ ctx, input }) => {
-      const res = await ctx.db.smsImportItem.updateMany({
-        where: { id: input.id, organisationId: ctx.organisationId, status: "PENDING_REVIEW" },
-        data: { parsedJson: input.parsed as unknown as Prisma.InputJsonValue },
-      });
+      const where = { id: input.id, organisationId: ctx.organisationId, status: "PENDING_REVIEW" as const };
+      const item = await ctx.db.smsImportItem.findFirst({ where, select: { parsedJson: true } });
+      if (!item) throw new TRPCError({ code: "NOT_FOUND" });
+      const stored = item.parsedJson as unknown as ParsedSmsTransaction[];
+      if (stored.length !== input.parsed.length) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: "This SMS changed. Refresh and try again." });
+      }
+      const merged = input.parsed.map((row, i) => ({
+        ...row,
+        ruleKey: stored[i]?.ruleKey ?? null,
+        ruleApplied: stored[i]?.ruleApplied ?? false,
+      }));
+      const res = await ctx.db.smsImportItem.updateMany({ where, data: { parsedJson: merged as unknown as Prisma.InputJsonValue } });
       if (res.count === 0) throw new TRPCError({ code: "NOT_FOUND" });
       return { ok: true as const };
     }),
@@ -207,7 +229,8 @@ export const smsImportRouter = createTRPCRouter({
       if (!item) throw new TRPCError({ code: "NOT_FOUND" });
       if (!item.text) throw new TRPCError({ code: "PRECONDITION_FAILED", message: "This message has no readable text." });
       const existing = await loadExistingForDedup(ctx.db, ctx.organisationId, new Date());
-      const result = await processSms(item.text, item.receivedAt, existing);
+      const categorizer = await createImportCategorizer(ctx.db, ctx.organisationId);
+      const result = await processSms(item.text, item.receivedAt, existing, categorizer);
       // Guarded on status: a Hide/dismiss that lands while we re-parse wins.
       const res = await ctx.db.smsImportItem.updateMany({
         where: { id: item.id, organisationId: ctx.organisationId, status: { in: ["FAILED", "NO_TRANSACTION"] } },

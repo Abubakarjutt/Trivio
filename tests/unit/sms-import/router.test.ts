@@ -15,6 +15,10 @@ vi.mock("@/server/services/sms/sms-import.service", async (orig) => ({
   ...svc,
 }));
 
+vi.mock("@/server/services/categorize/category-rules.service", () => ({
+  createImportCategorizer: vi.fn(async () => ({ tokenize: (t: string) => t, categorize: vi.fn() })),
+}));
+
 import { createCallerFactory, createTRPCRouter } from "@/server/trpc";
 import { smsImportRouter } from "@/server/routers/smsImport";
 import { makeDb, type MockDb } from "../outreach/helpers";
@@ -152,6 +156,17 @@ describe("smsImport.approve", () => {
 });
 
 describe("smsImport.updateItem", () => {
+  beforeEach(() => {
+    db.smsImportItem.findFirst.mockResolvedValue({ parsedJson: [txn] });
+  });
+
+  it("returns NOT_FOUND when the item is missing", async () => {
+    db.smsImportItem.findFirst.mockResolvedValue(null);
+    const err = await caller().updateItem({ id: "i1", parsed: [txn] }).catch((e) => e);
+    expect(err.code).toBe("NOT_FOUND");
+    expect(db.smsImportItem.updateMany).not.toHaveBeenCalled();
+  });
+
   it("only edits pending items of this org", async () => {
     db.smsImportItem.updateMany.mockResolvedValue({ count: 0 });
     const err = await caller().updateItem({ id: "i1", parsed: [txn] }).catch((e) => e);
@@ -169,6 +184,23 @@ describe("smsImport.updateItem", () => {
     const err = await caller().updateItem({ id: "i1", parsed: [{ ...txn, amount }] }).catch((e) => e);
     expect(err.code).toBe("BAD_REQUEST");
     expect(db.smsImportItem.updateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("smsImport.updateItem merge", () => {
+  it("keeps server-owned fields (ruleKey, ruleApplied) from the stored rows", async () => {
+    const stored = { ...txn, ruleKey: { kind: "COUNTERPARTY", matchKey: "0123456789ab", label: "Transfers to ••4567" }, ruleApplied: false, needsCategory: true };
+    db.smsImportItem.findFirst.mockResolvedValue({ parsedJson: [stored] });
+    db.smsImportItem.updateMany.mockResolvedValue({ count: 1 });
+    await caller().updateItem({ id: "i1", parsed: [{ ...txn, category: "Rent", ruleKey: { kind: "MERCHANT", matchKey: "evil", label: "x" }, ruleApplied: true, needsCategory: false, userCategorized: true, rememberRule: true }] });
+    const saved = db.smsImportItem.updateMany.mock.calls[0]![0];
+    expect(saved.where).toEqual({ id: "i1", organisationId: "org-1", status: "PENDING_REVIEW" });
+    expect(saved.data.parsedJson[0]).toMatchObject({ category: "Rent", ruleKey: stored.ruleKey, ruleApplied: false, needsCategory: false, userCategorized: true });
+  });
+
+  it("rejects a different number of rows", async () => {
+    db.smsImportItem.findFirst.mockResolvedValue({ parsedJson: [txn, txn] });
+    await expect(caller().updateItem({ id: "i1", parsed: [txn] })).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 });
 
@@ -202,6 +234,7 @@ describe("smsImport.retry", () => {
     svc.processSms.mockResolvedValue({ status: "PENDING_REVIEW", redactedText: "PKR 1,450 at KFC", parsed: [txn] });
     db.smsImportItem.updateMany.mockResolvedValue({ count: 1 });
     expect(await caller().retry({ id: "i1" })).toEqual({ status: "PENDING_REVIEW" });
+    expect(svc.processSms.mock.calls[0]![3]).toEqual(expect.objectContaining({ tokenize: expect.any(Function) }));
     expect(db.smsImportItem.findFirst.mock.calls[0]![0].where).toEqual({ id: "i1", organisationId: "org-1", status: { in: ["FAILED", "NO_TRANSACTION"] } });
     expect(db.smsImportItem.updateMany.mock.calls[0]![0]).toEqual({
       where: { id: "i1", organisationId: "org-1", status: { in: ["FAILED", "NO_TRANSACTION"] } },

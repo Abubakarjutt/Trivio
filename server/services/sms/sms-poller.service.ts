@@ -1,6 +1,7 @@
 // Checks the Messages database every minute for new SMS from the user's bank
 // senders and queues them for review. Started from instrumentation-node.ts on macOS.
 import type { Prisma, PrismaClient } from "@prisma/client";
+import type { ImportCategorizer } from "@/server/services/categorize/category-rules.service";
 import type { ExistingTransaction } from "@/server/services/statement-parser.service";
 import { ChatDbError, PAGE_SIZE, type ChatMessage, type MessageCursor, type readMessages } from "./messages-db";
 import { makeSenderMatcher } from "./sender";
@@ -14,6 +15,7 @@ export interface PollerDeps {
   db: PrismaClient;
   readMessages: typeof readMessages;
   processSms: typeof processSms;
+  createCategorizer: (organisationId: string) => Promise<ImportCategorizer>;
   now: () => Date;
 }
 
@@ -29,6 +31,7 @@ async function importOne(
   source: SourceRow,
   msg: ChatMessage,
   existing: ExistingTransaction[],
+  categorizer: ImportCategorizer,
 ): Promise<void> {
   const { db } = deps;
   const already = await db.smsImportItem.findUnique({
@@ -51,7 +54,7 @@ async function importOne(
     return;
   }
   // Postgres TEXT/JSONB reject NUL characters.
-  const result = await deps.processSms(msg.text.replace(/\u0000/g, ""), msg.receivedAt, existing);
+  const result = await deps.processSms(msg.text.replace(/\u0000/g, ""), msg.receivedAt, existing, categorizer);
   await db.smsImportItem.create({
     data: {
       ...base,
@@ -99,6 +102,7 @@ async function syncSource(deps: PollerDeps, source: SourceRow): Promise<void> {
       ? { since: new Date(deps.now().getTime() - FIRST_SYNC_LOOKBACK_DAYS * 86_400_000) }
       : { afterRowId: source.lastRowId };
   let existing: ExistingTransaction[] | null = null;
+  let categorizer: ImportCategorizer | undefined;
 
   for (let page = 0; page < MAX_PAGES_PER_TICK; page++) {
     const messages = await deps.readMessages(cursor);
@@ -108,8 +112,9 @@ async function syncSource(deps: PollerDeps, source: SourceRow): Promise<void> {
     for (const msg of messages) {
       if (matches(msg.sender)) {
         existing ??= await loadExistingForDedup(deps.db, source.organisationId, deps.now());
+        categorizer ??= await deps.createCategorizer(source.organisationId);
         try {
-          await importOne(deps, source, msg, existing);
+          await importOne(deps, source, msg, existing, categorizer);
         } catch (err) {
           await recordImportFailure(deps, source, msg, err);
         }
