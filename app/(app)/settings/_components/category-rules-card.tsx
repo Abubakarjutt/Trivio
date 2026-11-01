@@ -23,30 +23,44 @@ export function CategoryRulesCard() {
       <CardHeader>
         <CardTitle>Category rules</CardTitle>
         <CardDescription>
-          Categories Trivio remembers for a transfer recipient or merchant. Changes apply to future imports only.
+          Categories Trivio remembers for a transfer recipient or merchant. Changes apply to future
+          imports only.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">
-        {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
+        {isLoading && <p className="text-muted-foreground text-sm">Loading…</p>}
         {!isLoading && rules.length === 0 && (
-          <p className="text-sm text-muted-foreground">
-            No rules yet. When you pick a category for an imported transaction and keep &quot;Always use…&quot; ticked, it appears here.
+          <p className="text-muted-foreground text-sm">
+            No rules yet. When you pick a category for an imported transaction and keep &quot;Always
+            use…&quot; ticked, it appears here.
           </p>
         )}
         {rules.map((r) => (
-          <div key={r.id} className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm">
+          <div
+            key={r.id}
+            className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm"
+          >
             <div className="min-w-0">
               <p className="truncate font-medium">{r.label}</p>
-              <p className="text-xs text-muted-foreground">
-                {r.kind === "COUNTERPARTY" ? "Transfer" : "Merchant"} · used {r.timesApplied} time{r.timesApplied === 1 ? "" : "s"}
+              <p className="text-muted-foreground text-xs">
+                {r.kind === "COUNTERPARTY" ? "Transfer" : "Merchant"} · used {r.timesApplied} time
+                {r.timesApplied === 1 ? "" : "s"}
                 {r.lastAppliedAt ? ` · last ${new Date(r.lastAppliedAt).toLocaleDateString()}` : ""}
               </p>
             </div>
             <div className="flex shrink-0 items-center gap-2">
-              <CategoryPicker value={r.category} onChange={(c) => update.mutate({ id: r.id, category: c })}
-                triggerClassName="h-7 px-2 text-xs rounded-full bg-muted" />
-              <button type="button" aria-label={`Delete rule for ${r.label}`} disabled={remove.isPending}
-                onClick={() => remove.mutate({ id: r.id })} className="text-muted-foreground hover:text-red-500">
+              <CategoryPicker
+                value={r.category}
+                onChange={(c) => update.mutate({ id: r.id, category: c })}
+                triggerClassName="h-7 px-2 text-xs rounded-full bg-muted"
+              />
+              <button
+                type="button"
+                aria-label={`Delete rule for ${r.label}`}
+                disabled={remove.isPending}
+                onClick={() => remove.mutate({ id: r.id })}
+                className="text-muted-foreground hover:text-red-500"
+              >
                 <Trash2 className="h-4 w-4" />
               </button>
             </div>

@@ -9,8 +9,15 @@ export const categoryRulesRouter = createTRPCRouter({
     ctx.db.categoryRule.findMany({
       where: { organisationId: ctx.organisationId },
       orderBy: { updatedAt: "desc" },
-      select: { id: true, kind: true, label: true, category: true, timesApplied: true, lastAppliedAt: true },
-    }),
+      select: {
+        id: true,
+        kind: true,
+        label: true,
+        category: true,
+        timesApplied: true,
+        lastAppliedAt: true,
+      },
+    })
   ),
 
   update: orgProcedure
@@ -27,7 +34,9 @@ export const categoryRulesRouter = createTRPCRouter({
   delete: orgProcedure
     .input(z.object({ id: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      const res = await ctx.db.categoryRule.deleteMany({ where: { id: input.id, organisationId: ctx.organisationId } });
+      const res = await ctx.db.categoryRule.deleteMany({
+        where: { id: input.id, organisationId: ctx.organisationId },
+      });
       if (res.count === 0) throw new TRPCError({ code: "NOT_FOUND" });
       return { ok: true as const };
     }),
