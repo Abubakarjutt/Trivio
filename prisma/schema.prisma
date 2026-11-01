@@ -123,6 +123,8 @@ model Organisation {
   onboardingStep       OnboardingStep   @default(BUSINESS_INFO)
   onboardingComplete   Boolean          @default(false)
   hasSampleData        Boolean          @default(false)
+  counterpartySecret   String?
+  categoryRules        CategoryRule[]
   plan                 Plan                  @default(FREE)
   lsCustomerId         String?
   lsSubscriptionId     String?               @unique
@@ -759,6 +761,12 @@ model StatementTransaction {
 
   isExcluded     Boolean                  @default(false)
   isSampleData   Boolean                  @default(false)
+  /// Imported with an ambiguous category (transfer/other/no AI); the user is asked.
+  needsCategory  Boolean                  @default(false)
+  /// What "Always use…" applies to (see CategoryRule). Null for manual/old rows.
+  ruleKind       CategoryRuleKind?
+  ruleMatchKey   String?
+  ruleLabel      String?
   /// The savings goal this transaction paid into (its amount is in the goal's
   /// currentAmount; deleting the transaction takes it back off).
   goalId         String?
@@ -771,6 +779,7 @@ model StatementTransaction {
   @@index([goalId])
   @@index([organisationId, date])
   @@index([organisationId, category])
+  @@index([organisationId, needsCategory])
 }
 
 // ─── SMS Import ───────────────────────────────────────────────────────────────
@@ -824,6 +833,8 @@ model SmsImportItem {
   parsedJson     Json
   status         SmsImportStatus       @default(PENDING_REVIEW)
   errorMessage   String?
+  /// Set when the user closes this SMS's in-app notification (its × button).
+  notificationClosedAt DateTime?
   importBatchId  String?
   importBatch    StatementImportBatch? @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
   createdAt      DateTime              @default(now())
@@ -831,6 +842,31 @@ model SmsImportItem {
 
   @@unique([organisationId, messageGuid])
   @@index([organisationId, status])
+}
+
+// ─── Category rules ───────────────────────────────────────────────────────────
+
+enum CategoryRuleKind {
+  COUNTERPARTY
+  MERCHANT
+}
+
+/// "Always use <category>" for a counterparty token hash or a normalised merchant name.
+model CategoryRule {
+  id             String           @id @default(cuid())
+  organisationId String
+  organisation   Organisation     @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  kind           CategoryRuleKind
+  matchKey       String
+  label          String
+  category       String
+  timesApplied   Int              @default(0)
+  lastAppliedAt  DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@unique([organisationId, kind, matchKey])
+  @@index([organisationId])
 }
 
 // ─── CRM Module ───────────────────────────────────────────────────────────────

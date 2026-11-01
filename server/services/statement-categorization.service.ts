@@ -26,6 +26,8 @@ export interface CategorizationResult {
   mccCode: string;
   mccLabel: string;
   category: string;
+  /** True when no AI answer was available and a default was used. */
+  fallback: boolean;
 }
 
 const fallback = (description: string): CategorizationResult => ({
@@ -34,6 +36,7 @@ const fallback = (description: string): CategorizationResult => ({
   mccCode: "0000",
   mccLabel: "Uncategorized",
   category: "Other",
+  fallback: true,
 });
 
 function buildCategoryList(): string {
@@ -154,6 +157,7 @@ export async function categorizeBatch(descriptions: string[]): Promise<Categoriz
         mccCode: "0000",
         mccLabel: category,
         category,
+        fallback: false,
       };
     });
   } catch (err) {
