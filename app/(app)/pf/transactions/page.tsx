@@ -24,6 +24,11 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { SmsReviewBanner } from "./_components/sms-review-sheet";
+import { NeedsCategoryBanner } from "./_components/needs-category-banner";
+import {
+  RememberRuleDialog,
+  type PendingCategoryChange,
+} from "./_components/remember-rule-dialog";
 import { ImportDialog } from "./_components/import-dialog";
 import { AddTransactionDialog } from "./_components/add-transaction-dialog";
 import { TransactionCard } from "./_components/transaction-card";
@@ -89,6 +94,8 @@ export default function PfTransactionsPage() {
   const [type, setType] = useState<string>("__all__");
   const [search, setSearch] = useState("");
   const [cursor, setCursor] = useState<string | undefined>(undefined);
+  const [needsCategoryOnly, setNeedsCategoryOnly] = useState(false);
+  const [pendingChange, setPendingChange] = useState<PendingCategoryChange | null>(null);
 
   const { data: org } = trpc.org.get.useQuery();
   const currency = org?.currency ?? "USD";
@@ -105,6 +112,7 @@ export default function PfTransactionsPage() {
       type: type === "__all__" ? undefined : (type as "DEBIT" | "CREDIT"),
       search: search || undefined,
       cursor,
+      needsCategory: needsCategoryOnly ? true : undefined,
       limit: 50,
     },
     { enabled: payMonths.ready }
@@ -113,12 +121,25 @@ export default function PfTransactionsPage() {
   const isLoading = list.isLoading || !payMonths.ready;
 
   const updateCategory = trpc.statementTransactions.updateCategory.useMutation({
-    onSuccess: () => {
+    onSuccess: (r) => {
       utils.statementTransactions.list.invalidate();
       utils.statementTransactions.summary.invalidate();
+      utils.statementTransactions.needsCategoryCount.invalidate();
+      if (r.alsoUpdated > 0)
+        toast.success(
+          `Also updated ${r.alsoUpdated} other transaction${r.alsoUpdated === 1 ? "" : "s"}`
+        );
+      setPendingChange(null);
     },
     onError: (e) => toast.error(e.message),
   });
+
+  const changeCategory = (id: string, newCat: string) => {
+    const txn = data?.items.find((t) => t.id === id);
+    if (txn?.ruleMatchKey)
+      setPendingChange({ id, category: newCat, label: txn.ruleLabel ?? txn.merchantName });
+    else updateCategory.mutate({ id, category: newCat });
+  };
 
   const deleteTransaction = trpc.statementTransactions.deleteTransaction.useMutation({
     onSuccess: () => {
@@ -167,6 +188,14 @@ export default function PfTransactionsPage() {
       />
 
       <SmsReviewBanner />
+
+      <NeedsCategoryBanner
+        active={needsCategoryOnly}
+        onToggle={() => {
+          setNeedsCategoryOnly((v) => !v);
+          setCursor(undefined);
+        }}
+      />
 
       {/* Month picker */}
       <div className="flex items-center justify-between">
@@ -351,11 +380,14 @@ export default function PfTransactionsPage() {
                     <td className="px-4 py-3">
                       <CategoryPicker
                         value={txn.category}
-                        onChange={(newCat) =>
-                          updateCategory.mutate({ id: txn.id, category: newCat })
-                        }
+                        onChange={(newCat) => changeCategory(txn.id, newCat)}
                         triggerClassName={`h-6 px-2 text-xs rounded-full ${CATEGORY_COLORS[txn.category] ?? CATEGORY_COLORS["Other"]}`}
                       />
+                      {txn.needsCategory && (
+                        <span className="ml-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800">
+                          Needs category
+                        </span>
+                      )}
                     </td>
                     <td
                       className={`px-4 py-3 text-right font-medium tabular-nums ${txn.type === "DEBIT" ? "text-red-500" : "text-emerald-500"}`}
@@ -395,7 +427,7 @@ export default function PfTransactionsPage() {
               <TransactionCard
                 key={txn.id}
                 txn={{ ...txn, amount: Number(txn.amount) }}
-                onCategoryChange={(id, cat) => updateCategory.mutate({ id, category: cat })}
+                onCategoryChange={changeCategory}
                 onDelete={(id) => deleteTransaction.mutate({ id })}
                 fmt={fmt}
               />
@@ -425,6 +457,20 @@ export default function PfTransactionsPage() {
           utils.statementTransactions.list.invalidate();
           utils.statementTransactions.summary.invalidate();
         }}
+      />
+
+      <RememberRuleDialog
+        change={pendingChange}
+        busy={updateCategory.isPending}
+        onCancel={() => setPendingChange(null)}
+        onConfirm={(remember) =>
+          pendingChange &&
+          updateCategory.mutate({
+            id: pendingChange.id,
+            category: pendingChange.category,
+            remember,
+          })
+        }
       />
 
       <AddTransactionDialog
