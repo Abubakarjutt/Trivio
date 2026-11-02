@@ -322,7 +322,7 @@ export function resolveMigrateCommand(
 // explicit path it uses the file as-is. Pure + injectable.
 export function bundledPrismaEngineEnv(
   serverDir: string,
-  env: NodeJS.ProcessEnv = {},
+  env: Record<string, string | undefined> = {},
   list: (dir: string) => string[] = (dir) => {
     try {
       return readdirSync(dir);
@@ -330,12 +330,12 @@ export function bundledPrismaEngineEnv(
       return [];
     }
   }
-): NodeJS.ProcessEnv {
+): Record<string, string> {
   const dir = join(serverDir, "node_modules", "@prisma", "engines");
   const files = list(dir);
   const schema = files.find((f) => f.startsWith("schema-engine-"));
   const library = files.find((f) => /^(lib)?query_engine-/.test(f) && f.endsWith(".node"));
-  const out: NodeJS.ProcessEnv = {};
+  const out: Record<string, string> = {};
   if (schema && !env.PRISMA_SCHEMA_ENGINE_BINARY) out.PRISMA_SCHEMA_ENGINE_BINARY = join(dir, schema);
   if (library && !env.PRISMA_QUERY_ENGINE_LIBRARY) out.PRISMA_QUERY_ENGINE_LIBRARY = join(dir, library);
   return out;

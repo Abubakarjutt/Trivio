@@ -483,7 +483,7 @@ describe("bundledPrismaEngineEnv", () => {
       return child;
     };
     const cfg = buildConfig(
-      {},
+      {} as NodeJS.ProcessEnv,
       { userDataDir: "/userdata", port: 5432, binaries: { initdb: "i", postgres: "p" } }
     );
     const serverDir = mkdtempSync(join(tmpdir(), "trivio-engines-"));
@@ -491,7 +491,7 @@ describe("bundledPrismaEngineEnv", () => {
     mkdirSync(engines, { recursive: true });
     writeFileSync(join(engines, "schema-engine-darwin-arm64"), "");
     try {
-      await ensureMigrated(cfg, serverDir, {}, spawnImpl, () => false);
+      await ensureMigrated(cfg, serverDir, {} as NodeJS.ProcessEnv, spawnImpl, () => false);
       expect(capturedEnv.PRISMA_SCHEMA_ENGINE_BINARY).toBe(join(engines, "schema-engine-darwin-arm64"));
     } finally {
       rmSync(serverDir, { recursive: true, force: true });
