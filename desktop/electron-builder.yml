@@ -26,6 +26,11 @@ copyright: Copyright © 2025 Trivio
 # desktop/after-sign.mjs for the full explanation and fix.
 afterSign: desktop/after-sign.mjs
 
+# Runs before signing: strips the auto-update feed from builds made outside the
+# release workflow, whose updater can never install a published release. See
+# desktop/after-pack.mjs.
+afterPack: desktop/after-pack.mjs
+
 # Publishing is disabled via the `--publish never` CLI flag on every electron-builder
 # invocation in package.json, not here: the config-level `publish: never` value routes
 # through app-builder-lib's provider-class resolution and requires an
