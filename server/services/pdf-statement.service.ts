@@ -1,12 +1,18 @@
 /**
  * PdfStatementService
- * Extracts text from PDF files using pdfjs-dist, then uses the Gemini API
- * to parse transaction rows from the extracted text.
+ * Extracts text from PDF files using pdfjs-dist, then has the configured AI
+ * provider (the local Ollama model by default, or Gemini) parse transaction
+ * rows from the extracted text.
  */
+import { z } from "zod";
 import type { RawTransaction } from "./statement-parser.service";
 import { redactPii } from "./pii-redaction.service";
+import { resolveProvider } from "./ai-status";
+import { createLlm, OutreachAiError } from "./outreach/llm";
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY ?? "";
+// Read per call: the key can be added to ~/.trivio/.env without a rebuild, and
+// tests set it per case.
+const geminiApiKey = () => process.env.GEMINI_API_KEY ?? "";
 // Model fallback chain — each model has its own 1,500 RPD free-tier quota.
 // On 429 we try the next model so a single exhausted quota doesn't break imports.
 // Each model has its own independent daily quota.
@@ -145,7 +151,7 @@ const PARSE_PROMPT_SUFFIX = `
 JSON array:`;
 
 async function callGeminiModel(prompt: string, model: string): Promise<RawTransaction[] | 429> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiApiKey()}`;
   const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -192,11 +198,32 @@ async function callGeminiModel(prompt: string, model: string): Promise<RawTransa
     }));
 }
 
+const LocalParseSchema = z.object({
+  transactions: z.array(
+    z.object({
+      date: z.string(),
+      description: z.string(),
+      amount: z.number(),
+      type: z.enum(["DEBIT", "CREDIT"]),
+    })
+  ),
+});
+
+// The local model (gemma4:e4b via Ollama) answers through the shared structured-
+// output client, so its reply is schema-checked rather than scraped for a JSON array.
+async function callLocalModel(prompt: string): Promise<RawTransaction[]> {
+  const { transactions } = await createLlm().generateJson(LocalParseSchema, {
+    system: "You extract financial transactions from bank text and answer only with JSON.",
+    user: `${prompt}\n\nPut the transactions in the "transactions" array.`,
+  });
+  return transactions.filter((t) => t.date && t.description);
+}
+
 async function callGemini(prompt: string): Promise<RawTransaction[]> {
-  if (!GEMINI_API_KEY) {
-    console.warn("[pdf-statement.service] GEMINI_API_KEY not set — returning empty list.");
-    return [];
-  }
+  if (resolveProvider(process.env) === "ollama") return callLocalModel(prompt);
+  // Gemini was chosen explicitly (AI_PROVIDER=gemini). Without a key, fail loudly:
+  // returning [] would file every SMS as "no transaction" with no trace of why.
+  if (!geminiApiKey()) throw new Error("AI_PROVIDER is gemini but GEMINI_API_KEY is not set.");
 
   for (const model of GEMINI_MODELS) {
     const result = await callGeminiModel(prompt, model);
@@ -241,17 +268,19 @@ export async function parseTransactionsFromText(text: string): Promise<RawTransa
       const results = await callGemini(prompt);
       if (results.length > 0) return results;
       if (attempt < MAX_ATTEMPTS) {
-        console.warn(`[pdf-statement.service] Gemini returned 0 transactions on attempt ${attempt}, retrying…`);
+        console.warn(`[pdf-statement.service] AI returned 0 transactions on attempt ${attempt}, retrying…`);
         await new Promise((r) => setTimeout(r, 1000));
         continue;
       }
       return results;
     } catch (err) {
       if (attempt < MAX_ATTEMPTS) {
-        console.warn(`[pdf-statement.service] Gemini attempt ${attempt} failed, retrying…`, err);
+        console.warn(`[pdf-statement.service] AI parse attempt ${attempt} failed, retrying…`, err);
         await new Promise((r) => setTimeout(r, 1000));
         continue;
       }
+      // The shared client's messages say what to fix (start the local engine, pull the model).
+      if (err instanceof OutreachAiError) throw new Error(err.message);
       throw new Error("AI parsing service unavailable. Please try again in a moment.");
     }
   }
