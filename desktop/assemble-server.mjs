@@ -20,6 +20,7 @@
 import { cpSync, existsSync, rmSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { findMessagesDbInBuild } from "../scripts/check-no-messages-db.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
@@ -51,6 +52,15 @@ if (!existsSync(standaloneRoot))
   die(
     `no .next/standale found at ${standaloneRoot}`,
     `run "npm run build" first (package.json sets output: "standalone").`
+  );
+
+// Never ship the user's Messages database: the SMS reader points at
+// ~/Library/Messages/chat.db and output file tracing must not have copied it.
+const messagesDbHits = findMessagesDbInBuild(join(root, ".next"));
+if (messagesDbHits.length > 0)
+  die(
+    "Messages database found in build output",
+    `remove these and rebuild:\n  ${messagesDbHits.join("\n  ")}`
   );
 
 const serverJs = findServer(standaloneRoot);

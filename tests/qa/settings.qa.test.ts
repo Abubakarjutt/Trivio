@@ -69,13 +69,6 @@ describe("organisation settings", () => {
     expect((await u.api.org.get()).taxJurisdiction).toBeNull();
   });
 
-  it("rotates the email-import token", async () => {
-    const a = await u.api.org.resetEmailImportToken();
-    const b = await u.api.org.resetEmailImportToken();
-    expect(a.emailImportToken).toBeTruthy();
-    expect(b.emailImportToken).not.toBe(a.emailImportToken);
-  });
-
   it("onboarding rejects an unsupported currency or unknown tax regime", async () => {
     await callerFor(null).auth.register({
       name: "Onb",

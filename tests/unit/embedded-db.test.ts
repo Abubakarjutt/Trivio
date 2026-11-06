@@ -5,6 +5,9 @@
 // GUI — we inject fakes for spawn / fs / port-picking / readiness / migration.
 import { describe, it, expect, vi } from "vitest";
 import { EventEmitter } from "node:events";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   decideDatabaseMode,
   resolveDataDir,
@@ -16,6 +19,7 @@ import {
   resolveHiddenNodeExecPath,
   resolveMigrateCommand,
   ensureMigrated,
+  bundledPrismaEngineEnv,
   withEngineLibPath,
   withSafeLocale,
   startEmbeddedDatabase,
@@ -437,6 +441,61 @@ describe("ensureMigrated", () => {
     await expect(ensureMigrated(cfg, "/srv", {}, spawnImpl, () => false)).rejects.toThrow(
       /Cannot find module '@prisma\/debug'/
     );
+  });
+});
+
+describe("bundledPrismaEngineEnv", () => {
+  const dir = "/srv/node_modules/@prisma/engines";
+
+  it("points the Prisma CLI at the bundled engines so it never overwrites the signed copies from its cache", () => {
+    const list = () => [
+      "LICENSE",
+      "package.json",
+      "libquery_engine-darwin-arm64.dylib.node",
+      "schema-engine-darwin-arm64",
+    ];
+    expect(bundledPrismaEngineEnv("/srv", {}, list)).toEqual({
+      PRISMA_SCHEMA_ENGINE_BINARY: `${dir}/schema-engine-darwin-arm64`,
+      PRISMA_QUERY_ENGINE_LIBRARY: `${dir}/libquery_engine-darwin-arm64.dylib.node`,
+    });
+  });
+
+  it("matches the Windows engine names", () => {
+    const list = () => ["query_engine-windows.dll.node", "schema-engine-windows.exe"];
+    expect(bundledPrismaEngineEnv("/srv", {}, list)).toEqual({
+      PRISMA_SCHEMA_ENGINE_BINARY: `${dir}/schema-engine-windows.exe`,
+      PRISMA_QUERY_ENGINE_LIBRARY: `${dir}/query_engine-windows.dll.node`,
+    });
+  });
+
+  it("sets nothing when the engines dir is missing, and keeps explicit overrides", () => {
+    expect(bundledPrismaEngineEnv("/srv", {}, () => [])).toEqual({});
+    const list = () => ["schema-engine-darwin-arm64"];
+    expect(bundledPrismaEngineEnv("/srv", { PRISMA_SCHEMA_ENGINE_BINARY: "/x" }, list)).toEqual({});
+  });
+
+  it("is passed to the migrate child process", async () => {
+    let capturedEnv: any;
+    const spawnImpl: any = (_cmd: string, _args: string[], opts: any) => {
+      capturedEnv = opts.env;
+      const child = fakeChild();
+      process.nextTick(() => child.emit("exit", 0));
+      return child;
+    };
+    const cfg = buildConfig(
+      {} as NodeJS.ProcessEnv,
+      { userDataDir: "/userdata", port: 5432, binaries: { initdb: "i", postgres: "p" } }
+    );
+    const serverDir = mkdtempSync(join(tmpdir(), "trivio-engines-"));
+    const engines = join(serverDir, "node_modules", "@prisma", "engines");
+    mkdirSync(engines, { recursive: true });
+    writeFileSync(join(engines, "schema-engine-darwin-arm64"), "");
+    try {
+      await ensureMigrated(cfg, serverDir, {} as NodeJS.ProcessEnv, spawnImpl, () => false);
+      expect(capturedEnv.PRISMA_SCHEMA_ENGINE_BINARY).toBe(join(engines, "schema-engine-darwin-arm64"));
+    } finally {
+      rmSync(serverDir, { recursive: true, force: true });
+    }
   });
 });
 

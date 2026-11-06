@@ -45,6 +45,7 @@ import { createBackupService, registerBackupIpc } from "./backup/wire";
 import type { BackupService } from "./backup/backup-service";
 import { moveLegacyAttachments } from "./storage-dir";
 import { terminateChild, terminateChildAndWait } from "./stop-child";
+import { isAllowedExternalUrl } from "./external-url";
 
 // ── Ollama (local AI) engine lifecycle ─────────────────────────────────────────
 // The desktop shell owns a local Ollama server + Gemma model so the AI chat can
@@ -582,7 +583,7 @@ function createWindow(): BrowserWindow {
 
 function registerIpc(): void {
   ipcMain.handle("shell:openExternal", (_e, url: string) => {
-    if (/^https?:\/\//i.test(url)) return shell.openExternal(url);
+    if (isAllowedExternalUrl(url)) return shell.openExternal(url);
     return undefined;
   });
   ipcMain.handle("shell:openItem", (_e, path: string) => shell.openPath(path));

@@ -92,13 +92,15 @@ describe("runAppAction", () => {
   });
 
   it("runs the real procedure scoped to the user's organisation", async () => {
+    const statementTransaction = {
+      findFirst: vi.fn().mockResolvedValue({ id: "t1" }),
+      update: vi.fn().mockResolvedValue({ id: "t1", category: "Groceries" }),
+    };
     const db = {
       user: { findUnique: vi.fn().mockResolvedValue({ organisationId: "org-1" }) },
       chartAccount: { findMany: vi.fn().mockResolvedValue([]) },
-      statementTransaction: {
-        findFirst: vi.fn().mockResolvedValue({ id: "t1" }),
-        update: vi.fn().mockResolvedValue({ id: "t1", category: "Groceries" }),
-      },
+      statementTransaction,
+      $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn({ statementTransaction })),
     } as unknown as PrismaClient;
 
     const res = await runAppAction(db, "user-1", "statementTransactions.updateCategory", {
@@ -120,9 +122,11 @@ describe("runAppAction", () => {
           user: { findUnique: vi.fn().mockResolvedValue({ organisationId: "org-1" }) },
         } as unknown as PrismaClient,
         "user-1",
-        "statementTransactions.updateCategory", {
-        id: "t1",
-      })
+        "statementTransactions.updateCategory",
+        {
+          id: "t1",
+        }
+      )
     ).rejects.toThrow(/category/);
   });
 

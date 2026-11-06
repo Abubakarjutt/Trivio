@@ -314,6 +314,33 @@ export function resolveMigrateCommand(
   return { cmd: "npx", args: ["prisma", "migrate", "deploy"], cwd: serverDir };
 }
 
+// Point `prisma migrate deploy` at the engines shipped inside the app. Without
+// this the CLI hashes node_modules/@prisma/engines against its download cache
+// (~/.cache/prisma) and, because code signing rewrote those binaries, copies the
+// unsigned cached ones over them -- breaking the .app's signature on first
+// launch -- or, with no cache, downloads engines from the network. Given an
+// explicit path it uses the file as-is. Pure + injectable.
+export function bundledPrismaEngineEnv(
+  serverDir: string,
+  env: Record<string, string | undefined> = {},
+  list: (dir: string) => string[] = (dir) => {
+    try {
+      return readdirSync(dir);
+    } catch {
+      return [];
+    }
+  }
+): Record<string, string> {
+  const dir = join(serverDir, "node_modules", "@prisma", "engines");
+  const files = list(dir);
+  const schema = files.find((f) => f.startsWith("schema-engine-"));
+  const library = files.find((f) => /^(lib)?query_engine-/.test(f) && f.endsWith(".node"));
+  const out: Record<string, string> = {};
+  if (schema && !env.PRISMA_SCHEMA_ENGINE_BINARY) out.PRISMA_SCHEMA_ENGINE_BINARY = join(dir, schema);
+  if (library && !env.PRISMA_QUERY_ENGINE_LIBRARY) out.PRISMA_QUERY_ENGINE_LIBRARY = join(dir, library);
+  return out;
+}
+
 // A copied/portable engine (an EDB "binaries" tarball, a Homebrew keg copy, …)
 // loads its shared libraries from a sibling `lib/` dir. EDB macOS binaries carry
 // an `@executable_path/../lib` rpath so this is belt-and-suspenders there; on
@@ -587,6 +614,7 @@ export async function ensureMigrated(
   const url = buildDatabaseUrl(cfg);
   const childEnv = {
     ...withEngineLibPath(env, cfg.libDir),
+    ...bundledPrismaEngineEnv(serverDir, env),
     DATABASE_URL: url,
     // resolveMigrateCommand's package-entry fallback runs the resolved node
     // executable as its own interpreter (no system `node` required). In a

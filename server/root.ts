@@ -22,6 +22,8 @@ import { budgetsRouter } from "@/server/routers/budgets";
 import { goalsRouter } from "@/server/routers/goals";
 import { recurringItemsRouter } from "@/server/routers/recurringItems";
 import { watchlistsRouter } from "@/server/routers/watchlists";
+import { smsImportRouter } from "@/server/routers/smsImport";
+import { categoryRulesRouter } from "@/server/routers/categoryRules";
 // CRM module
 import { crmLeadsRouter } from "@/server/routers/crmLeads";
 import { crmCompaniesRouter } from "@/server/routers/crmCompanies";
@@ -60,6 +62,8 @@ export const appRouter = createTRPCRouter({
   goals: goalsRouter,
   recurringItems: recurringItemsRouter,
   watchlists: watchlistsRouter,
+  smsImport: smsImportRouter,
+  categoryRules: categoryRulesRouter,
   // CRM module
   crmLeads: crmLeadsRouter,
   crmCompanies: crmCompaniesRouter,

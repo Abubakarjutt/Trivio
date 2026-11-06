@@ -50,6 +50,7 @@ export async function POST(
     const stored = batch.pendingDuplicatesJson as {
       date: string; description: string; merchantName: string; amount: number;
       type: string; category: string; mccCode: string; mccLabel: string;
+      needsCategory?: boolean; ruleKind?: "COUNTERPARTY" | "MERCHANT" | null; ruleMatchKey?: string | null; ruleLabel?: string | null;
     }[] | null;
     if (stored && stored.length > 0) {
       await db.statementTransaction.createMany({
@@ -64,6 +65,10 @@ export async function POST(
           category: d.category,
           mccCode: d.mccCode,
           mccLabel: d.mccLabel,
+          needsCategory: d.needsCategory ?? false,
+          ruleKind: d.ruleKind ?? null,
+          ruleMatchKey: d.ruleMatchKey ?? null,
+          ruleLabel: d.ruleLabel ?? null,
         })),
       });
     }
