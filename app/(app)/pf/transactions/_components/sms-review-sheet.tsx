@@ -243,6 +243,9 @@ function SmsReviewSheet({
                   />
                   <Input
                     defaultValue={row.merchantName}
+                    placeholder={row.type === "DEBIT" ? "Paid to" : "Received from"}
+                    aria-label={row.type === "DEBIT" ? "Paid to" : "Received from"}
+                    title={row.type === "DEBIT" ? "Paid to" : "Received from"}
                     className="h-7 text-xs"
                     maxLength={200}
                     onBlur={(e) => {
@@ -276,6 +279,23 @@ function SmsReviewSheet({
                       }}
                     />
                   </div>
+                  <label className="col-span-3 block">
+                    <span className="text-muted-foreground text-[11px]">Description</span>
+                    <textarea
+                      defaultValue={row.description}
+                      rows={2}
+                      maxLength={500}
+                      placeholder="What was this for? e.g. Groceries for the week"
+                      className="border-input bg-background placeholder:text-muted-foreground focus-visible:ring-ring mt-0.5 block w-full resize-y rounded-md border px-2 py-1 text-xs focus-visible:ring-1 focus-visible:outline-none"
+                      onBlur={(e) => {
+                        const v = e.target.value.trim();
+                        // A transaction always needs a description: clearing the
+                        // box keeps the one read from the SMS.
+                        if (!v) e.target.value = row.description;
+                        else if (v !== row.description) editRow(item, i, { description: v });
+                      }}
+                    />
+                  </label>
                   <div className="col-span-3 flex flex-wrap items-center gap-2">
                     <CategoryPicker
                       value={row.category}
